@@ -11,7 +11,7 @@
 
 ## 데이터 함께 쓰기 (Supabase)
 
-앱의 데이터(식단·근무표·판매 실적·위생 기록 등)는 **Supabase 표 한 줄**에 홈페이지 비밀번호로 **암호화되어** 저장됩니다. 누가 고치든 3초 뒤 저장되고, 다른 기기는 8초마다(또는 화면을 다시 볼 때) 최신을 가져옵니다.
+앱의 데이터(식단·근무표·판매 실적·위생 기록 등)는 **Supabase 표**에 현재 상태 1줄 + 날짜별 기록(`namofood@YYYY-MM-DD`, 최대 1년)으로 홈페이지 비밀번호로 **암호화되어** 저장됩니다. 누가 고치든 3초 뒤 저장되고, 다른 기기는 8초마다(또는 화면을 다시 볼 때) 최신을 가져옵니다.
 
 Supabase 프로젝트의 SQL Editor에서 한 번 실행:
 
@@ -25,6 +25,8 @@ alter table public.namofood_state enable row level security;
 create policy "namofood anon read"  on public.namofood_state for select to anon using (true);
 create policy "namofood anon write" on public.namofood_state for insert to anon with check (true);
 create policy "namofood anon update" on public.namofood_state for update to anon using (true) with check (true);
+-- (선택) 1년 지난 날짜별 기록을 앱이 자동 정리할 수 있게 하려면:
+create policy "namofood anon delete old" on public.namofood_state for delete to anon using (id like 'namofood@%');
 ```
 
 그다음 앱의 **저장 · 백업 → 함께 쓰기**에 프로젝트 URL과 anon 키를 넣습니다(빌드에 미리 넣어 두면 입력 불필요). 표에는 암호문만 들어가므로 anon 키가 노출되어도 내용은 읽을 수 없습니다. 단, 표를 지우거나 덮어쓰는 것은 막지 못하니 백업 파일을 가끔 받아 두세요.
