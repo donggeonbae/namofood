@@ -1,21 +1,33 @@
 # 나모푸드 관리 (암호화 배포)
 
-공장 구내식당 **나모푸드**의 관리 웹앱입니다. 이 저장소는 GitHub Pages로 공개되지만, `index.html` 안의 앱 본문은 **AES-256-GCM으로 암호화**되어 있어 비밀번호를 아는 사람만 브라우저 안에서 열 수 있습니다. 비밀번호와 입력 데이터는 서버로 전송되지 않습니다.
+공장 구내식당 **나모푸드**의 관리 웹앱입니다. 이 저장소는 GitHub Pages로 공개되지만, `index.html` 안의 앱 본문은 **AES-256-GCM으로 암호화**되어 있어 비밀번호를 아는 사람만 브라우저 안에서 열 수 있습니다. 비밀번호는 서버로 전송되지 않습니다.
 
 ## 구성
 
 | 파일 | 설명 |
 |---|---|
 | `index.html` | 잠금 페이지 + 암호화된 앱 (비밀번호 입력 → 브라우저에서 해제) |
-| `data.enc` | 앱에서 "클라우드 저장"을 누르면 생성되는 **암호화된 데이터 파일** (같은 비밀번호로 잠김) |
 | `encrypt_app.py` | 앱을 새 비밀번호로 다시 암호화하는 도구 |
 
-## 사용
+## 데이터 함께 쓰기 (Supabase)
 
-1. `https://<아이디>.github.io/<저장소>/` 접속 → 비밀번호 입력.
-2. 앱의 **저장 · 백업 → 클라우드 동기화**에 GitHub 아이디·저장소 이름·토큰을 넣으면, 입력할 때마다 `data.enc`로 자동 저장되고 다른 기기에서 열 때 최신 데이터를 내려받습니다.
-   - 토큰: GitHub → Settings → Developer settings → Fine-grained tokens → 이 저장소만, **Contents: Read and write**.
-   - 읽기만 하는 기기(휴대폰 등)는 토큰 없이도 최신 데이터를 봅니다.
+앱의 데이터(식단·근무표·판매 실적·위생 기록 등)는 **Supabase 표 한 줄**에 홈페이지 비밀번호로 **암호화되어** 저장됩니다. 누가 고치든 3초 뒤 저장되고, 다른 기기는 8초마다(또는 화면을 다시 볼 때) 최신을 가져옵니다.
+
+Supabase 프로젝트의 SQL Editor에서 한 번 실행:
+
+```sql
+create table if not exists public.namofood_state (
+  id text primary key,
+  data text not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.namofood_state enable row level security;
+create policy "namofood anon read"  on public.namofood_state for select to anon using (true);
+create policy "namofood anon write" on public.namofood_state for insert to anon with check (true);
+create policy "namofood anon update" on public.namofood_state for update to anon using (true) with check (true);
+```
+
+그다음 앱의 **저장 · 백업 → 함께 쓰기**에 프로젝트 URL과 anon 키를 넣습니다(빌드에 미리 넣어 두면 입력 불필요). 표에는 암호문만 들어가므로 anon 키가 노출되어도 내용은 읽을 수 없습니다. 단, 표를 지우거나 덮어쓰는 것은 막지 못하니 백업 파일을 가끔 받아 두세요.
 
 ## 비밀번호 바꾸기 / 앱 갱신
 
@@ -25,9 +37,9 @@ python encrypt_app.py 나모푸드_관리앱.html . "새비밀번호"
 git add index.html && git commit -m "앱 갱신" && git push
 ```
 
-`data.enc`는 예전 비밀번호로 잠겨 있으므로, 비밀번호를 바꾼 뒤에는 앱에서 한 번 "클라우드에 저장"을 다시 눌러 주세요.
+비밀번호를 바꾸면 Supabase에 저장된 데이터는 예전 비밀번호로 잠겨 있으므로, 바꾸기 전에 앱에서 백업 파일을 받고 → 새 비밀번호로 열어 → 백업 불러오기 → 지금 저장 순서로 옮기세요.
 
 ## 보안 메모
 
 - 저장소가 공개라도 파일은 암호문입니다. 비밀번호가 짧으면 무차별 대입에 취약하니 12자 이상을 권합니다.
-- 토큰은 입력한 기기의 브라우저에만 저장됩니다. 공용 PC에서는 "비밀번호 기억"과 토큰을 넣지 마세요.
+- 공용 PC에서는 "비밀번호 기억"을 켜지 마세요.
