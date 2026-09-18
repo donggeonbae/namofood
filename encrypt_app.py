@@ -49,6 +49,7 @@ label.r input{width:20px;height:20px;padding:0}
   <div class="foot">암호화된 파일 · 비밀번호는 서버로 전송되지 않습니다</div>
 </form>
 <script id="payload" type="application/json">__PAYLOAD__</script>
+<script>window.__VER='__VER__';</script>
 <script>
 const P = JSON.parse(document.getElementById('payload').textContent);
 const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
@@ -73,6 +74,8 @@ async function tryOpen(pw, remember){
   }
 }
 document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); tryOpen(document.getElementById('pw').value, document.getElementById('rem').checked); });
+// 캐시된 옛 버전이면 새로 받아온다 (ver.json은 항상 서버에서 확인)
+(async()=>{ try{ if(location.protocol==='file:') return; const r=await fetch('ver.json?t='+Date.now(),{cache:'no-store'}); if(!r.ok) return; const j=await r.json(); if(new URLSearchParams(location.search).get('v')===j.v) return; if(j.v && j.v!==window.__VER){ document.getElementById('err').textContent='새 버전으로 바꾸는 중…'; location.replace(location.pathname+'?v='+j.v+location.hash); } }catch(e){} })();
 if (!window.crypto || !crypto.subtle) document.getElementById('err').textContent = '이 브라우저는 암호 해제를 지원하지 않습니다. 크롬·삼성인터넷·사파리로 열어 주세요.';
 else { try { const saved = localStorage.getItem('nmf_pw'); if (saved) { document.getElementById('rem').checked = true; tryOpen(saved, true); } } catch(e){} }
 </script>
@@ -80,5 +83,8 @@ else { try { const saved = localStorage.getItem('nmf_pw'); if (saved) { document
 </html>
 '''
 os.makedirs(outdir, exist_ok=True)
-open(os.path.join(outdir, 'index.html'), 'w', encoding='utf-8').write(LOADER.replace('__PAYLOAD__', payload))
+import re as _re
+_m = _re.search(r'id="appver">버전 ([0-9-]+)', plain.decode('utf-8', 'ignore')); VER = _m.group(1) if _m else 'dev'
+open(os.path.join(outdir, 'index.html'), 'w', encoding='utf-8').write(LOADER.replace('__PAYLOAD__', payload).replace('__VER__', VER))
+open(os.path.join(outdir, 'ver.json'), 'w', encoding='utf-8').write(json.dumps({"v": VER}))
 print(f"encrypted: {len(plain)//1024} KB -> index.html {len(payload)//1024} KB, iterations={ITER}")
