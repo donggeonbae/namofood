@@ -33,12 +33,12 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 
 ## 레시피 자동 채움 (Supabase cron → Edge Function → OpenCode Zen)
 
-식단표에 있지만 레시피가 없는 음식을 **매일 06:00(KST)** 에 자동으로 조사해 넣습니다 (앱에는 🤖 표시). MIO 와 같은 구조입니다.
+식단표에 있지만 레시피가 없는 음식을 **15분마다 확인**해(마지막 저장 10분 뒤) 자동으로 조사해 넣습니다 (앱에는 🤖 표시). MIO 와 같은 구조입니다.
 
 | 파일 | 설명 |
 |---|---|
 | `supabase/functions/nmf-recipe-fill/` | Edge Function. 상태 복호화 → 빠진 음식 → deepseek-v4-pro(OpenCode Zen)로 레시피 생성 → 병합·암호화 저장 |
-| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | pg_cron 일정, 실행 기록 표 `namofood_recipe_runs` |
+| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | pg_cron 일정(15분마다), 실행 기록 표 `namofood_recipe_runs` |
 | `tools/nmf_cron_setup.ps1` | 1회 설정 스크립트 (비밀값 입력 → 마이그레이션 → vault → 배포 → dry-run) |
 | `tools/test_recipe_fill.ts` | 로직 점검 `deno run -A tools/test_recipe_fill.ts` |
 

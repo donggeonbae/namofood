@@ -28,7 +28,7 @@ do `$`$ begin
 end `$`$;
 "@
 $tmp = New-TemporaryFile; Set-Content -Path $tmp -Value $sql -Encoding utf8
-npx --yes supabase db query --file $tmp
+npx --yes supabase db query --linked --file $tmp
 Remove-Item $tmp
 if (-not $?) { throw "vault 등록 실패" }
 
@@ -39,5 +39,5 @@ if (-not $?) { throw "deploy 실패" }
 Write-Host "`n[5/5] dry-run (LLM 호출 없이 빠진 음식 목록만)"
 $r = Invoke-RestMethod -Method Post -Uri $fnUrl -Headers @{ Authorization = "Bearer $cron"; "Content-Type" = "application/json" } -Body '{"dry":true}'
 $r | ConvertTo-Json -Depth 4
-Write-Host "`n완료. 매일 06:00(KST) 에 자동 실행됩니다. 실행 기록: SQL Editor 에서  select * from namofood_recipe_runs order by started_at desc;"
+Write-Host "`n완료. 15분마다 확인해 식단표에 새 음식이 들어오면(마지막 저장 10분 뒤) 자동으로 레시피를 채웁니다. 실행 기록: SQL Editor 에서  select * from namofood_recipe_runs order by started_at desc;"
 Write-Host "지금 바로 한 번 돌리기:  Invoke-RestMethod -Method Post -Uri $fnUrl -Headers @{Authorization='Bearer $cron'} -Body '{}' -ContentType application/json"

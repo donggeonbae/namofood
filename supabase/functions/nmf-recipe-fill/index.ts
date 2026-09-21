@@ -1,6 +1,6 @@
 // 나모푸드: 식단표에 있지만 레시피가 없는 음식을 OpenCode Zen(LLM)으로 조사해 상태에 병합
 // 호출: pg_cron → net.http_post (Authorization: Bearer NMF_CRON_SECRET) 또는 수동 POST
-//   body: {"dry":true}  → LLM 호출 없이 빠진 음식 목록만 반환
+//   body: {"dry":true} → LLM 호출 없이 빠진 음식 목록만 반환 · {"force":true} → 최근 저장 대기(10분) 무시
 // 비밀(supabase secrets set): NMF_PW(앱 비밀번호), NMF_CRON_SECRET, OPENCODE_API_KEY, [OPENCODE_MODEL]
 import { buildPrompt, decryptText, encryptText, mergeRecipes, missingList, parseRecipesJson, recipeNames } from "./lib.ts";
 
@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ ok: false, reason: "method_not_allowed" }, 405);
   const secret = env("NMF_CRON_SECRET"); const tok = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!secret || tok !== secret) return json({ ok: false, reason: "unauthorized" }, 401);
-  const body = await req.json().catch(() => ({})) as { dry?: boolean; max?: number };
+  const body = await req.json().catch(() => ({})) as { dry?: boolean; force?: boolean; max?: number };
   const started = new Date().toISOString(); const today = started.slice(0, 10);
   const run: Record<string, unknown> = { started_at: started, trigger_source: req.headers.get("x-source") || "http", status: "running" };
   try {
@@ -34,6 +34,8 @@ Deno.serve(async (req) => {
     const r = await fetch(rest(`${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=data,updated_at`), { headers: svc() });
     if (!r.ok) throw new Error(`상태 불러오기 ${r.status}`); const rows = await r.json(); if (!rows[0]) throw new Error("저장된 데이터가 없습니다");
     const S = JSON.parse(await decryptText(pw, rows[0].data));
+    const quietMin = +env("NMF_QUIET_MINUTES", "10"); const ageMs = Date.now() - new Date(rows[0].updated_at).getTime();
+    if (!body.dry && !body.force && ageMs < quietMin * 60000) return json({ ok: true, skipped_reason: `마지막 저장 ${Math.round(ageMs / 60000)}분 전 — 입력 중일 수 있어 ${quietMin}분 뒤 다시 확인` });
     const all = missingList(S); const targets = all.filter((m) => !m.similar.length).slice(0, Math.max(1, Math.min(20, +(body.max || env("NMF_MAX_PER_RUN", "10")))));
     if (body.dry) return json({ ok: true, dry: true, recipes: recipeNames(S).size, missing: all, targets: targets.map((t) => t.menu) });
     if (!targets.length) { await logRun({ ...run, status: "done", finished_at: new Date().toISOString(), added: [], note: `추가할 음식 없음 (유사이름 ${all.length}개)` }); return json({ ok: true, added: [], skipped: all.map((m) => m.menu) }); }
