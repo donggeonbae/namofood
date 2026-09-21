@@ -15,7 +15,7 @@ async function logRun(row: Record<string, unknown>) { try { await fetch(rest("na
 async function callLLM(prompt: string): Promise<string> {
   const key = env("OPENCODE_API_KEY") || env("OPENCODE_GO_API_KEY"); if (!key) throw new Error("OPENCODE_API_KEY 가 없습니다");
   const model = env("OPENCODE_MODEL", "deepseek-v4-pro"); const base = env("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1");
-  const r = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` }, body: JSON.stringify({ model, temperature: 0.3, messages: [{ role: "user", content: prompt }] }) });
+  const r = await fetch(`${base}/chat/completions`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, "x-opencode-session": crypto.randomUUID() }, body: JSON.stringify({ model, temperature: 0.3, messages: [{ role: "user", content: prompt }] }) });
   if (!r.ok) throw new Error(`LLM ${r.status} ${(await r.text()).slice(0, 200)}`);
   const j = await r.json(); const c = j?.choices?.[0]?.message?.content;
   const text = typeof c === "string" ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text || "").join("") : "";

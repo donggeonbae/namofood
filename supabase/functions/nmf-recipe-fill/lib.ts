@@ -3,7 +3,7 @@
 
 export const SLOT_COMP = ["밥", "국", "주찬", "부찬", "부찬", "김치", "후식"];
 
-const b64e = (u8: Uint8Array) => btoa(String.fromCharCode(...u8));
+const b64e = (u8: Uint8Array) => { let t = ""; for (let i = 0; i < u8.length; i += 8192) t += String.fromCharCode.apply(null, Array.from(u8.subarray(i, i + 8192))); return btoa(t); };
 const b64d = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 type U8 = Uint8Array<ArrayBuffer>;
 const u8 = (x: Uint8Array): U8 => new Uint8Array(x) as U8;
@@ -35,7 +35,9 @@ export async function encryptText(pw: string, text: string): Promise<string> {
 export type State = any;
 export type Missing = { menu: string; comp: string; used: string[]; similar: string[] };
 
-export function recipeNames(S: State): Set<string> { const s = new Set<string>(); for (const r of S.recipes || []) if (r.menu) s.add(r.menu); return s; }
+/** 재료가 하나라도 적힌 레시피의 음식 이름 (레시피 탭에서 이름만 만든 빈 레시피는 제외 → 자동 채움 대상) */
+export function recipeNames(S: State): Set<string> { const s = new Set<string>(); for (const r of S.recipes || []) if (r.menu && String(r.item || "").trim()) s.add(r.menu); return s; }
+function emptyRecipes(S: State): Record<string, string> { const have = recipeNames(S); const out: Record<string, string> = {}; for (const r of S.recipes || []) if (r.menu && !have.has(r.menu)) out[r.menu] = r.comp || "주찬"; return out; }
 function lev(a: string, b: string) { const m = a.length, n = b.length; const d = Array.from({ length: m + 1 }, (_, i) => [i, ...Array(n).fill(0)]); for (let j = 1; j <= n; j++) d[0][j] = j; for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[m][n]; }
 export function missingList(S: State): Missing[] {
   const have = recipeNames(S); const out: Record<string, Missing> = {};
@@ -46,6 +48,7 @@ export function missingList(S: State): Missing[] {
       o.used.push(`${ym}-${String(d).padStart(2, "0")} ${meal}`);
     }
   }
+  for (const [menu, comp] of Object.entries(emptyRecipes(S))) { const o = out[menu] || (out[menu] = { menu, comp, used: [], similar: [] }); o.used.push("레시피 탭(재료 없음)"); }
   const names = [...have];
   for (const o of Object.values(out)) {
     const norm = o.menu.replace(/\s/g, "");
@@ -64,6 +67,7 @@ export function mergeRecipes(S: State, recipes: Recipe[], today: string): { adde
     if (have.has(R.menu)) { skipped.push(R.menu + "(이미 있음)"); continue; }
     const items = R.items.filter((it) => it && String(it.item || "").trim() && +it.qty > 0 && String(it.item).trim() !== "물");
     if (!items.length) { skipped.push(R.menu + "(재료 없음)"); continue; }
+    S.recipes = S.recipes.filter((r: { menu: string; item?: string }) => !(r.menu === R.menu && !String(r.item || "").trim()));   // 빈 줄 제거 후 채움
     for (const it of items) S.recipes.push({ comp: R.comp || "주찬", menu: R.menu, item: String(it.item).trim(), qty: +it.qty, unit: ["g", "ml", "ea"].includes(it.unit || "") ? it.unit : "g", storage: it.storage || "냉장", loss: +(it.loss ?? 0.03) || 0.03, form: it.form || "원물", method: "", allergy: R.allergy || "" });
     if (R.method) S.methods[R.menu] = R.method; if (R.source) S.sources[R.menu] = R.source;
     S.recipeMeta[R.menu] = { by: "ai", updated: today }; have.add(R.menu); added.push(R.menu);

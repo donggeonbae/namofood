@@ -12,7 +12,7 @@ const [row] = await r.json();
 const S = JSON.parse(await decryptText(pw, row.data));
 const miss = missingList(S);
 console.log(`레시피 ${recipeNames(S).size}개 · 빠진 음식 ${miss.length}개 · 유사이름 제외 대상 ${miss.filter((m) => !m.similar.length).length}개`);
-console.log(miss.slice(0, 8).map((m) => `${m.menu}(${m.comp})${m.similar.length ? " ~" + m.similar.join("/") : ""}`).join(", "));
+console.log(miss.slice(0, 8).map((m) => `${m.menu}(${m.comp}) [${m.used.join(",")}]${m.similar.length ? " ~" + m.similar.join("/") : ""}`).join(", "));
 console.log("--- 프롬프트 미리보기 ---\n" + buildPrompt(miss.slice(0, 2)).slice(0, 400) + "\n---");
 
 // 병합 + 암호화 왕복 (저장은 하지 않음)
