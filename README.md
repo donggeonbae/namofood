@@ -31,6 +31,22 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 
 그다음 앱의 **저장 · 백업 → 함께 쓰기**에 프로젝트 URL과 anon 키를 넣습니다(빌드에 미리 넣어 두면 입력 불필요). 표에는 암호문만 들어가므로 anon 키가 노출되어도 내용은 읽을 수 없습니다. 단, 표를 지우거나 덮어쓰는 것은 막지 못하니 백업 파일을 가끔 받아 두세요.
 
+## 레시피 자동 채움 (Supabase cron → Edge Function → OpenCode Zen)
+
+식단표에 있지만 레시피가 없는 음식을 **매일 06:00(KST)** 에 자동으로 조사해 넣습니다 (앱에는 🤖 표시). MIO 와 같은 구조입니다.
+
+| 파일 | 설명 |
+|---|---|
+| `supabase/functions/nmf-recipe-fill/` | Edge Function. 상태 복호화 → 빠진 음식 → deepseek-v4-pro(OpenCode Zen)로 레시피 생성 → 병합·암호화 저장 |
+| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | pg_cron 일정, 실행 기록 표 `namofood_recipe_runs` |
+| `tools/nmf_cron_setup.ps1` | 1회 설정 스크립트 (비밀값 입력 → 마이그레이션 → vault → 배포 → dry-run) |
+| `tools/test_recipe_fill.ts` | 로직 점검 `deno run -A tools/test_recipe_fill.ts` |
+
+처음 한 번: `powershell -ExecutionPolicy Bypass -File tools
+mf_cron_setup.ps1` — 앱 비밀번호와 OpenCode Zen API 키를 물어 Supabase 비밀로만 저장합니다(저장소에는 남지 않음).
+실행 기록 확인: `select * from namofood_recipe_runs order by started_at desc;`
+비밀번호를 바꾸면 `supabase secrets set NMF_PW=새비밀번호` 도 같이 바꿔야 합니다.
+
 ## 비밀번호 바꾸기 / 앱 갱신
 
 ```bash

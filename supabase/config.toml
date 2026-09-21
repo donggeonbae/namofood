@@ -1,0 +1,4 @@
+project_id = "rycibsczsgbkgtwfxyim"
+
+[functions.nmf-recipe-fill]
+verify_jwt = false
