@@ -1,4 +1,4 @@
-# 나모푸드 레시피 자동 채움(pg_cron → Edge Function → OpenCode Zen) 1회 설정
+﻿# 나모푸드 레시피 자동 채움(pg_cron → Edge Function → OpenCode Zen) 1회 설정
 # 실행: 저장소 루트에서  powershell -ExecutionPolicy Bypass -File tools\nmf_cron_setup.ps1
 # 하는 일: 1) Edge Function 비밀 설정  2) 마이그레이션(cron·runs 표) 적용  3) vault 에 함수 URL·비밀 등록  4) 함수 배포  5) dry-run 확인
 $ErrorActionPreference = "Stop"
