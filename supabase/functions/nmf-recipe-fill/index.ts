@@ -43,12 +43,12 @@ Deno.serve(async (req) => {
     if (!targets.length) { await logRun({ ...run, status: "done", finished_at: new Date().toISOString(), added: [], note: `추가할 음식 없음 (유사이름 ${all.length}개)` }); return json({ ok: true, added: [], skipped: all.map((m) => m.menu) }); }
     const text = await callLLM(buildPrompt(targets));
     const recipes = parseRecipesJson(text).filter((R) => targets.some((t) => t.menu === R.menu));
-    const { added, skipped } = mergeRecipes(S, recipes, today);
+    // LLM 응답을 기다리는 동안 다른 기기가 저장했을 수 있으니, 최신 상태를 다시 받아 그 위에 병합 (덮어쓰기 방지)
+    const r2 = await fetch(rest(`${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=data,updated_at`), { headers: svc() }); const [latest] = await r2.json();
+    const S2 = latest.updated_at !== rows[0].updated_at ? JSON.parse(await decryptText(pw, latest.data)) : S;
+    const { added, skipped } = mergeRecipes(S2, recipes, today);
     if (added.length) {
-      // 누가 90초 안에 저장했으면 이번 회차는 건너뜀 (덮어쓰기 방지)
-      const r2 = await fetch(rest(`${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=updated_at`), { headers: svc() }); const [{ updated_at }] = await r2.json();
-      if (updated_at !== rows[0].updated_at) throw new Error("작업 중 다른 기기가 저장해 이번 회차를 건너뜁니다");
-      S.updatedAt = new Date().toISOString(); const blob = await encryptText(pw, JSON.stringify(S)); const at = S.updatedAt;
+      S2.updatedAt = new Date().toISOString(); const blob = await encryptText(pw, JSON.stringify(S2)); const at = S2.updatedAt;
       const up = await fetch(rest(`${TABLE}?on_conflict=id`), { method: "POST", headers: svc({ Prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify([{ id: ROOM, data: blob, updated_at: at }, { id: `${ROOM}@${at.slice(0, 10)}`, data: blob, updated_at: at }]) });
       if (!up.ok) throw new Error(`저장 실패 ${up.status} ${(await up.text()).slice(0, 200)}`);
     }
