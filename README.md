@@ -1,6 +1,6 @@
 # 나모푸드 관리 (암호화 배포)
 
-공장 구내식당 **나모푸드**의 관리 웹앱입니다. 이 저장소는 GitHub Pages로 공개되지만, `index.html` 안의 앱 본문은 **AES-256-GCM으로 암호화**되어 있어 비밀번호를 아는 사람만 브라우저 안에서 열 수 있습니다. 비밀번호는 서버로 전송되지 않습니다.
+공장 구내식당 **나모푸드**(와 **나모카페**)의 관리 웹앱입니다. 왼쪽 위 스위치로 푸드/카페를 전환하며, 데이터는 따로 저장됩니다(Supabase 행 `namofood` / `namocafe`). 이 저장소는 GitHub Pages로 공개되지만, `index.html` 안의 앱 본문은 **AES-256-GCM으로 암호화**되어 있어 비밀번호를 아는 사람만 브라우저 안에서 열 수 있습니다. 비밀번호는 서버로 전송되지 않습니다.
 
 ## 구성
 
@@ -33,12 +33,12 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 
 ## 레시피 자동 채움 (Supabase cron → Edge Function → OpenCode Zen)
 
-식단표에 있지만 레시피가 없는 음식을 **15분마다 확인**해(마지막 저장 10분 뒤) 자동으로 조사해 넣습니다 (앱에는 🤖 표시). MIO 와 같은 구조입니다.
+식단표에 있지만 레시피가 없는 음식을 **10분마다 확인**해(마지막 저장 4분 뒤) 자동으로 조사해 넣습니다 (앱에는 🤖 표시). MIO 와 같은 구조입니다.
 
 | 파일 | 설명 |
 |---|---|
 | `supabase/functions/nmf-recipe-fill/` | Edge Function. 상태 복호화 → 빠진 음식 → deepseek-v4-pro(OpenCode Zen)로 레시피 생성 → 병합·암호화 저장 |
-| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | pg_cron 일정(15분마다), 실행 기록 표 `namofood_recipe_runs` |
+| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | pg_cron 일정(10분마다), 실행 기록 표 `namofood_recipe_runs` |
 | `tools/nmf_cron_setup.ps1` | 1회 설정 스크립트 (비밀값 입력 → 마이그레이션 → vault → 배포 → dry-run) |
 | `tools/test_recipe_fill.ts` | 로직 점검 `deno run -A tools/test_recipe_fill.ts` |
 

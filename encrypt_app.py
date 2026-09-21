@@ -77,7 +77,7 @@ document.getElementById('f').addEventListener('submit', e => { e.preventDefault(
 // 캐시된 옛 버전이면 새로 받아온다 (ver.json은 항상 서버에서 확인)
 (async()=>{ try{ if(location.protocol==='file:') return; const r=await fetch('ver.json?t='+Date.now(),{cache:'no-store'}); if(!r.ok) return; const j=await r.json(); if(new URLSearchParams(location.search).get('v')===j.v) return; if(j.v && j.v!==window.__VER){ document.getElementById('err').textContent='새 버전으로 바꾸는 중…'; location.replace(location.pathname+'?v='+j.v+location.hash); } }catch(e){} })();
 if (!window.crypto || !crypto.subtle) document.getElementById('err').textContent = '이 브라우저는 암호 해제를 지원하지 않습니다. 크롬·삼성인터넷·사파리로 열어 주세요.';
-else { try { const saved = localStorage.getItem('nmf_pw'); if (saved) { document.getElementById('rem').checked = true; tryOpen(saved, true); } } catch(e){} }
+else { try { const saved = localStorage.getItem('nmf_pw'); const sess = sessionStorage.getItem('nmf_session_pw'); if (saved) { document.getElementById('rem').checked = true; tryOpen(saved, true); } else if (sess) { tryOpen(sess, false); } } catch(e){} }
 </script>
 </body>
 </html>
