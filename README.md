@@ -43,9 +43,12 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 
 ## 레시피 자동 채움 (Supabase cron → Edge Function → OpenCode Zen)
 
-식단표에 있지만 레시피가 없는 음식을 **10분마다 확인**해(마지막 저장 4분 뒤)
-자동으로 조사해 넣습니다 (앱에는 🤖 표시). 최근 저장·직전 오류로 건너뛴 실행도
-`status = skipped` 로 기록됩니다. MIO 와 같은 구조입니다.
+레시피가 없는 음식을 **식단 저장 직후 요청**하고, 누락된 요청은 **매분 확인**해
+자동으로 채웁니다. 최근 편집 중이어도 생성하고 최신 상태에 충돌 검사 후 병합합니다.
+레시피 화면과 내부 조리용 식단에 실제 시작 시각, 진행 단계, 예상 완료 범위,
+다음 확인/재시도 시각을 5초마다 갱신합니다. 외부 공지용 화면·인쇄에는 AI 표시가 없습니다.
+앱 요청은 비밀번호 기반의 짧은 유효기간 HMAC 서명으로 인증하며 cron 비밀은
+클라이언트에 전달하지 않습니다. 동시 요청은 DB에서 하나만 실행합니다.
 
 | 파일                                                                 | 설명                                                                                                                                 |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -62,12 +65,18 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 `supabase secrets set NMF_PW=새비밀번호` 도 같이 바꿔야 합니다. 레시피 모델은
 `NMF_RECIPE_MODEL`(기본 `deepseek-v4.1-flash`)과
 `NMF_RECIPE_FALLBACK_MODEL`(기본 `minimax-m3`), 1회 생성 수는
-`NMF_MAX_PER_RUN`(기본 8, 메뉴별 병렬 생성), 오류 backoff는
-`NMF_RECIPE_ERROR_BACKOFF_MINUTES`(기본 20분), LLM 제한은
+`NMF_MAX_PER_RUN`(기본 8, 메뉴별 병렬 생성), 오류 재시도 대기는
+DB claim에서 2분, 실행 제한시간은 4분입니다. LLM 제한은
 `NMF_RECIPE_TIMEOUT_MS`(기본 52초, 최대 55초 적용)/`NMF_RECIPE_MAX_TOKENS`로
 조정합니다.
 
 ## AI 주간 식단 자동 편성
+
+실시간 레시피 실행 잠금·진행 상태·매분 일정은
+`supabase/migrations/20260924182650_nmf_recipe_immediate_status.sql`에서 적용합니다.
+인쇄는 A4 여백 2mm이며 식단 높이에 맞춰 한 페이지로 자동 축소합니다.
+브라우저 회귀 확인: Playwright와 pdf-lib가 설치된 환경에서
+`node tools/test_app_print.cjs` (필요하면 `CHROME_PATH` 지정).
 
 2026-09-24를 기준으로 7일 블록을 사용합니다. 기존 수동 셀은 보존하면서 새 최소
 구성에서 비어 있는 칸만 채우고, 이후 매일 06:05 KST에 상태를 확인해 **완성된

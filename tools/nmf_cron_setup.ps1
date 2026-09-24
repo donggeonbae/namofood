@@ -47,6 +47,6 @@ for ($i = 1; $i -le 2; $i++) {
   $m | ConvertTo-Json -Depth 6
   if (-not $m.needsFollowUp) { break }
 }
-Write-Host "`n완료. 레시피는 10분마다 확인하고, 식단은 매일 확인하되 향후 완성분이 7일 미만일 때만 새 7일을 만듭니다."
+Write-Host "`n완료. 레시피는 저장 직후 요청하고 매분 재확인합니다. 식단은 매일 확인하되 향후 완성분이 7일 미만일 때만 새 7일을 만듭니다."
 Write-Host "실행 기록: namofood_recipe_runs / namofood_menu_runs"
 Write-Host "지금 바로 한 번 돌리기:  Invoke-RestMethod -Method Post -Uri $fnUrl -Headers @{Authorization='Bearer $cron'} -Body '{}' -ContentType application/json"

@@ -10,7 +10,45 @@ import {
   parseRecipesJson,
   recipeNames,
   shouldErrorBackoff,
+  verifyAppRequest,
 } from "../supabase/functions/nmf-recipe-fill/lib.ts";
+
+const authTime = String(Date.now()), enc = new TextEncoder();
+const authKey = await crypto.subtle.importKey(
+  "raw",
+  enc.encode("fixture-password"),
+  { name: "HMAC", hash: "SHA-256" },
+  false,
+  ["sign"],
+);
+const signature = Array.from(
+  new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      authKey,
+      enc.encode("nmf-recipe:status:" + authTime),
+    ),
+  ),
+  (v) => v.toString(16).padStart(2, "0"),
+).join("");
+if (
+  !await verifyAppRequest("fixture-password", "status", authTime, signature)
+) throw new Error("valid status signature rejected");
+if (await verifyAppRequest("fixture-password", "run", authTime, signature)) {
+  throw new Error("status signature allowed run");
+}
+if (
+  await verifyAppRequest(
+    "fixture-password",
+    "status",
+    authTime,
+    signature,
+    Number(authTime) + 61000,
+  )
+) throw new Error("expired signature accepted");
+if (await verifyAppRequest("wrong-password", "status", authTime, signature)) {
+  throw new Error("wrong password accepted");
+}
 
 const backoffNow = Date.parse("2026-09-25T00:10:00Z");
 if (

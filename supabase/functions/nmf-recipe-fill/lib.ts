@@ -87,6 +87,38 @@ export async function encryptText(pw: string, text: string): Promise<string> {
 
 // deno-lint-ignore no-explicit-any
 export type State = any;
+/** Signed requests authorize status/run without putting the cron secret in a client. */
+export async function verifyAppRequest(
+  pw: string,
+  action: string,
+  timestamp: string,
+  signature: string,
+  now = Date.now(),
+): Promise<boolean> {
+  if (
+    !pw || !["status", "run"].includes(action) || !/^\d{13}$/.test(timestamp) ||
+    Math.abs(now - Number(timestamp)) > 60000 ||
+    !/^[a-f0-9]{64}$/.test(signature)
+  ) return false;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(pw),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const bytes = Uint8Array.from(
+    signature.match(/../g)!,
+    (v) => parseInt(v, 16),
+  );
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    bytes,
+    enc.encode("nmf-recipe:" + action + ":" + timestamp),
+  );
+}
 export type Missing = {
   menu: string;
   comp: string;
