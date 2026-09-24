@@ -2,8 +2,14 @@
 //   cd tools && node test_parse.js   (복호화된 ../나모푸드_관리앱.html 이 있어야 함)
 // eval: 우리 앱 파일의 파서 함수를 그대로 꺼내 쓰기 위한 것 (외부 입력 아님)
 const fs = require("fs");
-const src = fs.readFileSync("../나모푸드_관리앱.html", "utf8");
-const start = src.indexOf("const UNITS="), end = src.indexOf("function requirements(){", start);
+const path = require("path");
+const src = fs.readFileSync(
+  path.join(__dirname, "..", "나모푸드_관리앱.html"),
+  "utf8",
+);
+const start = src.indexOf("const UNITS="),
+  end = src.indexOf("function requirements(", start);
+if (start < 0 || end < 0) throw new Error("앱에서 OCR 파서 범위를 찾지 못했습니다");
 eval(src.slice(start, end));
 const t = `거래명세서
 상호: (주)나모유통   전화 02-123-4567

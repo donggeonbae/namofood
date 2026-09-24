@@ -2,3 +2,6 @@ project_id = "rycibsczsgbkgtwfxyim"
 
 [functions.nmf-recipe-fill]
 verify_jwt = false
+
+[functions.nmf-menu-plan]
+verify_jwt = false
