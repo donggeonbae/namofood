@@ -2,6 +2,13 @@
 // 호출 인증: Authorization: Bearer <NMF_CRON_SECRET>
 // body: {"weeks":2} 재호출하며 9/24~10/7 중 누락 7일씩 채움 · {"dry":true} 현황만 · {"preview":true} 생성하되 미저장
 import {
+  logValues,
+  readState,
+  snapshotState,
+  sql,
+  writeState,
+} from "../_shared/database.ts";
+import {
   blockDates,
   buildPrompt,
   coverageReport,
@@ -20,10 +27,13 @@ import {
   parseOpenCodeResponse,
   runModelFallback,
   selectAnchorBlocks,
+  selectRollingDates,
   selectRunAnchorBlocks,
   splitDateChunks,
   staleRunCutoffIso,
   type State,
+  surroundingMenuCells,
+  validateMenuVariety,
 } from "./lib.ts";
 
 const env = (key: string, fallback = ""): string =>
@@ -32,7 +42,6 @@ const TABLE = env("NMF_TABLE", "namofood_state");
 const ROOM = env("NMF_ROOM", "namofood");
 const RUN_BUDGET_MS = 110_000;
 const LLM_ATTEMPT_TIMEOUT_MS = 45_000;
-const DB_TIMEOUT_MS = 12_000;
 const STALE_RUN_MINUTES = 5;
 
 type StateRow = { data: string; updated_at: string };
@@ -51,25 +60,6 @@ const json = (body: unknown, status = 200): Response =>
     headers: { "Content-Type": "application/json; charset=utf-8" },
   });
 
-function rest(path: string): string {
-  const url = env("SUPABASE_URL");
-  if (!url) throw new Error("SUPABASE_URL 이 없습니다");
-  return `${url.replace(/\/$/, "")}/rest/v1/${path}`;
-}
-
-function serviceHeaders(
-  extra: Record<string, string> = {},
-): Record<string, string> {
-  const key = env("SUPABASE_SERVICE_ROLE_KEY");
-  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY 가 없습니다");
-  return {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    "Content-Type": "application/json",
-    ...extra,
-  };
-}
-
 function safeEqual(a: string, b: string): boolean {
   const aa = new TextEncoder().encode(a);
   const bb = new TextEncoder().encode(b);
@@ -77,14 +67,6 @@ function safeEqual(a: string, b: string): boolean {
   const length = Math.max(aa.length, bb.length);
   for (let i = 0; i < length; i++) different |= (aa[i] || 0) ^ (bb[i] || 0);
   return different === 0;
-}
-
-function boundedSignal(
-  parent: AbortSignal | undefined,
-  timeoutMs: number,
-): AbortSignal {
-  const timeout = AbortSignal.timeout(timeoutMs);
-  return parent ? AbortSignal.any([parent, timeout]) : timeout;
 }
 
 function kstDate(now = new Date()): string {
@@ -103,96 +85,42 @@ async function fetchState(
   password: string,
   signal?: AbortSignal,
 ): Promise<{ state: State; row: StateRow }> {
-  const response = await fetch(
-    rest(`${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=data,updated_at`),
-    { headers: serviceHeaders(), signal: boundedSignal(signal, DB_TIMEOUT_MS) },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `상태 불러오기 ${response.status} ${
-        (await response.text()).slice(0, 200)
-      }`,
-    );
-  }
-  const rows = await response.json() as StateRow[];
-  if (!rows[0]) throw new Error("저장된 나모푸드 상태가 없습니다");
-  const state = JSON.parse(await decryptText(password, rows[0].data)) as State;
-  return { state, row: rows[0] };
+  signal?.throwIfAborted();
+  const [row] = await readState(TABLE, ROOM);
+  if (!row) throw new Error("저장된 나모푸드 상태가 없습니다");
+  return {
+    state: JSON.parse(await decryptText(password, row.data)),
+    row: row as StateRow,
+  };
 }
 
 async function cleanupStaleRuns(
   nowIso: string,
   signal?: AbortSignal,
 ): Promise<number> {
+  signal?.throwIfAborted();
   const cutoff = staleRunCutoffIso(nowIso, STALE_RUN_MINUTES);
-  const response = await fetch(
-    rest(
-      `namofood_menu_runs?status=eq.running&started_at=lt.${
-        encodeURIComponent(cutoff)
-      }&select=run_id`,
-    ),
-    {
-      method: "PATCH",
-      headers: serviceHeaders({ Prefer: "return=representation" }),
-      body: JSON.stringify({
-        status: "error",
-        finished_at: nowIso,
-        note: `stale cleanup: ${STALE_RUN_MINUTES}분 넘게 running 상태`,
-        error: "Edge 실행이 완료 로그를 남기기 전에 종료됨",
-      }),
-      signal: boundedSignal(signal, DB_TIMEOUT_MS),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `stale 로그 정리 실패 ${response.status} ${
-        (await response.text()).slice(0, 200)
-      }`,
-    );
-  }
-  return (await response.json() as Array<{ run_id: string }>).length;
+  const rows =
+    await sql`update public.namofood_menu_runs set status='error', finished_at=${nowIso}, note='stale cleanup: 실행시간 초과', error='Edge 실행이 완료 로그를 남기기 전에 종료됨' where status='running' and started_at<${cutoff} returning run_id`;
+  return rows.length;
 }
 
 async function startRun(
   row: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(rest("namofood_menu_runs"), {
-    method: "POST",
-    headers: serviceHeaders({ Prefer: "return=minimal" }),
-    body: JSON.stringify(row),
-    signal: boundedSignal(signal, DB_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `실행 로그 시작 실패 ${response.status} ${
-        (await response.text()).slice(0, 200)
-      }`,
-    );
-  }
+  signal?.throwIfAborted();
+  await sql`insert into public.namofood_menu_runs ${sql(logValues(row))}`;
 }
-
 async function finishRun(
   runId: string,
   patch: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(
-    rest(`namofood_menu_runs?run_id=eq.${encodeURIComponent(runId)}`),
-    {
-      method: "PATCH",
-      headers: serviceHeaders({ Prefer: "return=minimal" }),
-      body: JSON.stringify(patch),
-      signal: boundedSignal(signal, DB_TIMEOUT_MS),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `실행 로그 완료 실패 ${response.status} ${
-        (await response.text()).slice(0, 200)
-      }`,
-    );
-  }
+  signal?.throwIfAborted();
+  await sql`update public.namofood_menu_runs set ${
+    sql(logValues(patch))
+  } where run_id=${runId}`;
 }
 
 async function callLLM(
@@ -313,65 +241,25 @@ async function casSave(
   today: string,
   signal?: AbortSignal,
 ): Promise<{ saved: boolean; updatedAt?: string; snapshotError?: string }> {
+  signal?.throwIfAborted();
   const updatedAt = new Date().toISOString();
   state.updatedAt = updatedAt;
   const encrypted = await encryptText(password, JSON.stringify(state));
-  const response = await fetch(
-    rest(
-      `${TABLE}?id=eq.${encodeURIComponent(ROOM)}&updated_at=eq.${
-        encodeURIComponent(expectedUpdatedAt)
-      }&select=id,updated_at`,
-    ),
-    {
-      method: "PATCH",
-      headers: serviceHeaders({ Prefer: "return=representation" }),
-      body: JSON.stringify({ data: encrypted, updated_at: updatedAt }),
-      signal: boundedSignal(signal, DB_TIMEOUT_MS),
-    },
+  const rows = await writeState(
+    TABLE,
+    ROOM,
+    expectedUpdatedAt,
+    encrypted,
+    updatedAt,
   );
-  if (!response.ok) {
-    throw new Error(
-      `상태 저장 실패 ${response.status} ${
-        (await response.text()).slice(0, 200)
-      }`,
-    );
-  }
-  const rows = await response.json() as Array<
-    { id: string; updated_at: string }
-  >;
   if (!rows.length) return { saved: false };
-
-  // 현재 행 CAS가 성공한 뒤 같은 암호문으로 KST 일별 복구 스냅샷을 남긴다.
-  let snapshot: Response;
   try {
-    snapshot = await fetch(rest(`${TABLE}?on_conflict=id`), {
-      method: "POST",
-      headers: serviceHeaders({
-        Prefer: "resolution=merge-duplicates,return=minimal",
-      }),
-      body: JSON.stringify({
-        id: `${ROOM}@${today}`,
-        data: encrypted,
-        updated_at: updatedAt,
-      }),
-      signal: boundedSignal(signal, DB_TIMEOUT_MS),
-    });
-  } catch (error) {
+    await snapshotState(TABLE, ROOM + "@" + today, encrypted, updatedAt);
+  } catch {
     return {
       saved: true,
       updatedAt,
-      snapshotError: `스냅샷 요청 실패: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-  if (!snapshot.ok) {
-    return {
-      saved: true,
-      updatedAt,
-      snapshotError: `스냅샷 저장 실패 ${snapshot.status} ${
-        (await snapshot.text()).slice(0, 200)
-      }`,
+      snapshotError: "식단은 저장됐으나 복구 스냅샷 저장에 실패했습니다",
     };
   }
   return { saved: true, updatedAt };
@@ -482,7 +370,9 @@ Deno.serve(async (request: Request) => {
     // 첫 블록 완성 후 두 번째 누락 블록이 선택된다.
     const anchors = selectRunAnchorBlocks(initial.state, today, body.weeks);
     const remainingAnchors = pendingAnchors.slice(anchors.length);
-    const targetDates = uniqueDates(anchors);
+    const targetDates = body.weeks === undefined
+      ? selectRollingDates(initial.state, today)
+      : uniqueDates(anchors);
     if (targetDates.length) {
       targetStart = targetDates[0];
       targetEnd = targetDates.at(-1)!;
@@ -492,18 +382,24 @@ Deno.serve(async (request: Request) => {
     if (targetDates.length) {
       // 기존 수동 셀까지 되풀이하는 2일 응답은 토큰 제한에 걸릴 수 있어 하루씩
       // 병렬 생성한다. 각 조각은 저장 전에 날짜·4식·필수 6칸을 독립 검증한다.
-      const chunks = anchors.flatMap((anchor) =>
-        splitDateChunks(blockDates(anchor), 1)
-      );
+      const chunks = splitDateChunks(targetDates, 1);
+      // Synchronously reserve accepted days so parallel chunks/fallbacks also see
+      // dishes generated earlier in this same run, not just the saved calendar.
+      const generationState = structuredClone(initial.state);
       const chunkResults = await Promise.all(chunks.map(async (dates) => {
         const fixedCells = existingMenuCells(initial.state, dates, meals);
-        const prompt = buildPrompt(dates, meals, fixedCells);
         // 같은 청크의 primary/fallback은 동일 conversation/session으로 식별한다.
         const sessionId = crypto.randomUUID();
         try {
           const generated = await runModelFallback(
             [primaryModel, fallbackModel],
             async (candidateModel, protocol) => {
+              const prompt = buildPrompt(
+                dates,
+                meals,
+                fixedCells,
+                surroundingMenuCells(generationState, dates, meals),
+              );
               const answer = await callLLM(
                 prompt,
                 candidateModel,
@@ -512,7 +408,21 @@ Deno.serve(async (request: Request) => {
                 sessionId,
               );
               // JSON/날짜/식사/슬롯 검증 실패도 primary 실패로 간주해 fallback한다.
-              return parseMenuPlanJson(answer, dates, meals, fixedCells);
+              const candidate = parseMenuPlanJson(
+                answer,
+                dates,
+                meals,
+                fixedCells,
+              );
+              validateMenuVariety(generationState, candidate);
+              mergeMenuPlan(generationState, candidate, {
+                updated: startedAt,
+                model: candidateModel,
+                runId,
+                meals,
+                headcountDates: [],
+              });
+              return candidate;
             },
           );
           return {
@@ -627,6 +537,7 @@ Deno.serve(async (request: Request) => {
     let snapshotWarning = "";
     for (let attempt = 1; attempt <= 3; attempt++) {
       const working = structuredClone(latest.state);
+      validateMenuVariety(working, plan);
       const changes = mergeMenuPlan(working, plan, {
         updated: startedAt,
         model: effectiveModel,
@@ -682,9 +593,9 @@ Deno.serve(async (request: Request) => {
       ? `저장 완료: 식단 ${changes.added.length}셀, 식수 ${
         Object.keys(changes.headcounts).length
       }셀, 쌀밥 기본 ${changes.rice.length}셀, 가격 ${changes.prices.length}항목`
-      : anchors.length
+      : targetDates.length
       ? "대상 블록에 추가할 빈 셀이 없습니다"
-      : "향후 식단이 7일 이상 있어 새 블록을 만들지 않았습니다";
+      : "오늘부터 14일 뒤까지 식단이 모두 준비되어 있습니다";
     const followUpNote = remainingAnchors.length
       ? `추가 호출 필요: ${remainingAnchors.join(", ")}`
       : "";

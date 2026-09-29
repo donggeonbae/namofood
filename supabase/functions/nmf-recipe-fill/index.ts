@@ -3,6 +3,13 @@
 // 저장 직후 앱 서명 요청 + 매분 cron. DB 원자적 claim으로 동시 생성/오류 재시도를 제어한다.
 // 비밀(supabase secrets set): NMF_PW(앱 비밀번호), NMF_CRON_SECRET, OPENCODE_API_KEY, [NMF_RECIPE_MODEL]
 import {
+  logValues,
+  readState,
+  snapshotState,
+  sql,
+  writeState,
+} from "../_shared/database.ts";
+import {
   buildPrompt,
   decryptText,
   encryptText,
@@ -30,39 +37,18 @@ const json = (b: unknown, s = 200) =>
     },
   });
 
-function rest(path: string) {
-  return `${env("SUPABASE_URL").replace(/\/$/, "")}/rest/v1/${path}`;
-}
-function svc(extra: Record<string, string> = {}) {
-  const k = env("SUPABASE_SERVICE_ROLE_KEY");
-  return {
-    apikey: k,
-    Authorization: `Bearer ${k}`,
-    "Content-Type": "application/json",
-    ...extra,
-  };
-}
 type LogResult = { ok: true } | { ok: false; message: string };
 async function logRun(row: Record<string, unknown>): Promise<LogResult> {
   try {
-    const r = await fetch(
-      rest(
-        row.id
-          ? "namofood_recipe_runs?id=eq." + row.id
-          : "namofood_recipe_runs",
-      ),
-      {
-        method: row.id ? "PATCH" : "POST",
-        headers: svc({ Prefer: "return=minimal" }),
-        body: JSON.stringify(row),
-      },
-    );
-    if (r.ok) return { ok: true };
-    const message = `실행 기록 저장 실패 ${r.status} ${
-      (await r.text()).slice(0, 200)
-    }`;
-    console.error(message);
-    return { ok: false, message };
+    const { id, ...patch } = row;
+    if (id) {
+      await sql`update public.namofood_recipe_runs set ${
+        sql(logValues(patch))
+      } where id=${String(id)}`;
+    } else {await sql`insert into public.namofood_recipe_runs ${
+        sql(logValues(row))
+      }`;}
+    return { ok: true };
   } catch (e) {
     const message = `실행 기록 저장 실패 ${
       e instanceof Error ? e.message : String(e)
@@ -139,40 +125,14 @@ async function saveCurrentStateWithCas(
     pw,
     JSON.stringify({ ...(state as Record<string, unknown>), updatedAt: at }),
   );
-  const current = await fetch(
-    rest(
-      `${TABLE}?id=eq.${encodeURIComponent(ROOM)}&updated_at=eq.${
-        encodeURIComponent(expectedUpdatedAt)
-      }&select=updated_at`,
-    ),
-    {
-      method: "PATCH",
-      headers: svc({ Prefer: "return=representation" }),
-      body: JSON.stringify({ data: blob, updated_at: at }),
-    },
-  );
-  if (!current.ok) {
-    throw new Error(
-      `저장 실패 ${current.status} ${(await current.text()).slice(0, 200)}`,
-    );
-  }
-  const patched = await current.json();
+  const patched = await writeState(TABLE, ROOM, expectedUpdatedAt, blob, at);
   if (!patched[0]) {
     throw new Error("state_conflict");
   }
-  const backup = await fetch(rest(`${TABLE}?on_conflict=id`), {
-    method: "POST",
-    headers: svc({ Prefer: "resolution=merge-duplicates,return=minimal" }),
-    body: JSON.stringify([{
-      id: `${ROOM}@${at.slice(0, 10)}`,
-      data: blob,
-      updated_at: at,
-    }]),
-  });
-  if (!backup.ok) {
-    const warning = `오늘 백업 저장 실패 ${backup.status} ${
-      (await backup.text()).slice(0, 200)
-    }`;
+  try {
+    await snapshotState(TABLE, `${ROOM}@${at.slice(0, 10)}`, blob, at);
+  } catch {
+    const warning = "레시피는 저장됐으나 오늘 백업 저장에 실패했습니다";
     console.error(warning);
     return { at, warning };
   }
@@ -213,15 +173,9 @@ Deno.serve(async (req) => {
   ) return json({ ok: false, reason: "invalid_app_request" }, 400);
   if (body.action === "status") {
     try {
-      const r = await fetch(
-        rest(
-          "namofood_recipe_runs?select=id,status,started_at,finished_at,added,targets,note,error&order=started_at.desc&limit=5",
-        ),
-        { headers: svc() },
-      );
-      if (!r.ok) throw new Error("실행 기록을 읽지 못했습니다");
-      const runs = await r.json();
-      const running = runs.find((r: { status: string; started_at: string }) =>
+      const runs =
+        await sql`select id,status,started_at,finished_at,added,targets,note,error from public.namofood_recipe_runs order by started_at desc limit 5`;
+      const running = runs.find((r) =>
         r.status === "running" && Date.now() - Date.parse(r.started_at) < 240000
       );
       const last = runs[0] || null;
@@ -256,13 +210,11 @@ Deno.serve(async (req) => {
   try {
     if (!body.dry) {
       const id = crypto.randomUUID();
-      const claim = await fetch(rest("rpc/nmf_claim_recipe_run"), {
-        method: "POST",
-        headers: svc(),
-        body: JSON.stringify({ p_id: id, p_source: run.trigger_source }),
-      });
-      if (!claim.ok) throw new Error("작업 잠금 실패 " + claim.status);
-      if (!(await claim.json())) {
+      const [claim] =
+        await sql`select public.nmf_claim_recipe_run(${id}::uuid,${
+          String(run.trigger_source)
+        }) as claimed`;
+      if (!claim.claimed) {
         return json({
           ok: true,
           busy: true,
@@ -273,12 +225,7 @@ Deno.serve(async (req) => {
     }
     const pw = env("NMF_PW");
     if (!pw) throw new Error("NMF_PW 가 없습니다");
-    const r = await fetch(
-      rest(`${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=data,updated_at`),
-      { headers: svc() },
-    );
-    if (!r.ok) throw new Error(`상태 불러오기 ${r.status}`);
-    const rows = await r.json();
+    const rows = await readState(TABLE, ROOM);
     if (!rows[0]) throw new Error("저장된 데이터가 없습니다");
     const S = JSON.parse(await decryptText(pw, rows[0].data));
     const all = missingList(S);
@@ -395,14 +342,7 @@ Deno.serve(async (req) => {
     let added: string[] = [], skipped: string[] = [];
     let saveWarning = "";
     for (let attempt = 0; attempt < 3; attempt++) {
-      const r2 = await fetch(
-        rest(
-          `${TABLE}?id=eq.${encodeURIComponent(ROOM)}&select=data,updated_at`,
-        ),
-        { headers: svc() },
-      );
-      if (!r2.ok) throw new Error("최신 상태 불러오기 " + r2.status);
-      const [latest] = await r2.json();
+      const [latest] = await readState(TABLE, ROOM);
       const S2 = JSON.parse(await decryptText(pw, latest.data));
       ({ added, skipped } = mergeRecipes(S2, recipes, today, refs));
       try {
