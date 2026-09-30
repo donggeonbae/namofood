@@ -192,6 +192,9 @@ Deno.serve(async (req) => {
       if (!stateRow) throw new Error("저장된 데이터가 없습니다");
       const state = JSON.parse(await decryptText(env("NMF_PW"), stateRow.data));
       const names = [...recipeNames(state)];
+      const upgradeNames = new Set(
+        institutionalUpgradeList(state).map((item) => item.menu),
+      );
       return json({
         ok: true,
         serverTime: new Date().toISOString(),
@@ -200,10 +203,10 @@ Deno.serve(async (req) => {
         nextCheckAt: new Date(nextCheck).toISOString(),
         retryAt: retryAt > Date.now() ? new Date(retryAt).toISOString() : null,
         estimatedSeconds: [30, 180],
-        upgradePending: institutionalUpgradeList(state).length,
+        upgradePending: upgradeNames.size,
         institutionalReady: names.filter((menu) =>
           state.recipeMeta?.[menu]?.cookingProfile ===
-            INSTITUTIONAL_COOKING_PROFILE
+            INSTITUTIONAL_COOKING_PROFILE && !upgradeNames.has(menu)
         ).length,
         totalRecipes: names.length,
         runs,

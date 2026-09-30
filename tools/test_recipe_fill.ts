@@ -52,6 +52,43 @@ if (
 ) {
   throw new Error("대량 전판 작업서와 완제품 김치 작업서가 허용되어야 합니다");
 }
+const replaceLastStep = (last: string) =>
+  bulkBeefMethod.replace(/6\. [^\n]+$/, "6. " + last);
+const actualUnsafeLeftovers = replaceLastStep(
+  "배식 전 60℃ 이상 보온한다. 배식 후 남은 음식은 얕은 용기에 나누어 5℃ 이하로 냉장 보관하고, 재사용 시 중심온도 75℃에서 1분 이상 재가열한다.",
+);
+for (
+  const method of [
+    actualUnsafeLeftovers,
+    replaceLastStep(
+      "배식 전 60℃ 이상 보온한다. 남은 음식은 냉장 보관한 후 다시 배식한다.",
+    ),
+    replaceLastStep(
+      "배식 전 60℃ 이상 보온한다. 잔반은 재사용 시 재가열하고, 상태가 나쁘면 폐기한다.",
+    ),
+  ]
+) {
+  if (!validateInstitutionalMethod(method)) {
+    throw new Error("배식 후 잔반 보관·재사용 지시가 통과했습니다");
+  }
+}
+for (
+  const method of [
+    replaceLastStep(
+      "배식 전 60℃ 이상 보온한다. 배식 후 남은 음식은 재사용하지 않고 폐기한다.",
+    ),
+    replaceLastStep(
+      "배식 전 60℃ 이상 보온한다. 손님에게 제공된 음식은 재사용·재조리·보관하지 않고 폐기한다.",
+    ),
+    replaceLastStep(
+      "배식 전 60℃ 이상 보온한다. 미배식분의 남은 음식은 시설 위생관리 기준에 따라 얕은 용기에 분할 냉각하고 5℃ 이하로 냉장 보관한다.",
+    ),
+  ]
+) {
+  if (validateInstitutionalMethod(method)) {
+    throw new Error("명확한 잔반 폐기 또는 미배식분 관리 지시가 거부됐습니다");
+  }
+}
 for (
   const invalid of [
     "",
@@ -472,6 +509,37 @@ const makeUpgradeState = () =>
     menus: { "2026-10": { "1|중식|2": "육전", "1|중식|n": 100 } },
   }));
 const upgradeState = makeUpgradeState();
+const unsafeTagged = makeUpgradeState();
+unsafeTagged.recipeMeta["육전"].cookingProfile = INSTITUTIONAL_COOKING_PROFILE;
+unsafeTagged.methods["육전"] = actualUnsafeLeftovers;
+if (
+  institutionalUpgradeList(unsafeTagged).length !== 1 ||
+  mergeInstitutionalMethods(
+      unsafeTagged,
+      [bulkBeef],
+      institutionalUpgradeList(unsafeTagged),
+      "2026-09-30",
+    ).upgraded[0] !== "육전"
+) {
+  throw new Error(
+    "현재 대량 조리 태그가 있어도 위험한 AI 잔반 지시는 재전환해야 합니다",
+  );
+}
+const unsafeManual = makeUpgradeState();
+unsafeManual.recipeMeta["육전"].by = "user";
+unsafeManual.recipeMeta["육전"].cookingProfile = INSTITUTIONAL_COOKING_PROFILE;
+unsafeManual.methods["육전"] = actualUnsafeLeftovers;
+if (institutionalUpgradeList(unsafeManual).length) {
+  throw new Error(
+    "위험 문구가 있는 수동 레시피도 자동 덮어쓰기 대상이 아닙니다",
+  );
+}
+const validTagged = makeUpgradeState();
+validTagged.recipeMeta["육전"].cookingProfile = INSTITUTIONAL_COOKING_PROFILE;
+validTagged.methods["육전"] = bulkBeefMethod;
+if (institutionalUpgradeList(validTagged).length) {
+  throw new Error("유효한 현재 대량 조리 레시피가 불필요하게 재전환됩니다");
+}
 const upgradeTargets = institutionalUpgradeList(upgradeState);
 if (upgradeTargets.length !== 1 || upgradeTargets[0].menu !== "육전") {
   throw new Error("AI 가정용 조리법이 전환 대기열에 있어야 합니다");

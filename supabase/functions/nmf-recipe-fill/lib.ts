@@ -142,6 +142,30 @@ const HOT_HOLDING =
 const COLD_HOLDING =
   /(?<![\d.])(?:[0-4](?:\.\d+)?|5(?:\.0+)?)\s*℃\s*(?:이하|↓|미만)/;
 
+/** Reheating does not make serving leftovers reusable; only explicitly unserved food may be stored. */
+function unsafeLeftoverInstructions(step: string): boolean {
+  return step.split(/[。.!?；;]/).some((sentence) => {
+    const served =
+      /(잔반|배식\s*(?:후|하고)[^。.!?]{0,25}(?:남은|음식)|배식대[^。.!?]{0,25}(?:음식|남은)|(?:손님|고객)[^。.!?]{0,20}제공[^。.!?]{0,15}(?:음식|남은)|제공(?:된|한)\s*음식)/
+        .test(sentence);
+    const leftovers = served ||
+      /(남은\s*(?:음식|요리|완성품)|잔식)/.test(sentence);
+    if (!leftovers) return false;
+    const unserved =
+      /(미배식|배식(?:하지|되지)\s*않은|제공(?:하지|되지)\s*않은)/.test(
+        sentence,
+      );
+    if (unserved && !served) return false;
+    // Remove explicit prohibitions, not a whole step merely because it also says '폐기'.
+    const actions = sentence.replace(
+      /(?:(?:재사용|재가열|재조리|냉각|냉장(?:\s*보관)?|보관|다시\s*(?:사용|배식|제공))\s*(?:[·,\/]|및|또는|와|과)?\s*){1,6}(?:을|은|는)?\s*(?:하지\s*않|하지\s*말|금지|불가|할\s*수\s*없)/g,
+      "",
+    );
+    return /(재사용|재가열|재조리|냉각|냉장|보관|다시\s*(?:사용|배식|제공))/
+      .test(actions);
+  });
+}
+
 /** Shape gate used before accepting AI output, including ready-made/no-cook dishes. */
 export function validateInstitutionalMethod(method: string): string {
   const text = normalizeTemperature(normalizeMethod(method));
@@ -156,6 +180,9 @@ export function validateInstitutionalMethod(method: string): string {
   if (!BULK_EQUIPMENT.test(text)) return "대량 조리/배식 장비 누락";
   if (!BATCH_METHOD.test(text)) return "장비 용량에 맞춘 배치·분할 작업 누락";
   if (!/배식/.test(text)) return "배식 직전 마무리·보관 순서 누락";
+  if (steps.some(unsafeLeftoverInstructions)) {
+    return "배식 후 남은 음식·잔반은 보관·재사용하지 않고 폐기해야 합니다";
+  }
   if (
     steps.some((step) =>
       /오븐/.test(step) &&
@@ -204,14 +231,10 @@ function methodUpgradeFingerprint(S: State, menu: string): string {
   });
 }
 
-/** Conservative legacy classifier: never touches manual recipes or current bulk recipes. */
+/** Manual recipes stay protected; even tagged AI methods are rechecked for current safety rules. */
 export function needsInstitutionalUpgrade(S: State, menu: string): boolean {
   const meta = S.recipeMeta?.[menu];
-  if (
-    meta?.by !== "ai" || meta.cookingProfile === INSTITUTIONAL_COOKING_PROFILE
-  ) {
-    return false;
-  }
+  if (meta?.by !== "ai") return false;
   const method = currentMethod(S, menu);
   return Boolean(validateInstitutionalMethod(method));
 }
@@ -918,6 +941,7 @@ export function buildPrompt(
     "- 팬·솥에 전량을 한꺼번에 넣지 말고 용량과 가열 회복에 맞춰 배치/분할 작업을 설명. 튀김은 튀김기 사용, 메뉴별 기름 온도와 투입량을 제시하되 기름 온도만으로 익음을 판단하지 마세요. 배식 직전 마무리, 보관온도, 배식 회차별 교체를 반드시 적으세요.",
     "- 식약처 대량 조리 위생 기준: 육류는 중심온도 75℃ 1분 이상, 어패류는 85℃ 1분 이상을 온도계로 확인. 뜨거운 음식은 60℃ 이상 보온, 찬 음식은 5℃ 이하. 냉각이 필요한 음식은 얕은 용기에 분할해 빠르게 냉각. 짧은 고정 시간만 제시해 가열 기준과 모순되게 쓰지 마세요. 가열하지 않는 완제품 김치·절임 등은 불필요하게 익히지 말고 대형 믹싱볼/배식용기, 개봉·위생·분할·냉장·배식 작업을 6~10단계로 작성하세요.",
     "- 생으로 배식하는 채소는 식품용 살균·소독제의 표시 농도·접촉 시간을 지켜 세척·소독하고 충분히 헹구세요. 식초·소금물 세척을 살균·소독의 대체로 쓰지 마세요.",
+    "- 배식대에 나갔거나 손님에게 제공된 음식, 배식 후 남은 음식·잔반은 재사용·재조리·보관하지 않고 폐기. 재가열하면 재사용할 수 있다고 쓰지 마세요. 냉각·보관 안내는 명확히 구분된 '미배식분'에만 시설의 위생관리 기준을 따르는 조건으로 작성하고, 단순히 '남은 음식'이라 하지 마세요.",
     "- items 는 물 제외 5~13개, 양념까지 모두 포함. 1인 분량은 급식 기준(밥 쌀 100g, 국 건더기 60~80g, 주찬 육류·어류 70~120g, 부찬 채소 50~80g, 김치 50g). unit 은 g/ml/ea 만. storage 는 냉장/냉동/실온. form 은 원물/전처리/가공. loss 는 육류·어류 0.1, 채소 0.05, 양념 0.03.",
     '- allergy 는 식약처 표시 대상 알레르기 유발물질을 쉼표로 (없으면 "").',
     '- 이름이 오타·상표·구호처럼 보이거나 어떤 음식인지 확신이 없으면(예: \'엄마파이팅\'), 가장 그럴듯한 레시피를 쓰되 "ask":{"question":"…인지 확인해 주세요","rename":["올바른 이름 후보1","후보2"]} 를 그 레시피에 덧붙임. 확실하면 ask 생략.',
