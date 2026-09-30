@@ -144,26 +144,48 @@ const COLD_HOLDING =
 
 /** Reheating does not make serving leftovers reusable; only explicitly unserved food may be stored. */
 function unsafeLeftoverInstructions(step: string): boolean {
-  return step.split(/[。.!?；;]/).some((sentence) => {
-    const served =
-      /(잔반|배식\s*(?:후|하고)[^。.!?]{0,25}(?:남은|음식)|배식대[^。.!?]{0,25}(?:음식|남은)|(?:손님|고객)[^。.!?]{0,20}제공[^。.!?]{0,15}(?:음식|남은)|제공(?:된|한)\s*음식)/
-        .test(sentence);
-    const leftovers = served ||
-      /(남은\s*(?:음식|요리|완성품)|잔식)/.test(sentence);
-    if (!leftovers) return false;
-    const unserved =
-      /(미배식|배식(?:하지|되지)\s*않은|제공(?:하지|되지)\s*않은)/.test(
-        sentence,
-      );
-    if (unserved && !served) return false;
-    // Remove explicit prohibitions, not a whole step merely because it also says '폐기'.
-    const actions = sentence.replace(
-      /(?:(?:재사용|재가열|재조리|냉각|냉장(?:\s*보관)?|보관|다시\s*(?:사용|배식|제공))\s*(?:[·,\/]|및|또는|와|과)?\s*){1,6}(?:을|은|는)?\s*(?:하지\s*않|하지\s*말|금지|불가|할\s*수\s*없)/g,
-      "",
-    );
-    return /(재사용|재가열|재조리|냉각|냉장|보관|다시\s*(?:사용|배식|제공))/
-      .test(actions);
-  });
+  // '배식대의 찬 음식' alone is active holding, not a leftover-food subject.
+  const subjectPattern =
+    /(잔반|잔식|잔여\s*(?:분|음식)|남은\s*(?:음식|요리|완성품)|(?:손님|고객)[^,。.!?]{0,20}제공(?:된|한)\s*음식|제공(?:된|한)\s*음식)/;
+  const unservedPattern =
+    /(미배식|배식(?:하지|되지)\s*않은|제공(?:하지|되지)\s*않은)/;
+  const servedPattern = /(잔반|배식\s*(?:후|하고)|제공(?:된|한)\s*음식)/;
+  const prohibition =
+    /(?:(?:재사용|재배식|재가열|재조리|냉각|냉장(?:\s*보관)?|보관|다시\s*(?:사용|배식|제공))\s*(?:[을를은는])?\s*(?:[·,\/]|및|또는|와|과|하거나)?\s*){1,6}(?:(?:절대(?:로)?|일체|모두|원칙적으로)\s*)?(?:하지\s*않|하지\s*말|금지|불가|할\s*수\s*없|없이|해서는\s*안\s*(?:된다|됩니다|돼)|해선\s*안|안\s*한다)/g;
+  let previousSubject: "none" | "leftover" | "unserved" = "none";
+  for (const rawSentence of step.split(/[。.!?；;]/)) {
+    const sentence = rawSentence.replace(prohibition, "");
+    let subject: "none" | "leftover" | "unserved" =
+      /^\s*(?:이를|이\s*음식|해당\s*음식|그것)/.test(sentence)
+        ? previousSubject
+        : "none";
+    for (
+      const clause of sentence.split(
+        /[,，]|(?=(?:배식용기|용기|도구|집게)[은는])/,
+      )
+    ) {
+      if (/^\s*(?:배식용기|용기|도구|집게)[은는]/.test(clause)) {
+        subject = "none";
+      }
+      const marker = clause.match(subjectPattern);
+      if (unservedPattern.test(clause) && !servedPattern.test(clause)) {
+        subject = "unserved";
+        continue;
+      }
+      if (marker) subject = "leftover";
+      if (subject !== "leftover") continue;
+      // Only scan this food's actions: safe 냉장 equipment before 잔여분 is irrelevant.
+      const relevant = marker ? clause.slice(marker.index) : clause;
+      if (
+        /(재사용|재배식|재가열|재조리|냉각|냉장|보관|다시\s*(?:사용|배식|제공))/
+          .test(relevant)
+      ) {
+        return true;
+      }
+    }
+    previousSubject = subject;
+  }
+  return false;
 }
 
 /** Shape gate used before accepting AI output, including ready-made/no-cook dishes. */
