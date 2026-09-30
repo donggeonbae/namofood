@@ -125,7 +125,179 @@ export type Missing = {
   used: string[];
   similar: string[];
   cells: { ym: string; key: string }[];
+  /** Existing AI recipe: replace only the method if this baseline is still current. */
+  methodUpgrade?: { fingerprint: string; recipe: Recipe };
 };
+
+export const INSTITUTIONAL_COOKING_PROFILE = "institutional-v1";
+const HOUSEHOLD_METHOD =
+  /(프라이팬|후라이팬|가정용\s*팬|한\s*줌|종이컵|큰술|작은술)/;
+const BULK_EQUIPMENT =
+  /(회전솥|대형\s*(솥|냄비|볼|믹싱볼)|틸팅\s*팬|전판|그리들|튀김기|스팀솥|오븐|스텐\s*밧드|배식\s*용기)/;
+const BATCH_METHOD = /(배치|분할|나누어|나눠|회차|차례로|분산)/;
+const normalizeTemperature = (s: string) =>
+  s.replace(/(\d)\s*(?:℃|°\s*C|C|도\s*씨)/gi, "$1℃");
+const HOT_HOLDING =
+  /(?<![\d.])(?:60|6[1-9]|[7-9]\d|1\d\d)\s*℃\s*(?:이상|↑|초과)/;
+const COLD_HOLDING =
+  /(?<![\d.])(?:[0-4](?:\.\d+)?|5(?:\.0+)?)\s*℃\s*(?:이하|↓|미만)/;
+
+/** Shape gate used before accepting AI output, including ready-made/no-cook dishes. */
+export function validateInstitutionalMethod(method: string): string {
+  const text = normalizeTemperature(normalizeMethod(method));
+  const steps = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  if (
+    steps.length < 6 || steps.length > 10 ||
+    steps.some((s, i) => !s.startsWith(`${i + 1}. `))
+  ) {
+    return "조리법은 순서대로 번호를 붙인 6~10단계가 필요합니다";
+  }
+  if (HOUSEHOLD_METHOD.test(text)) return "가정용 팬·한 줌·숟가락 계량 조리법";
+  if (!BULK_EQUIPMENT.test(text)) return "대량 조리/배식 장비 누락";
+  if (!BATCH_METHOD.test(text)) return "장비 용량에 맞춘 배치·분할 작업 누락";
+  if (!/배식/.test(text)) return "배식 직전 마무리·보관 순서 누락";
+  if (
+    steps.some((step) =>
+      /오븐/.test(step) &&
+      !/(보유|있으면|없으면|없는\s*경우|선택|대체)/.test(step)
+    )
+  ) {
+    return "보유 여부가 미확인인 오븐을 필수 장비로 지정";
+  }
+  if (
+    !steps.some((step) =>
+      /(보온|냉장|보관|유지)/.test(step) &&
+      (HOT_HOLDING.test(step) || COLD_HOLDING.test(step))
+    )
+  ) return "배식 전 뜨거운 음식 60℃ 이상/찬 음식 5℃ 이하 보관 기준 누락";
+  if (
+    steps.some((step) =>
+      /(냉장|찬\s*음식|차가운\s*음식)/.test(step) &&
+      /(?<![\d.])(?:[6-9]|[1-9]\d|1\d\d)(?:\.\d+)?\s*℃\s*(?:이하|로\s*(?:보관|유지|냉장))/
+        .test(step)
+    )
+  ) return "찬 음식은 5℃ 이하로 보관해야 합니다";
+  if (
+    /실온[^\n]{0,25}(?:[2-9]|\d{2,})\s*시간[^\n]{0,15}(?:방치|보관|둔다|유지)/
+      .test(text)
+  ) {
+    return "조리 후 장시간 실온 보관 지시";
+  }
+  return "";
+}
+
+function currentMethod(S: State, menu: string): string {
+  return String(
+    S.methods?.[menu] ??
+      (S.recipes || []).find((r: { menu: string }) => r.menu === menu)
+        ?.method ??
+      "",
+  );
+}
+function methodUpgradeFingerprint(S: State, menu: string): string {
+  return JSON.stringify({
+    rows: (S.recipes || []).filter((r: { menu: string }) => r.menu === menu),
+    method: S.methods?.[menu] ?? null,
+    meta: S.recipeMeta?.[menu] ?? null,
+    source: S.sources?.[menu] ?? null,
+    ask: S.recipeAsk?.[menu] ?? null,
+  });
+}
+
+/** Conservative legacy classifier: never touches manual recipes or current bulk recipes. */
+export function needsInstitutionalUpgrade(S: State, menu: string): boolean {
+  const meta = S.recipeMeta?.[menu];
+  if (
+    meta?.by !== "ai" || meta.cookingProfile === INSTITUTIONAL_COOKING_PROFILE
+  ) {
+    return false;
+  }
+  const method = currentMethod(S, menu);
+  return Boolean(validateInstitutionalMethod(method));
+}
+
+/** Pending upgrades are independent of missing recipes and processed after them. */
+export function institutionalUpgradeList(S: State): Missing[] {
+  return [...recipeNames(S)].filter((menu) =>
+    needsInstitutionalUpgrade(S, menu)
+  )
+    .map((menu) => {
+      const rows = (S.recipes || []).filter((r: { menu: string }) =>
+        r.menu === menu
+      );
+      return {
+        menu,
+        comp: rows[0]?.comp || "주찬",
+        used: ["기존 AI 레시피 대량조리 전환"],
+        similar: [],
+        cells: [],
+        methodUpgrade: {
+          fingerprint: methodUpgradeFingerprint(S, menu),
+          recipe: {
+            menu,
+            comp: rows[0]?.comp || "주찬",
+            allergy: rows[0]?.allergy || "",
+            source: S.sources?.[menu] || "",
+            method: currentMethod(S, menu),
+            items: rows.filter((r: { item?: string }) =>
+              String(r.item || "").trim()
+            )
+              .map((r: Recipe["items"][number]) => ({
+                item: r.item,
+                qty: r.qty,
+                unit: r.unit,
+                storage: r.storage,
+                loss: r.loss,
+                form: r.form,
+              })),
+          },
+        },
+      };
+    }).sort((a, b) => a.menu.localeCompare(b.menu, "ko"));
+}
+
+/** Missing dishes stay first; recently failed dishes yield to untried peers in each queue. */
+export function selectRecipeTargets(
+  missing: Missing[],
+  upgrades: Missing[],
+  max: number,
+  recentRuns: {
+    status?: string;
+    targets?: unknown;
+    note?: string;
+    started_at?: string;
+  }[] = [],
+): Missing[] {
+  const lastFailure = (menu: string) =>
+    Math.max(
+      0,
+      ...recentRuns.filter((run) => {
+        if (
+          run.status === "error" && Array.isArray(run.targets) &&
+          run.targets.includes(menu)
+        ) {
+          return true;
+        }
+        const failedPart =
+          run.note?.match(/생성 실패\(다음 실행 재시도\):\s*([^·]*)/)?.[1] ||
+          "";
+        return failedPart.split(",").map((m) => m.trim()).includes(menu);
+      }).map((run) => Date.parse(run.started_at || "") || 0),
+    );
+  const order = (list: Missing[]) =>
+    [...list].sort((a, b) =>
+      lastFailure(a.menu) - lastFailure(b.menu) ||
+      a.menu.localeCompare(b.menu, "ko")
+    );
+  const selectedMissing = order(missing).slice(0, max);
+  return [
+    ...selectedMissing,
+    ...order(upgrades).slice(
+      0,
+      Math.max(0, Math.min(2, max - selectedMissing.length)),
+    ),
+  ];
+}
 
 export function shouldErrorBackoff(
   latest: { status?: string; started_at?: string } | undefined,
@@ -251,6 +423,11 @@ export function mergeRecipes(
       skipped.push(R.menu + "(이미 있음)");
       continue;
     }
+    const invalid = validateRecipeContent(R);
+    if (invalid) {
+      skipped.push(R.menu + "(" + invalid + ")");
+      continue;
+    }
     const items = R.items.filter((it) =>
       it && String(it.item || "").trim() && +it.qty > 0 &&
       String(it.item).trim() !== "물"
@@ -278,7 +455,11 @@ export function mergeRecipes(
     }
     if (R.method) S.methods[R.menu] = normalizeMethod(R.method);
     if (R.source) S.sources[R.menu] = R.source;
-    S.recipeMeta[R.menu] = { by: "ai", updated: today };
+    S.recipeMeta[R.menu] = {
+      by: "ai",
+      updated: today,
+      cookingProfile: INSTITUTIONAL_COOKING_PROFILE,
+    };
     have.add(R.menu);
     added.push(R.menu);
     delete S.recipeAsk[R.menu];
@@ -305,6 +486,45 @@ export function mergeRecipes(
     }
   }
   return { added, skipped };
+}
+
+/** Only replace the method; concurrent/manual edits and all ingredient rows are protected. */
+export function mergeInstitutionalMethods(
+  S: State,
+  recipes: Recipe[],
+  targets: Missing[],
+  today: string,
+): { upgraded: string[]; skipped: string[] } {
+  const upgraded: string[] = [], skipped: string[] = [];
+  for (const target of targets) {
+    if (!target.methodUpgrade) continue;
+    const R = recipes.find((r) => r.menu === target.menu);
+    if (!R) continue;
+    if (
+      !needsInstitutionalUpgrade(S, target.menu) ||
+      methodUpgradeFingerprint(S, target.menu) !==
+        target.methodUpgrade.fingerprint
+    ) {
+      skipped.push(target.menu + "(기존 레시피 변경됨)");
+      continue;
+    }
+    // Identity is checked against the preserved ingredients, never invented replacements.
+    const candidate = { ...target.methodUpgrade.recipe, method: R.method };
+    const invalid = validateRecipeContent(candidate);
+    if (invalid) {
+      skipped.push(target.menu + "(" + invalid + ")");
+      continue;
+    }
+    S.methods = S.methods || {};
+    S.methods[target.menu] = normalizeMethod(R.method || "");
+    S.recipeMeta[target.menu] = {
+      ...S.recipeMeta[target.menu],
+      updated: today,
+      cookingProfile: INSTITUTIONAL_COOKING_PROFILE,
+    };
+    upgraded.push(target.menu);
+  }
+  return { upgraded, skipped };
 }
 
 /** 이미 있는 레시피와 이름이 비슷한 음식: 레시피를 새로 만들지 않고 식단표 이름을 바꾸라는 확인 안내를 남긴다 */
@@ -439,12 +659,74 @@ function validateRecipesForTargets(recipes: Recipe[], targetMenus: string[]) {
   const got = new Set(out.map((R) => R.menu));
   const missing = [...targets].filter((menu) => !got.has(menu));
   if (missing.length) throw new Error(`응답 누락: ${missing.join(", ")}`);
-  const empty = out.filter((R) => !Array.isArray(R.items) || !R.items.length)
-    .map((R) => R.menu);
-  if (empty.length) throw new Error(`재료 누락: ${empty.join(", ")}`);
-  const invalid = out.map(validateRecipeIdentity).filter(Boolean);
+  if (out.length !== targets.size) throw new Error("동일 음식 응답 중복");
+  const invalid = out.map((R) => {
+    const reason = validateRecipeContent(R);
+    return reason ? `${R.menu}(${reason})` : "";
+  }).filter(Boolean);
   if (invalid.length) throw new Error(`내용 불일치: ${invalid.join(", ")}`);
   return out;
+}
+function validateRecipeContent(R: Recipe): string {
+  if (
+    !Array.isArray(R.items) || !R.items.length ||
+    !R.items.some((it) =>
+      it && String(it.item || "").trim() && it.item !== "물"
+    )
+  ) {
+    return "재료 누락";
+  }
+  if (
+    R.items.some((it) =>
+      !it || !String(it.item || "").trim() ||
+      !Number.isFinite(Number(it.qty)) || Number(it.qty) <= 0 ||
+      !["g", "ml", "ea"].includes(it.unit || "")
+    )
+  ) {
+    return "재료 분량·단위 확인 실패(g/ml/ea만 허용)";
+  }
+  return validateRecipeIdentity(R) ||
+    validateInstitutionalMethod(R.method || "") || validateFoodSafety(R);
+}
+function validateFoodSafety(R: Recipe): string {
+  const raw = R.items.map((it) => String(it.item || ""))
+    .filter((name) =>
+      !/(익힌|가열완료|조리완료|통조림|캔참치|캔\s*참치|분말|액젓|새우젓|소스|조미김|건멸치|건새우|마른|말린|육수용)/
+        .test(name)
+    );
+  const meat = raw.some((name) =>
+    /(소고기|쇠고기|돼지고기|닭고기|오리고기|우육|돈육|계육|홍두깨|목살|삼겹|안심|등심|부채살|설도|전각|생닭|돈까스|돈가스|치킨까스|치킨가스)/
+      .test(name)
+  );
+  const seafood = raw.some((name) =>
+    /(오징어|낙지|쭈꾸미|주꾸미|문어|새우|꽃게|게살|대게|홍합|조개|바지락|굴|전복|가리비|생선|고등어|삼치|갈치|꽁치|명태|대구|연어|가자미|참치|해물|어패류)/
+      .test(name)
+  );
+  if (!meat && !seafood) return "";
+  const minimum = seafood ? 85 : 75;
+  const steps = normalizeTemperature(normalizeMethod(R.method || "")).split(
+    /\r?\n/,
+  );
+  const safe = steps.some((step) => {
+    if (!/(중심\s*온도|온도계)/.test(step)) return false;
+    const centers = [
+      ...step.matchAll(/중심\s*온도[^\d\n]{0,12}(\d+(?:\.\d+)?)\s*℃/g),
+    ];
+    return centers.some((center) => {
+      if (Number(center[1]) < minimum) return false;
+      const end = (center.index || 0) + center[0].length;
+      const after = step.slice(end, end + 45);
+      return [...after.matchAll(/(\d+(?:\.\d+)?)\s*분/g)].some((m) =>
+        Number(m[1]) >= 1
+      ) ||
+        [...after.matchAll(/(\d+(?:\.\d+)?)\s*초/g)].some((m) =>
+          Number(m[1]) >= 60
+        );
+    });
+  });
+  return safe
+    ? ""
+    : `${seafood ? "어패류" : "육류"} 중심온도 ${minimum}℃ 1분 이상 확인 누락`;
 }
 function recipeText(R: Recipe) {
   return [
@@ -457,10 +739,14 @@ function recipeText(R: Recipe) {
 function validateRecipeIdentity(R: Recipe): string {
   const t = recipeText(R).replace(/\s/g, "");
   if (R.menu === "육전") {
-    const hasBeef = /(소고기|쇠고기|우육|홍두깨|설도|부채살|전각)/.test(t);
-    const hasEgg = /(계란|달걀|난액)/.test(t);
-    const hasCoating = /(밀가루|부침가루|튀김가루|전분)/.test(t);
-    const hasPanCook = /(굽|부치|전판|팬|기름)/.test(t);
+    const ingredients = (R.items || []).map((it) => it.item).join(" ");
+    const hasBeef = /(소고기|쇠고기|우육|홍두깨|설도|부채살|전각)/.test(
+      ingredients,
+    );
+    const hasEgg = /(계란|달걀|난액)/.test(ingredients);
+    const hasCoating = /(밀가루|부침가루|튀김가루|전분)/.test(ingredients);
+    const hasPanCook = /(전판|그리들)/.test(R.method || "") &&
+      /(굽|구워|부치|부친|부쳐)/.test(t);
     if (!hasBeef || !hasEgg || !hasCoating || !hasPanCook) {
       return "육전(소고기·계란·가루옷·부침 조리 확인 실패)";
     }
@@ -598,9 +884,9 @@ export async function fetchReference(menu: string): Promise<Ref | null> {
   }
 }
 
-const EXAMPLE =
-  `{"recipes":[{"menu":"오징어무침","comp":"부찬","allergy":"오징어, 밀, 대두","source":"https://www.10000recipe.com/recipe/7021555",
-"method":"1. 오징어는 몸통과 다리를 손질해 내장과 눈, 입을 제거하고 껍질을 벗긴다.\n2. 몸통 안쪽에 어슷하게 칼집을 넣고 먹기 좋은 크기로 썬다.\n3. 끓는 물에 식초와 소금을 넣고 오징어를 15~20초만 짧게 데친다(오래 데치면 질겨진다).\n4. 중심온도 75℃ 1분 이상을 확인한 뒤 건져 찬물에 헹궈 급속으로 식히고 물기를 뺀다.\n5. 오이, 당근, 양파는 전용 도마와 칼로 채 썰어 준비한다.\n6. 고추장, 고춧가루, 식초, 설탕, 물엿, 다진마늘로 양념장을 만든다.\n7. 배식 직전 오징어와 채소를 양념장에 버무리고 참기름, 통깨로 마무리한다(미리 버무리면 물이 생긴다).\n8. 완성 후 10℃ 이하로 냉장 보관한다.",
+const EXAMPLE = String
+  .raw`{"recipes":[{"menu":"오징어무침","comp":"부찬","allergy":"오징어, 밀, 대두","source":"https://www.10000recipe.com/recipe/7021555",
+"method":"1. 기준 작업량은 100명이며 실제 식수에 맞춰 1인 재료량을 곱해 계량한다. 대형솥, 대형 믹싱볼, 얕은 배식용기를 준비하고 장비 용량에 맞게 25명분씩 4배치로 분할한다.\n2. 오징어는 전용 칼과 도마로 내장·눈·입을 제거하고 같은 크기로 절단한다. 채소는 별도 작업대에서 세척·손질해 물기를 뺀다.\n3. 대형솥의 물이 다시 끓도록 배치별로 오징어를 넣는다(과다 투입으로 온도가 떨어지지 않도록 한다).\n4. 가장 두꺼운 오징어의 중심온도 85℃를 1분 이상 확인한 뒤 건진다. 시간만으로 익음을 판단하지 않는다.\n5. 가열한 오징어는 얕은 용기에 나누어 빠르게 냉각하고 5℃ 이하로 보관한다. 생재료와 조리된 재료의 도구를 분리한다.\n6. 대형 믹싱볼에서 계량한 고추장·식초 등 양념을 먼저 고르게 섞고 배치별 양념량을 나눈다.\n7. 배식 직전 필요한 배치만 오징어·채소와 양념을 버무린다(전체를 미리 버무려 물이 생기지 않게 한다).\n8. 완성품은 배식용기에 분할해 5℃ 이하로 보관하고 배식 회차에 맞춰 소량씩 교체한다.",
 "items":[{"item":"오징어","qty":100,"unit":"g","storage":"냉장","loss":0.1,"form":"전처리"},{"item":"오이","qty":20,"unit":"g","storage":"냉장","loss":0.05,"form":"전처리"},{"item":"고추장","qty":10,"unit":"g","storage":"실온","loss":0.03,"form":"원물"},{"item":"식초","qty":8,"unit":"ml","storage":"실온","loss":0.03,"form":"원물"}]}]}`;
 
 export function buildPrompt(
@@ -608,6 +894,11 @@ export function buildPrompt(
   refs: Record<string, Ref | null> = {},
 ): string {
   const refText = (m: Missing) => {
+    if (m.methodUpgrade) {
+      return `- ${m.menu} | 기존 AI 레시피의 조리법만 대량조리로 전환\n` +
+        `  기존 레시피: ${JSON.stringify(m.methodUpgrade.recipe)}\n` +
+        "  menu/comp/allergy/source/items는 기존 값 그대로 반환. 재료를 추가·삭제하거나 분량을 다시 산정하지 말고 method만 새로 작성.";
+    }
     const r = refs[m.menu];
     if (!r) {
       return `- ${m.menu} | 구성: ${m.comp} | 참고자료 없음 → source 는 "일반 급식 레시피"`;
@@ -617,16 +908,20 @@ export function buildPrompt(
     }\n  참고 조리: ${r.steps.join(" / ").slice(0, 900)}`;
   };
   return [
-    "당신은 한국 공장 구내식당(단체급식) 영양사입니다. 아래 음식들의 1인 분량 레시피를 JSON 으로만 출력하세요. 설명 문장·마크다운은 쓰지 마세요.",
+    "당신은 한국 공장 구내식당의 단체급식 조리 실무자입니다. 재료량은 기존 발주 계산과 호환되는 1인 분량, method는 100명 기준 대량 조리 작업서로 작성하세요. JSON 으로만 출력하고 설명 문장·마크다운은 쓰지 마세요.",
     "출력 형식과 문체는 아래 예시와 똑같이 맞추세요:",
     EXAMPLE,
     "규칙:",
     "- menu 는 주어진 이름과 글자 그대로 동일. comp 는 기본적으로 주어진 구성을 쓰되, 메뉴와 명백히 맞지 않으면 실제 조리 역할로 바로잡으세요(예: 육전이 밥으로 들어오면 comp 는 주찬).",
-    "- method 는 6~9단계, 각 단계는 '숫자. ' 로 시작하고 단계 사이는 반드시 줄바꿈(\n)으로 구분. 손질→조리→위생 확인(중심온도 75℃ 1분, 튀김 170℃ 등)→보관·배식(60℃ 이상 보온 또는 10℃ 이하 냉장) 순서. 주의점은 괄호로 덧붙임.",
+    "- method 는 순서대로 6~10단계, 각 단계는 '숫자. ' 로 시작하고 줄바꿈(\\n)으로 구분. 준비·계량→대량 전처리→배치별 조리→온도계 확인→보관·배식 순서. 첫 단계에 100명 기준, 사용할 장비와 장비 용량에 맞춘 분할 배치(예: 25명분씩 4회, 실제 식수에 맞춰 환산)를 명시하세요.",
+    "- 회전솥 또는 대형솥·틸팅팬·튀김기·전판(그리들)을 음식에 맞게 선택. 프라이팬/후라이팬/가정용 팬, 한 줌, 종이컵, 큰술/작은술 계량은 금지. 오븐 보유가 확인되지 않았으므로 필수로 쓰지 말고, 쓸 경우 '보유 시 선택'으로 쓰고 대형솥·튀김기·전판 조리 대안을 같이 적으세요. 육전은 소고기·가루옷·계란물을 준비해 전판에 겹치지 않게 배치별로 부치세요.",
+    "- 팬·솥에 전량을 한꺼번에 넣지 말고 용량과 가열 회복에 맞춰 배치/분할 작업을 설명. 튀김은 튀김기 사용, 메뉴별 기름 온도와 투입량을 제시하되 기름 온도만으로 익음을 판단하지 마세요. 배식 직전 마무리, 보관온도, 배식 회차별 교체를 반드시 적으세요.",
+    "- 식약처 대량 조리 위생 기준: 육류는 중심온도 75℃ 1분 이상, 어패류는 85℃ 1분 이상을 온도계로 확인. 뜨거운 음식은 60℃ 이상 보온, 찬 음식은 5℃ 이하. 냉각이 필요한 음식은 얕은 용기에 분할해 빠르게 냉각. 짧은 고정 시간만 제시해 가열 기준과 모순되게 쓰지 마세요. 가열하지 않는 완제품 김치·절임 등은 불필요하게 익히지 말고 대형 믹싱볼/배식용기, 개봉·위생·분할·냉장·배식 작업을 6~10단계로 작성하세요.",
+    "- 생으로 배식하는 채소는 식품용 살균·소독제의 표시 농도·접촉 시간을 지켜 세척·소독하고 충분히 헹구세요. 식초·소금물 세척을 살균·소독의 대체로 쓰지 마세요.",
     "- items 는 물 제외 5~13개, 양념까지 모두 포함. 1인 분량은 급식 기준(밥 쌀 100g, 국 건더기 60~80g, 주찬 육류·어류 70~120g, 부찬 채소 50~80g, 김치 50g). unit 은 g/ml/ea 만. storage 는 냉장/냉동/실온. form 은 원물/전처리/가공. loss 는 육류·어류 0.1, 채소 0.05, 양념 0.03.",
     '- allergy 는 식약처 표시 대상 알레르기 유발물질을 쉼표로 (없으면 "").',
     '- 이름이 오타·상표·구호처럼 보이거나 어떤 음식인지 확신이 없으면(예: \'엄마파이팅\'), 가장 그럴듯한 레시피를 쓰되 "ask":{"question":"…인지 확인해 주세요","rename":["올바른 이름 후보1","후보2"]} 를 그 레시피에 덧붙임. 확실하면 ask 생략.',
-    "- source 는 참고자료 URL 을 그대로. 참고자료가 있으면 그 재료·조리 순서를 바탕으로 하되 가정용 분량을 1인 급식 분량으로 환산하고, 참고자료가 없으면 일반적인 급식 레시피로 작성.",
+    "- source 는 참고자료 URL 을 그대로. 참고자료는 음식의 정체성·재료 참고일 뿐, 가정용 장비·가열 시간·숟가락 계량은 복사하지 말고 대량 조리 공정으로 재설계. 참고자료가 없으면 일반적인 급식 레시피로 작성.",
     "음식 목록:",
     ...list.map(refText),
   ].join("\n");

@@ -15,9 +15,13 @@ import {
   encryptText,
   fetchReference,
   generateRecipesWithFallback,
+  INSTITUTIONAL_COOKING_PROFILE,
+  institutionalUpgradeList,
+  mergeInstitutionalMethods,
   mergeRecipes,
   missingList,
   recipeNames,
+  selectRecipeTargets,
   verifyAppRequest,
 } from "./lib.ts";
 
@@ -184,6 +188,10 @@ Deno.serve(async (req) => {
         : 0;
       const nextCheck =
         Math.ceil(Math.max(Date.now() + 1000, retryAt) / 60000) * 60000;
+      const [stateRow] = await readState(TABLE, ROOM);
+      if (!stateRow) throw new Error("저장된 데이터가 없습니다");
+      const state = JSON.parse(await decryptText(env("NMF_PW"), stateRow.data));
+      const names = [...recipeNames(state)];
       return json({
         ok: true,
         serverTime: new Date().toISOString(),
@@ -192,6 +200,12 @@ Deno.serve(async (req) => {
         nextCheckAt: new Date(nextCheck).toISOString(),
         retryAt: retryAt > Date.now() ? new Date(retryAt).toISOString() : null,
         estimatedSeconds: [30, 180],
+        upgradePending: institutionalUpgradeList(state).length,
+        institutionalReady: names.filter((menu) =>
+          state.recipeMeta?.[menu]?.cookingProfile ===
+            INSTITUTIONAL_COOKING_PROFILE
+        ).length,
+        totalRecipes: names.length,
         runs,
       });
     } catch (e) {
@@ -229,28 +243,54 @@ Deno.serve(async (req) => {
     if (!rows[0]) throw new Error("저장된 데이터가 없습니다");
     const S = JSON.parse(await decryptText(pw, rows[0].data));
     const all = missingList(S);
+    const upgrades = institutionalUpgradeList(S);
     // 이름이 비슷하다는 이유만으로 대기 음식이 영구 제외되지 않게 한다.
-    const targets = all.slice(
-      0,
-      Math.max(1, Math.min(20, +(body.max || env("NMF_MAX_PER_RUN", "8")))),
+    const max = Math.max(
+      1,
+      Math.min(20, Number(body.max || env("NMF_MAX_PER_RUN", "8")) || 8),
     );
+    let recentRuns: Parameters<typeof selectRecipeTargets>[3] = [];
+    if (all.length || upgrades.length) {
+      try {
+        const failureRows = await sql<
+          {
+            status: string;
+            targets: unknown;
+            note: string;
+            started_at: string;
+          }[]
+        >`select status,targets,note,started_at from public.namofood_recipe_runs
+          where status='error' or note like '%생성 실패(다음 실행 재시도)%'
+          order by started_at desc limit 30`;
+        recentRuns = failureRows.map((row) => ({ ...row }));
+      } catch (e) {
+        console.warn("실패 음식 순서 조정용 기록 조회 실패", String(e));
+      }
+    }
+    const targets = selectRecipeTargets(all, upgrades, max, recentRuns);
     if (body.dry && !body.llm) {
       return json({
         ok: true,
         dry: true,
         recipes: recipeNames(S).size,
         missing: all,
+        upgradePending: upgrades.length,
+        upgradeMenus: upgrades.map((t) => t.menu),
         targets: targets.map((t) => t.menu),
       });
     }
     if (body.dry && body.llm) { // 형식 점검용: 지정 음식으로 LLM 까지 돌리고 저장은 안 함
-      const list = (body.menus || targets.map((t) => t.menu)).map((menu) => ({
-        menu,
-        comp: all.find((m) => m.menu === menu)?.comp || "주찬",
-        used: [],
-        similar: [],
-        cells: [],
-      }));
+      const list = (body.menus || targets.map((t) => t.menu)).map((menu) =>
+        all.find((m) => m.menu === menu) || upgrades.find((m) =>
+          m.menu === menu
+        ) || {
+          menu,
+          comp: "주찬",
+          used: [],
+          similar: [],
+          cells: [],
+        }
+      );
       const refs = await fetchReferences(list);
       const gen = await generateRecipesWithFallback(
         recipeGenerationOptions(
@@ -276,11 +316,13 @@ Deno.serve(async (req) => {
         status: "done",
         finished_at: new Date().toISOString(),
         added: [],
-        note: "추가할 음식 없음",
+        note: "추가할 음식·대량 조리법 전환 대상 없음",
       });
       return json({
         ok: true,
         added: [],
+        upgraded: [],
+        upgradePending: 0,
         skipped: [],
         ...(log.ok ? {} : { log_warning: log.message }),
       });
@@ -291,7 +333,12 @@ Deno.serve(async (req) => {
       note: "참고자료 확인 중",
     });
     const refs = await fetchReferences(targets); // 만개의레시피 참고자료·출처
-    await logRun({ ...run, note: "AI 레시피 작성 중" });
+    await logRun({
+      ...run,
+      note: targets.some((t) => t.methodUpgrade)
+        ? `AI 레시피 작성·대량 조리법 전환 중 (대기 ${upgrades.length}개)`
+        : "AI 대량 조리 레시피 작성 중",
+    });
     // 레시피 두 개도 상세 재료가 길면 출력 토큰이 잘릴 수 있다. 음식 하나씩
     // 독립 생성하고 일부가 실패해도 성공분은 저장해 특정 메뉴가 전체를 막지 않게 한다.
     const generationSettled = targets.length
@@ -339,14 +386,48 @@ Deno.serve(async (req) => {
       : null;
     // LLM 응답을 기다리는 동안 다른 기기가 저장했을 수 있으니, 최신 상태를 다시 받아 그 위에 병합 (덮어쓰기 방지)
     await logRun({ ...run, note: "완성된 레시피 저장 중" });
-    let added: string[] = [], skipped: string[] = [];
+    let added: string[] = [], upgraded: string[] = [], skipped: string[] = [];
+    let remainingUpgrades = upgrades.length;
     let saveWarning = "";
     for (let attempt = 0; attempt < 3; attempt++) {
       const [latest] = await readState(TABLE, ROOM);
       const S2 = JSON.parse(await decryptText(pw, latest.data));
-      ({ added, skipped } = mergeRecipes(S2, recipes, today, refs));
+      const upgradeNames = new Set(
+        targets.filter((t) => t.methodUpgrade).map((t) => t.menu),
+      );
+      const addedResult = mergeRecipes(
+        S2,
+        recipes.filter((R) => !upgradeNames.has(R.menu)),
+        today,
+        refs,
+      );
+      const upgradeResult = mergeInstitutionalMethods(
+        S2,
+        recipes,
+        targets,
+        today,
+      );
+      added = addedResult.added;
+      upgraded = upgradeResult.upgraded;
+      skipped = [...addedResult.skipped, ...upgradeResult.skipped];
+      remainingUpgrades = institutionalUpgradeList(S2).length;
       try {
-        if (added.length) {
+        if (upgraded.length) {
+          // Never reuse the daily snapshot: each CAS baseline has its own recoverable backup.
+          try {
+            await snapshotState(
+              TABLE,
+              `${ROOM}@before-institutional-${String(run.id)}-${attempt}`,
+              latest.data,
+              new Date().toISOString(),
+            );
+          } catch {
+            throw new Error(
+              "대량 조리법 전환 전 백업 실패: 기존 레시피는 변경하지 않았습니다",
+            );
+          }
+        }
+        if (added.length || upgraded.length) {
           saveWarning =
             (await saveCurrentStateWithCas(pw, S2, latest.updated_at)).warning;
         }
@@ -360,6 +441,8 @@ Deno.serve(async (req) => {
     }
     const note = [
       modelNote(gen),
+      upgraded.length ? `대량 조리법 전환: ${upgraded.join(", ")}` : "",
+      remainingUpgrades ? `전환 대기 ${remainingUpgrades}개` : "",
       generationFailures.length
         ? `생성 실패(다음 실행 재시도): ${
           generationFailures.map((failure) => failure.menu).join(", ")
@@ -378,6 +461,8 @@ Deno.serve(async (req) => {
     return json({
       ok: true,
       added,
+      upgraded,
+      upgradePending: remainingUpgrades,
       skipped,
       targets: targets.map((t) => t.menu),
       ...(gen
