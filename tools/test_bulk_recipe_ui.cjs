@@ -118,6 +118,26 @@ const upgradedMethod = "1. 300명 기준 전처리한다. 2. 대형 솥에 배�
     const mutation = await checkMerge(true);
     assert.throws(() => assertMergedUpgrade(mutation), assert.AssertionError, "the upgrade oracle must reject a no-op merge negative control");
 
+    const removedBeer = await page.evaluate(() => {
+      const remote={recipes:[],menus:{"2026-10":{"14|야식|10":"치즈핫도그","14|야식|n":"250"}}};
+      S.recipes=[{menu:"맥주",item:"캔옥수수"},{menu:"콘치즈",item:"캔옥수수"}];
+      S.recipeMeta={"맥주":{by:"ai"},"콘치즈":{by:"user"}};
+      S.methods={"맥주":"잘못된 조리법","콘치즈":"수동 조리법"};S.sources={"맥주":"오류"};S.recipeAsk={"맥주":{question:"오류"}};
+      S.menus={"2026-10":{"14|야식|10":"치즈핫도그","14|야식|11":"맥주","14|야식|n":"250"}};
+      S.menuPlanMeta={"2026-10-14|야식":{by:"ai"}};
+      discardRemovedAiBeer(remote);
+      const ai={recipes:structuredClone(S.recipes),methods:structuredClone(S.methods),menus:structuredClone(S.menus),meta:structuredClone(S.recipeMeta),sources:structuredClone(S.sources),ask:structuredClone(S.recipeAsk)};
+      S.recipes.push({menu:"맥주",item:"수동 입력"});S.recipeMeta["맥주"]={by:"user"};delete S.menuPlanMeta["2026-10-14|야식"];S.menus["2026-10"]["14|야식|11"]="맥주";
+      discardRemovedAiBeer(remote);
+      return {ai,manualKept:S.recipes.some(r=>r.menu==="맥주")&&S.menus["2026-10"]["14|야식|11"]==="맥주"};
+    });
+    assert.deepEqual(removedBeer.ai.recipes,[{menu:"콘치즈",item:"캔옥수수"}]);
+    assert.deepEqual(removedBeer.ai.methods,{"콘치즈":"수동 조리법"});
+    assert.deepEqual(removedBeer.ai.meta,{"콘치즈":{by:"user"}});
+    assert.deepEqual(removedBeer.ai.sources,{});assert.deepEqual(removedBeer.ai.ask,{});
+    assert.deepEqual(removedBeer.ai.menus,{"2026-10":{"14|야식|10":"치즈핫도그","14|야식|n":"250"}});
+    assert(removedBeer.manualKept,"server cleanup must not silently remove manual local entries");
+
     const checkRestore = async (protect = true, staleOpenPage = false) => page.evaluate(({ upgradedMethod, protect, staleOpenPage }) => {
       const rows = ["복원한옛AI", "복원해도동일AI"].map(menu => ({ menu, item: "돈육", qty: 100, unit: "g", loss: 0, comp: "주찬" }));
       const server = { recipes: structuredClone(rows), methods: {}, recipeMeta: {} };

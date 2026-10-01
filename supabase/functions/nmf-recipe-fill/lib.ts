@@ -1,5 +1,9 @@
 // 나모푸드 레시피 자동 채움 — 순수 로직 (nmf_cloud.mjs 와 같은 암호화/병합 규칙)
 // Deno/Edge Runtime 전용: Web Crypto + CompressionStream 사용
+import {
+  assertMealMenuAllowed,
+  prohibitedMenuReason,
+} from "../_shared/menu-eligibility.ts";
 
 // 0은 기본 쌀밥, 편집 필수칸은 1·2·7·3·4·8, 옛 5·6·9와 10 이상은 선택 추가메뉴다.
 export const SLOT_COMP = [
@@ -255,6 +259,7 @@ function methodUpgradeFingerprint(S: State, menu: string): string {
 
 /** Manual recipes stay protected; even tagged AI methods are rechecked for current safety rules. */
 export function needsInstitutionalUpgrade(S: State, menu: string): boolean {
+  if (prohibitedMenuReason(menu)) return false;
   const meta = S.recipeMeta?.[menu];
   if (meta?.by !== "ai") return false;
   const method = currentMethod(S, menu);
@@ -399,7 +404,7 @@ export function missingList(S: State): Missing[] {
   ) {
     for (const [k, v] of Object.entries(m)) {
       const [d, meal, ci] = k.split("|");
-      if (ci === "n" || !v || have.has(v)) continue;
+      if (ci === "n" || !v || have.has(v) || prohibitedMenuReason(v)) continue;
       const o = out[v] ||
         (out[v] = {
           menu: v,
@@ -413,6 +418,7 @@ export function missingList(S: State): Missing[] {
     }
   }
   for (const [menu, comp] of Object.entries(emptyRecipes(S))) {
+    if (prohibitedMenuReason(menu)) continue;
     const o = out[menu] ||
       (out[menu] = { menu, comp, used: [], similar: [], cells: [] });
     o.used.push("레시피 탭(재료 없음)");
@@ -617,6 +623,9 @@ export function parseRecipesJson(text: string): Recipe[] {
   const j = JSON.parse(t.slice(a, b + 1));
   const arr = Array.isArray(j) ? j : j.recipes;
   if (!Array.isArray(arr)) throw new Error("recipes 배열이 없습니다");
+  for (const R of arr) {
+    if (R?.menu) assertMealMenuAllowed(String(R.menu));
+  }
   return arr;
 }
 
@@ -713,6 +722,8 @@ function validateRecipesForTargets(recipes: Recipe[], targetMenus: string[]) {
   return out;
 }
 function validateRecipeContent(R: Recipe): string {
+  const prohibited = prohibitedMenuReason(R.menu);
+  if (prohibited) return prohibited;
   if (
     !Array.isArray(R.items) || !R.items.length ||
     !R.items.some((it) =>
@@ -938,6 +949,7 @@ export function buildPrompt(
   list: Missing[],
   refs: Record<string, Ref | null> = {},
 ): string {
+  for (const menu of list) assertMealMenuAllowed(menu.menu);
   const refText = (m: Missing) => {
     if (m.methodUpgrade) {
       return `- ${m.menu} | 기존 AI 레시피의 조리법만 대량조리로 전환\n` +
@@ -957,6 +969,7 @@ export function buildPrompt(
     "출력 형식과 문체는 아래 예시와 똑같이 맞추세요:",
     EXAMPLE,
     "규칙:",
+    "- 공장 구내식당 급식이므로 맥주·소주·막걸리·와인·하이볼 등 주류, 무알콜·논알콜 맥주형 음료와 그 브랜드는 독립 메뉴로 생성하지 마세요. 조리 재료인 맛술·와인 등을 실제 요리에 사용하는 것은 가능하지만 음료 메뉴를 다른 음식으로 바꿔 쓰거나 같은 menu 이름 아래 콘치즈 등 다른 음식의 레시피를 넣지 마세요.",
     "- menu 는 주어진 이름과 글자 그대로 동일. comp 는 기본적으로 주어진 구성을 쓰되, 메뉴와 명백히 맞지 않으면 실제 조리 역할로 바로잡으세요(예: 육전이 밥으로 들어오면 comp 는 주찬).",
     "- method 는 순서대로 6~10단계, 각 단계는 '숫자. ' 로 시작하고 줄바꿈(\\n)으로 구분. 준비·계량→대량 전처리→배치별 조리→온도계 확인→보관·배식 순서. 첫 단계에 100명 기준, 사용할 장비와 장비 용량에 맞춘 분할 배치(예: 25명분씩 4회, 실제 식수에 맞춰 환산)를 명시하세요.",
     "- 회전솥 또는 대형솥·틸팅팬·튀김기·전판(그리들)을 음식에 맞게 선택. 프라이팬/후라이팬/가정용 팬, 한 줌, 종이컵, 큰술/작은술 계량은 금지. 오븐 보유가 확인되지 않았으므로 필수로 쓰지 말고, 쓸 경우 '보유 시 선택'으로 쓰고 대형솥·튀김기·전판 조리 대안을 같이 적으세요. 육전은 소고기·가루옷·계란물을 준비해 전판에 겹치지 않게 배치별로 부치세요.",

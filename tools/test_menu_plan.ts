@@ -295,6 +295,8 @@ for (
     "필수 6칸",
     "쌀밥",
     "extras",
+    "주류",
+    "논알콜/무알콜",
     "맛·포만감",
     "JSON",
     "수동제육",
@@ -348,6 +350,118 @@ assert(
     "왕새우튀김,간장수육",
   "optional extras 1~3개 파싱",
 );
+
+// 공장 급식에서는 주류·무알콜 주류형 음료도 필수/추가 칸에 들어갈 수 없다.
+for (
+  const drink of [
+    "맥주",
+    "소주",
+    "막걸리",
+    "와인",
+    "위스키",
+    "하이볼",
+    "Beer",
+    "Wine",
+    "Heineken",
+    "테라",
+    "논알콜맥주",
+    "무알콜맥주",
+    "Heineken 0.0",
+  ]
+) {
+  const alcoholExtra = structuredClone(oneDay);
+  alcoholExtra.days[0].meals[0].extras = [drink];
+  throws(
+    () =>
+      parseMenuPlanJson(JSON.stringify(alcoholExtra), ["2026-09-24"], MEALS),
+    /주류|급식|술|음료/,
+    `주류 extra 거절: ${drink}`,
+  );
+}
+for (const ci of SLOT_INDICES) {
+  const alcoholSlot = structuredClone(oneDay);
+  alcoholSlot.days[0].meals[0].slots[ci] = "맥주";
+  throws(
+    () => parseMenuPlanJson(JSON.stringify(alcoholSlot), ["2026-09-24"], MEALS),
+    /주류|급식|술|음료/,
+    `모든 필수 슬롯에서 주류 거절: ${ci}`,
+  );
+}
+for (const drink of ["보리차", "콜라", "요구르트"]) {
+  const softDrink = structuredClone(oneDay);
+  softDrink.days[0].meals[0].extras = [drink];
+  equal(
+    parseMenuPlanJson(JSON.stringify(softDrink), ["2026-09-24"], MEALS)
+      .days[0].meals[0].extras,
+    [drink],
+    `일반 음료는 보존: ${drink}`,
+  );
+}
+for (const dish of ["맥주반죽생선튀김", "와인소스스테이크", "맛술닭조림"]) {
+  const cookedDish = structuredClone(oneDay);
+  cookedDish.days[0].meals[0].slots["2"] = dish;
+  equal(
+    parseMenuPlanJson(JSON.stringify(cookedDish), ["2026-09-24"], MEALS)
+      .days[0].meals[0].slots["2"],
+    dish,
+    `주류가 조리 재료인 실제 음식은 보존: ${dish}`,
+  );
+}
+const fixedAlcohol = structuredClone(oneDay);
+fixedAlcohol.days[0].meals[0].slots["2"] = "맥주";
+throws(
+  () =>
+    parseMenuPlanJson(JSON.stringify(fixedAlcohol), ["2026-09-24"], MEALS, {
+      "2026-09-24|조식|2": "맥주",
+    }),
+  /주류|급식|술|음료/,
+  "금지된 고정 셀은 몰래 바꾸지 않고 생성 전체를 거절",
+);
+equal(fixedAlcohol.days[0].meals[0].slots["2"], "맥주", "고정 입력 원본 보존");
+
+// 파서를 우회해도 마지막 끼니의 금지 메뉴가 병합 전부를 막아야 한다.
+for (const placement of ["required", "extra"]) {
+  const bypassPlan = structuredClone(oneDay);
+  const lastMeal = bypassPlan.days[0].meals[3];
+  if (placement === "required") lastMeal.slots["8"] = "맥주";
+  else lastMeal.extras = ["맥주"];
+  const untouched: State = {
+    menus: { "2026-09": { "24|조식|2": "수동제육", "24|조식|n": "999" } },
+    settings: { custom: "보존" },
+  };
+  const snapshot = structuredClone(untouched);
+  throws(
+    () =>
+      mergeMenuPlan(untouched, bypassPlan, {
+        updated: "2026-09-25T01:02:03.000Z",
+        model: "fixture",
+        runId: "blocked",
+        meals: MEALS,
+      }),
+    /주류|급식|술|음료/,
+    `병합 전 금지 메뉴 거절: ${placement}`,
+  );
+  equal(
+    untouched,
+    snapshot,
+    `거절 시 수동 메뉴·식수·메타 등 전체 상태 보존: ${placement}`,
+  );
+}
+const emptyState: State = { custom: "보존" };
+const emptySnapshot = structuredClone(emptyState);
+throws(
+  () =>
+    mergeMenuPlan(emptyState, fixedAlcohol, {
+      updated: "2026-09-25T01:02:03.000Z",
+      model: "fixture",
+      runId: "blocked",
+      meals: MEALS,
+    }),
+  /주류|급식|술|음료/,
+  "빈 상태도 금지 메뉴 병합 거절",
+);
+equal(emptyState, emptySnapshot, "거절 시 빈 menus/menuPlanMeta도 만들지 않음");
+
 const duplicateExtra = structuredClone(oneDay);
 duplicateExtra.days[0].meals[0].extras = [
   duplicateExtra.days[0].meals[0].slots["2"],

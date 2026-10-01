@@ -18,6 +18,85 @@ import {
   validateInstitutionalMethod,
   verifyAppRequest,
 } from "../supabase/functions/nmf-recipe-fill/lib.ts";
+import {
+  assertMealMenuAllowed,
+  prohibitedMenuReason,
+} from "../supabase/functions/_shared/menu-eligibility.ts";
+
+const prohibitedMenus = [
+  "맥주",
+  "생맥주",
+  "소주",
+  "막걸리",
+  "와인",
+  "하이볼",
+  "위스키",
+  "보드카",
+  "beer",
+  "wine",
+  "Whiskey",
+  "Heineken",
+  "Budweiser",
+  "Guinness",
+  "테라",
+  "카스",
+  "참이슬",
+  "무알콜 맥주",
+  "논알콜맥주",
+  "무알코올카스",
+  "non-alcoholic Heineken",
+  "돈까스+맥주",
+  "치킨+맥주세트",
+  "맥 주",
+  "참 이 슬",
+  "맥주와 치킨",
+  "맥주 치킨",
+  "하이트+치킨",
+  "테라와 치킨",
+  "칵테일새우+맥주",
+  "사케동과맥주",
+  "고량주",
+  "복분자주",
+  "소맥",
+  "술1잔",
+  "럼1잔",
+];
+for (const menu of prohibitedMenus) {
+  if (!prohibitedMenuReason(menu)) {
+    throw new Error(`급식 주류 메뉴가 허용됐습니다: ${menu}`);
+  }
+  let refused = false;
+  try {
+    assertMealMenuAllowed(menu);
+  } catch (e) {
+    refused = /주류.*급식/.test(String(e));
+  }
+  if (!refused) throw new Error(`주류 급식 오류 메시지가 없습니다: ${menu}`);
+}
+for (
+  const menu of [
+    "보리차",
+    "콜라",
+    "탄산수",
+    "식혜",
+    "ginger ale",
+    "카스테라",
+    "맥주반죽생선튀김",
+    "와인소스스테이크",
+    "맛술닭조림",
+    "맥주수육",
+    "Guinness beef stew",
+    "채소주먹밥",
+    "청주식짜글이",
+    "칵테일새우샐러드",
+    "사케동",
+    "복분자주스",
+  ]
+) {
+  if (prohibitedMenuReason(menu)) {
+    throw new Error(`정상 음식/음료가 주류로 차단됐습니다: ${menu}`);
+  }
+}
 
 const bulkBeefMethod = [
   "1. 100명 기준 재료를 계량하고 전판, 배식용기를 준비해 25명분씩 4배치로 분할한다.",
@@ -38,6 +117,79 @@ const bulkBeef = {
   items: beefItems,
   method: bulkBeefMethod,
 };
+const rejectedMenuState = JSON.parse(
+  '{"recipes":[],"methods":{},"recipeMeta":{}}',
+);
+if (
+  mergeRecipes(rejectedMenuState, [{
+    ...bulkBeef,
+    menu: "맥주",
+    items: [
+      { item: "옥수수", qty: 80, unit: "g" },
+      { item: "치즈", qty: 20, unit: "g" },
+    ],
+  }], "2026-10-01").added.length || rejectedMenuState.recipes.length ||
+  rejectedMenuState.recipeMeta["맥주"]
+) {
+  throw new Error("맥주 이름 아래 콘치즈 레시피가 저장됐습니다");
+}
+let prohibitedParsed = false;
+try {
+  parseRecipesJson(
+    JSON.stringify({ recipes: [{ ...bulkBeef, menu: "맥주" }] }),
+  );
+} catch {
+  prohibitedParsed = true;
+}
+if (!prohibitedParsed) throw new Error("LLM의 주류 레시피 JSON이 허용됐습니다");
+const prohibitedQueueState = {
+  menus: { "2026-10": { "1|중식|10": "맥주", "1|중식|11": "보리차" } },
+  recipes: [{ menu: "소주", item: "", comp: "부찬" }, {
+    menu: "맥주",
+    item: "옥수수",
+    qty: 80,
+    unit: "g",
+  }],
+  methods: { "맥주": "프라이팬에 옥수수와 치즈를 볶는다." },
+  recipeMeta: { "맥주": { by: "ai" } },
+};
+if (
+  missingList(prohibitedQueueState).map((m) => m.menu).join(",") !== "보리차" ||
+  institutionalUpgradeList(prohibitedQueueState).length
+) {
+  throw new Error(
+    "기존 주류·빈 주류 레시피가 자동 생성/전환 대기열에 들어갔습니다",
+  );
+}
+let forbiddenPrompt = false;
+try {
+  buildPrompt([{
+    menu: "맥주",
+    comp: "부찬",
+    used: [],
+    similar: [],
+    cells: [],
+  }]);
+} catch {
+  forbiddenPrompt = true;
+}
+if (!forbiddenPrompt) {
+  throw new Error("주류 음식의 생성 프롬프트가 허용됐습니다");
+}
+const cookingWine = JSON.parse('{"recipes":[],"recipeMeta":{}}');
+if (
+  !mergeRecipes(cookingWine, [{
+    ...bulkBeef,
+    menu: "와인소스스테이크",
+    items: [
+      ...beefItems,
+      { item: "조리용 와인", qty: 5, unit: "ml" },
+      { item: "맛술", qty: 5, unit: "ml" },
+    ],
+  }], "2026-10-01").added.length
+) {
+  throw new Error("정상 요리의 조리용 와인·맛술 재료까지 차단됐습니다");
+}
 const kimchiMethod = [
   "1. 100명 기준 완제품 김치를 계량하고 배식용기를 준비해 회차별로 분할한다.",
   "2. 포장 상태와 소비기한, 냉장 온도를 확인한다.",
