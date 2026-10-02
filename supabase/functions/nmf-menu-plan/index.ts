@@ -17,16 +17,22 @@ import {
   encryptText,
   existingMenuCells,
   headcountPlanDates,
+  kstDayStartIso,
+  MENU_RETRY_COOLDOWN_MS,
   menuDates,
   type MenuPlan,
+  type MenuRunHistory,
   mergeMenuPlan,
+  mergeMenuPlanDays,
   type ModelAttemptDiagnostic,
   ModelFallbackError,
   type OpenCodeProtocol,
   parseMenuPlanJson,
   parseOpenCodeResponse,
   runModelFallback,
+  runValidatedMenuAttempt,
   selectAnchorBlocks,
+  selectRetryMenuDates,
   selectRollingDates,
   selectRunAnchorBlocks,
   splitDateChunks,
@@ -41,17 +47,32 @@ const env = (key: string, fallback = ""): string =>
 const TABLE = env("NMF_TABLE", "namofood_state");
 const ROOM = env("NMF_ROOM", "namofood");
 const RUN_BUDGET_MS = 110_000;
-const LLM_ATTEMPT_TIMEOUT_MS = 45_000;
+const SAVE_RESERVE_MS = 15_000;
+const LLM_PRIMARY_TIMEOUT_MS = 35_000;
+const LLM_FALLBACK_TIMEOUT_MS = 60_000;
 const STALE_RUN_MINUTES = 5;
 
 type StateRow = { data: string; updated_at: string };
-type RequestBody = { dry?: boolean; preview?: boolean; weeks?: number };
+type RequestBody = {
+  dry?: boolean;
+  preview?: boolean;
+  weeks?: number;
+  retry?: boolean;
+  force?: boolean;
+};
 type ChunkGenerationDiagnostic = {
   dates: string[];
   selectedModel: string | null;
   fallbackUsed: boolean;
   attempts: ModelAttemptDiagnostic[];
   error?: string;
+  saveError?: string;
+  correctionCount?: number;
+  corrections?: Array<{ model: string; attempt: number; error: string }>;
+};
+type RecentMenuRun = MenuRunHistory & {
+  error?: string;
+  generation?: { chunks?: ChunkGenerationDiagnostic[] };
 };
 
 const json = (body: unknown, status = 200): Response =>
@@ -101,16 +122,27 @@ async function cleanupStaleRuns(
   signal?.throwIfAborted();
   const cutoff = staleRunCutoffIso(nowIso, STALE_RUN_MINUTES);
   const rows =
-    await sql`update public.namofood_menu_runs set status='error', finished_at=${nowIso}, note='stale cleanup: 실행시간 초과', error='Edge 실행이 완료 로그를 남기기 전에 종료됨' where status='running' and started_at<${cutoff} returning run_id`;
+    await sql`update public.namofood_menu_runs set status='error', finished_at=${nowIso}, note=case when note like 'preview:%' then 'preview: stale cleanup: 실행시간 초과' else 'stale cleanup: 실행시간 초과' end, error='Edge 실행이 완료 로그를 남기기 전에 종료됨' where status='running' and started_at<${cutoff} returning run_id`;
   return rows.length;
 }
 
-async function startRun(
+async function claimRun(
   row: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<boolean> {
   signal?.throwIfAborted();
-  await sql`insert into public.namofood_menu_runs ${sql(logValues(row))}`;
+  // The short transaction serializes check+insert, not the long LLM call. The
+  // running row acts as a 5-minute lease until finishRun releases it.
+  return await sql.begin(async (tx) => {
+    await tx`select pg_advisory_xact_lock(hashtext(${`nmf-menu-plan:${TABLE}:${ROOM}`}))`;
+    const active =
+      await tx`select run_id from public.namofood_menu_runs where status='running' and started_at>=${
+        staleRunCutoffIso(String(row.started_at), STALE_RUN_MINUTES)
+      } limit 1`;
+    if (active.length) return false;
+    await tx`insert into public.namofood_menu_runs ${tx(logValues(row))}`;
+    return true;
+  });
 }
 async function finishRun(
   runId: string,
@@ -129,6 +161,7 @@ async function callLLM(
   protocol: OpenCodeProtocol,
   runSignal: AbortSignal,
   sessionId: string,
+  attemptTimeoutMs: number,
 ): Promise<string> {
   const key = env("OPENCODE_API_KEY") || env("OPENCODE_GO_API_KEY");
   if (!key) throw new Error("OPENCODE_API_KEY 가 없습니다");
@@ -155,13 +188,13 @@ async function callLLM(
         temperature: 0.4,
         max_tokens: Math.max(
           512,
-          Number(env("NMF_MENU_MAX_TOKENS", "7000")) || 7000,
+          Number(env("NMF_MENU_MAX_TOKENS", "10000")) || 10000,
         ),
         messages: [{ role: "user", content: prompt }],
       }),
       signal: AbortSignal.any([
         runSignal,
-        AbortSignal.timeout(LLM_ATTEMPT_TIMEOUT_MS),
+        AbortSignal.timeout(attemptTimeoutMs),
       ]),
     });
   } catch (error) {
@@ -171,7 +204,7 @@ async function callLLM(
       error instanceof DOMException &&
       (error.name === "TimeoutError" || error.name === "AbortError")
     ) {
-      throw new Error(`LLM ${LLM_ATTEMPT_TIMEOUT_MS}ms timeout`);
+      throw new Error(`LLM ${attemptTimeoutMs}ms timeout`);
     }
     throw new Error(`LLM transport 실패: ${detail}`);
   }
@@ -208,7 +241,9 @@ function generationReport(
   return {
     primaryModel,
     fallbackModel,
-    attemptTimeoutMs: LLM_ATTEMPT_TIMEOUT_MS,
+    attemptTimeoutMs: LLM_PRIMARY_TIMEOUT_MS,
+    primaryTimeoutMs: LLM_PRIMARY_TIMEOUT_MS,
+    fallbackTimeoutMs: LLM_FALLBACK_TIMEOUT_MS,
     usedModels,
     fallbackChunks: chunks.filter((chunk) => chunk.fallbackUsed).length,
     chunks,
@@ -232,6 +267,13 @@ function generationNote(chunks: ChunkGenerationDiagnostic[]): string {
     `fallback ${fallbackChunks.length}/${chunks.length}`,
     reasons,
   ].filter(Boolean).join(" · ");
+}
+
+function failedMenuDates(chunks: ChunkGenerationDiagnostic[]) {
+  return chunks.flatMap((chunk) => {
+    const error = chunk.saveError || chunk.error;
+    return error ? chunk.dates.map((date) => ({ date, error })) : [];
+  });
 }
 
 async function casSave(
@@ -297,6 +339,13 @@ Deno.serve(async (request: Request) => {
   let staleCleaned = 0;
   let staleCleanupWarning = "";
   let generationDiagnostics: ChunkGenerationDiagnostic[] = [];
+  let targetDates: string[] = [];
+  let retrySelection: ReturnType<typeof selectRetryMenuDates> = {
+    dates: [],
+    deferred: [],
+  };
+  let isPreview = false;
+  let forceUsed = false;
   try {
     // 504/강제 종료로 완료 PATCH를 못 남긴 이전 행은 새 실행 전에 닫는다.
     try {
@@ -307,7 +356,7 @@ Deno.serve(async (request: Request) => {
         : String(error);
       console.warn(staleCleanupWarning);
     }
-    await startRun({
+    const claimed = await claimRun({
       run_id: runId,
       target_start: null,
       target_end: null,
@@ -319,7 +368,17 @@ Deno.serve(async (request: Request) => {
       headcounts: {},
       note: "",
       error: "",
+      targets: [],
+      generation: {},
     }, runSignal);
+    if (!claimed) {
+      return json({
+        ok: true,
+        skipped: true,
+        reason: "already_running",
+        runId: null,
+      });
+    }
     logged = true;
 
     const parsedBody = await request.json().catch(() => ({}));
@@ -327,12 +386,19 @@ Deno.serve(async (request: Request) => {
       parsedBody && typeof parsedBody === "object" && !Array.isArray(parsedBody)
         ? parsedBody as RequestBody
         : {};
+    isPreview = body.preview === true;
     if (
       body.weeks !== undefined &&
       (!Number.isInteger(body.weeks) || body.weeks < 1 || body.weeks > 2)
     ) {
       throw new Error("weeks 는 1 또는 2여야 합니다");
     }
+    for (const flag of ["dry", "preview", "retry", "force"] as const) {
+      if (body[flag] !== undefined && typeof body[flag] !== "boolean") {
+        throw new Error(`${flag} 는 boolean이어야 합니다`);
+      }
+    }
+    forceUsed = body.force === true;
     const password = env("NMF_PW");
     if (!password) throw new Error("NMF_PW 가 없습니다");
     const today = kstDate();
@@ -370,12 +436,36 @@ Deno.serve(async (request: Request) => {
     // 첫 블록 완성 후 두 번째 누락 블록이 선택된다.
     const anchors = selectRunAnchorBlocks(initial.state, today, body.weeks);
     const remainingAnchors = pendingAnchors.slice(anchors.length);
-    const targetDates = body.weeks === undefined
+    const requestedDates = body.weeks === undefined
       ? selectRollingDates(initial.state, today)
       : uniqueDates(anchors);
+    const historySince = new Date(
+      Date.parse(kstDayStartIso(startedAt)) - MENU_RETRY_COOLDOWN_MS,
+    ).toISOString();
+    const history = await sql<
+      RecentMenuRun[]
+    >`select started_at,targets,target_start,target_end,error,generation from public.namofood_menu_runs where run_id<>${runId} and started_at>=${historySince} and note not like 'preview:%' and note not like 'dry run:%' and (jsonb_array_length(targets)>0 or target_start is not null) order by started_at desc`;
+    retrySelection = isPreview
+      ? { dates: requestedDates, deferred: [] }
+      : selectRetryMenuDates(requestedDates, history, startedAt, {
+        force: forceUsed,
+      });
+    targetDates = retrySelection.dates;
     if (targetDates.length) {
       targetStart = targetDates[0];
       targetEnd = targetDates.at(-1)!;
+      // Only this exact targeted set consumes per-date quota. A no-op cron tick
+      // has null ranges/empty targets and can never exhaust retries.
+      await finishRun(runId, {
+        targets: targetDates,
+        target_start: targetStart,
+        target_end: targetEnd,
+        note: isPreview
+          ? "preview: 생성 중 (저장 안 함)"
+          : forceUsed
+          ? "운영자 cooldown 해제(force): 하루 3회 한도 유지"
+          : "",
+      }, runSignal);
     }
 
     let plan: MenuPlan = { days: [] };
@@ -386,43 +476,86 @@ Deno.serve(async (request: Request) => {
       // Synchronously reserve accepted days so parallel chunks/fallbacks also see
       // dishes generated earlier in this same run, not just the saved calendar.
       const generationState = structuredClone(initial.state);
+      const generationSignal = AbortSignal.any([
+        runSignal,
+        AbortSignal.timeout(
+          Math.max(
+            1,
+            RUN_BUDGET_MS - SAVE_RESERVE_MS -
+              (Date.now() - Date.parse(startedAt)),
+          ),
+        ),
+      ]);
       const chunkResults = await Promise.all(chunks.map(async (dates) => {
         const fixedCells = existingMenuCells(initial.state, dates, meals);
+        const previousRun = history.find((run) =>
+          run.targets?.includes(dates[0]) ||
+          (!run.targets?.length && run.target_start && run.target_end &&
+            run.target_start <= dates[0] && dates[0] <= run.target_end)
+        );
+        const priorFailure = previousRun?.generation?.chunks?.find((chunk) =>
+          chunk.dates.includes(dates[0])
+        )?.error || previousRun?.error || "";
         // 같은 청크의 primary/fallback은 동일 conversation/session으로 식별한다.
         const sessionId = crypto.randomUUID();
+        const corrections: Array<
+          { model: string; attempt: number; error: string }
+        > = [];
         try {
           const generated = await runModelFallback(
             [primaryModel, fallbackModel],
-            async (candidateModel, protocol) => {
-              const prompt = buildPrompt(
-                dates,
-                meals,
-                fixedCells,
-                surroundingMenuCells(generationState, dates, meals),
+            async (candidateModel, protocol, previousFailure) => {
+              return await runValidatedMenuAttempt(
+                async (correction) => {
+                  const prompt = buildPrompt(
+                    dates,
+                    meals,
+                    fixedCells,
+                    surroundingMenuCells(generationState, dates, meals),
+                    [correction?.error, priorFailure, previousFailure].filter(
+                      Boolean,
+                    ).join(" / "),
+                    correction?.answer,
+                  );
+                  return await callLLM(
+                    prompt,
+                    candidateModel,
+                    protocol,
+                    generationSignal,
+                    sessionId,
+                    candidateModel === primaryModel
+                      ? LLM_PRIMARY_TIMEOUT_MS
+                      : LLM_FALLBACK_TIMEOUT_MS,
+                  );
+                },
+                (answer) => {
+                  const candidate = parseMenuPlanJson(
+                    answer,
+                    dates,
+                    meals,
+                    fixedCells,
+                  );
+                  validateMenuVariety(generationState, candidate);
+                  mergeMenuPlan(generationState, candidate, {
+                    updated: startedAt,
+                    model: candidateModel,
+                    runId,
+                    meals,
+                    headcountDates: [],
+                  });
+                  return candidate;
+                },
+                {
+                  signal: generationSignal,
+                  maxCorrections: 2,
+                  onCorrection: (correction) =>
+                    corrections.push({
+                      model: candidateModel,
+                      attempt: correction.attempt,
+                      error: correction.error,
+                    }),
+                },
               );
-              const answer = await callLLM(
-                prompt,
-                candidateModel,
-                protocol,
-                runSignal,
-                sessionId,
-              );
-              // JSON/날짜/식사/슬롯 검증 실패도 primary 실패로 간주해 fallback한다.
-              const candidate = parseMenuPlanJson(
-                answer,
-                dates,
-                meals,
-                fixedCells,
-              );
-              validateMenuVariety(generationState, candidate);
-              mergeMenuPlan(generationState, candidate, {
-                updated: startedAt,
-                model: candidateModel,
-                runId,
-                meals,
-                headcountDates: [],
-              });
-              return candidate;
             },
           );
           return {
@@ -432,6 +565,8 @@ Deno.serve(async (request: Request) => {
               selectedModel: generated.model,
               fallbackUsed: generated.fallbackUsed,
               attempts: generated.attempts,
+              correctionCount: corrections.length,
+              corrections,
             } satisfies ChunkGenerationDiagnostic,
           };
         } catch (error) {
@@ -445,28 +580,22 @@ Deno.serve(async (request: Request) => {
               selectedModel: null,
               fallbackUsed: attempts.length > 1,
               attempts,
+              correctionCount: corrections.length,
+              corrections,
               error: error instanceof Error ? error.message : String(error),
             } satisfies ChunkGenerationDiagnostic,
           };
         }
       }));
       generationDiagnostics = chunkResults.map((result) => result.diagnostic);
-      const failed = chunkResults.filter((result) => !result.plan);
-      if (failed.length) {
-        throw new Error(
-          failed.map((result) =>
-            `${result.diagnostic.dates[0]}~${
-              result.diagnostic.dates.at(-1)
-            } 생성 실패: ${result.diagnostic.error}`
-          ).join(" | "),
-        );
-      }
+      // Failed/aborted dates are diagnosed separately, never discard completed
+      // dates. The final save has its own reserved budget below.
       plan = {
         days: chunkResults.flatMap((result) => result.plan?.days || []),
       };
     }
 
-    const generation = generationReport(
+    let generation = generationReport(
       primaryModel,
       fallbackModel,
       generationDiagnostics,
@@ -483,18 +612,24 @@ Deno.serve(async (request: Request) => {
     ].sort();
 
     if (body.preview) {
-      const previewState = structuredClone(initial.state);
-      const changes = mergeMenuPlan(previewState, plan, {
+      const preview = mergeMenuPlanDays(initial.state, plan, {
         updated: startedAt,
         model: effectiveModel,
         runId,
         meals,
         headcountDates,
       });
+      const changes = preview.changes;
+      const failures = [
+        ...failedMenuDates(generationDiagnostics),
+        ...preview.failedDates,
+      ];
       await finishRun(runId, {
         target_start: targetStart,
         target_end: targetEnd,
-        status: "done",
+        status: failures.length
+          ? preview.succeededDates.length ? "partial" : "error"
+          : "done",
         finished_at: new Date().toISOString(),
         added: [],
         headcounts: changes.headcounts,
@@ -505,10 +640,14 @@ Deno.serve(async (request: Request) => {
           }셀 (저장 안 함)`,
           generationNote(generationDiagnostics),
         ].filter(Boolean).join(" · "),
-        error: "",
+        error: failures.map((item) => `${item.date}: ${item.error}`).join(
+          " | ",
+        ),
+        generation,
       }, runSignal);
       return json({
-        ok: true,
+        ok: !failures.length || preview.succeededDates.length > 0,
+        partial: failures.length > 0 && preview.succeededDates.length > 0,
         preview: true,
         runId,
         anchors,
@@ -519,10 +658,16 @@ Deno.serve(async (request: Request) => {
         plan,
         changes,
         generation,
+        failedDates: failures,
+        succeededDates: preview.succeededDates,
+        retry: retrySelection,
       });
     }
 
-    let latest = await fetchState(password, runSignal); // LLM 대기 중 사용자 저장분을 반드시 다시 읽는다.
+    // Completed chunks remain saveable even when the generation/request signal
+    // expired. This independent final phase is bounded to the reserved 15s.
+    const saveSignal = AbortSignal.timeout(SAVE_RESERVE_MS);
+    let latest = await fetchState(password, saveSignal); // LLM 대기 중 사용자 저장분을 반드시 다시 읽는다.
     if (
       plan.days.length &&
       detectMealLabels(latest.state).join("\u0000") !== meals.join("\u0000")
@@ -535,16 +680,20 @@ Deno.serve(async (request: Request) => {
     let finalChanges: ReturnType<typeof mergeMenuPlan> | null = null;
     let savedAt: string | undefined;
     let snapshotWarning = "";
+    let succeededDates: string[] = [];
+    let saveFailures: Array<{ date: string; error: string }> = [];
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const working = structuredClone(latest.state);
-      validateMenuVariety(working, plan);
-      const changes = mergeMenuPlan(working, plan, {
+      const prepared = mergeMenuPlanDays(latest.state, plan, {
         updated: startedAt,
         model: effectiveModel,
         runId,
         meals,
         headcountDates,
       });
+      const working = prepared.state;
+      const changes = prepared.changes;
+      succeededDates = prepared.succeededDates;
+      saveFailures = prepared.failedDates;
       finalChanges = changes;
       if (
         !changes.added.length && !Object.keys(changes.headcounts).length &&
@@ -557,7 +706,7 @@ Deno.serve(async (request: Request) => {
         latest.row.updated_at,
         working,
         today,
-        runSignal,
+        saveSignal,
       );
       if (saved.saved) {
         savedAt = saved.updatedAt;
@@ -569,7 +718,7 @@ Deno.serve(async (request: Request) => {
           "동시 저장 충돌이 3회 발생했습니다. 다음 실행에서 다시 시도합니다",
         );
       }
-      latest = await fetchState(password, runSignal);
+      latest = await fetchState(password, saveSignal);
       if (
         plan.days.length &&
         detectMealLabels(latest.state).join("\u0000") !== meals.join("\u0000")
@@ -589,12 +738,40 @@ Deno.serve(async (request: Request) => {
         headcounts: {},
         prices: [],
       };
-    const noteBase = savedAt
+    for (const failure of saveFailures) {
+      const chunk = generationDiagnostics.find((item) =>
+        item.dates.includes(failure.date)
+      );
+      if (chunk) chunk.saveError = failure.error;
+    }
+    const failures = failedMenuDates(generationDiagnostics);
+    const partial = failures.length > 0 && succeededDates.length > 0;
+    const status = !targetDates.length
+      ? "skipped"
+      : failures.length
+      ? partial ? "partial" : "error"
+      : "done";
+    generation = generationReport(
+      primaryModel,
+      fallbackModel,
+      generationDiagnostics,
+    );
+    const noteBase = failures.length && !succeededDates.length
+      ? "AI 생성 실패로 저장된 식단이 없습니다. 실패 날짜별 원인을 확인하고 제한된 재시도를 기다립니다"
+      : savedAt
       ? `저장 완료: 식단 ${changes.added.length}셀, 식수 ${
         Object.keys(changes.headcounts).length
       }셀, 쌀밥 기본 ${changes.rice.length}셀, 가격 ${changes.prices.length}항목`
       : targetDates.length
       ? "대상 블록에 추가할 빈 셀이 없습니다"
+      : retrySelection.deferred.length
+      ? `누락 식단 재시도 대기: ${
+        retrySelection.deferred.map((item) =>
+          `${item.date} ${
+            item.reason === "daily_limit" ? "오늘 3회 한도" : "30분 대기"
+          }`
+        ).join(", ")
+      }`
       : "오늘부터 14일 뒤까지 식단이 모두 준비되어 있습니다";
     const followUpNote = remainingAnchors.length
       ? `추가 호출 필요: ${remainingAnchors.join(", ")}`
@@ -604,20 +781,41 @@ Deno.serve(async (request: Request) => {
       generationNote(generationDiagnostics),
       followUpNote,
       snapshotWarning,
+      forceUsed ? "운영자 cooldown 해제(force): 하루 3회 한도 유지" : "",
+      retrySelection.deferred.length
+        ? `재시도 대기: ${
+          retrySelection.deferred.map((item) => `${item.date} → ${item.nextAt}`)
+            .join(", ")
+        }`
+        : "",
+      failures.length
+        ? `${partial ? "부분 저장" : "생성 실패"}: ${
+          failures.map((item) => item.date).join(", ")
+        }`
+        : "",
     ].filter(Boolean).join(" · ");
     let logWarning = "";
     try {
       await finishRun(runId, {
         target_start: targetStart,
         target_end: targetEnd,
-        status: "done",
+        status,
         finished_at: new Date().toISOString(),
         added: changes.added,
         headcounts: changes.headcounts,
         model: effectiveModel,
         note,
-        error: "",
-      }, runSignal);
+        error: failures.map((item) => `${item.date}: ${item.error}`).join(
+          " | ",
+        ),
+        generation: {
+          ...generation,
+          retry: retrySelection,
+          succeededDates,
+          failedDates: failures,
+          force: forceUsed,
+        },
+      }, saveSignal);
     } catch (logError) {
       if (!savedAt) throw logError;
       logWarning = logError instanceof Error
@@ -625,7 +823,9 @@ Deno.serve(async (request: Request) => {
         : String(logError);
     }
     return json({
-      ok: true,
+      ok: status !== "error",
+      partial,
+      status,
       runId,
       anchors,
       remainingAnchors,
@@ -635,7 +835,16 @@ Deno.serve(async (request: Request) => {
       savedAt: savedAt || null,
       changes,
       coverageBefore: report,
-      generation,
+      generation: {
+        ...generation,
+        retry: retrySelection,
+        succeededDates,
+        failedDates: failures,
+        force: forceUsed,
+      },
+      failedDates: failures,
+      succeededDates,
+      retry: retrySelection,
       note,
       warnings: [staleCleanupWarning, snapshotWarning, logWarning].filter(
         Boolean,
@@ -655,8 +864,18 @@ Deno.serve(async (request: Request) => {
             fallbackModel,
             generationDiagnostics,
           ).usedModels.join(",") || primaryModel,
-          note: generationNote(generationDiagnostics),
+          note: (isPreview
+            ? "preview: "
+            : forceUsed
+            ? "운영자 cooldown 해제(force): "
+            : "") +
+            generationNote(generationDiagnostics),
           error: message,
+          generation: generationReport(
+            primaryModel,
+            fallbackModel,
+            generationDiagnostics,
+          ),
         }, AbortSignal.timeout(5_000));
       } catch (logError) {
         message += ` · 로그 갱신 실패: ${

@@ -11,22 +11,27 @@ import {
   headcountForDate,
   headcountPlanDates,
   initialAnchors,
+  kstDayStartIso,
   menuDates,
   type MenuPlan,
   mergeHeadcounts,
   mergeMenuPlan,
+  mergeMenuPlanDays,
   ModelFallbackError,
   openCodeProtocol,
   parseMenuPlanJson,
   parseOpenCodeResponse,
   runModelFallback,
+  runValidatedMenuAttempt,
   selectAnchorBlocks,
+  selectRetryMenuDates,
   selectRunAnchorBlocks,
   SLOT_INDICES,
   splitDateChunks,
   staleRunCutoffIso,
   type State,
   UI_SLOT_ORDER,
+  validateMenuVariety,
 } from "../supabase/functions/nmf-menu-plan/lib.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -202,6 +207,353 @@ await rejects(
   "동일 override 모델 실패",
 );
 assert(attempts === 1, "primary/fallback 모델명이 같으면 중복 호출하지 않음");
+
+let correction = "";
+await runModelFallback(
+  ["primary", "fallback"],
+  (model, _protocol, previousFailure) => {
+    if (model === "primary") {
+      return Promise.reject(
+        new Error("슬롯 1 입력: 제육볶음"),
+      );
+    }
+    correction = previousFailure || "";
+    return Promise.resolve("corrected");
+  },
+);
+assert(correction.includes("제육볶음"), "fallback에 실제 이전 오류 전달");
+assert(
+  buildPrompt(["2026-10-16"], MEALS, {}, {}, correction).includes(
+    JSON.stringify(correction),
+  ),
+  "오류를 인용 데이터로 프롬프트에 전달",
+);
+
+// 완성된 잘못된 답만 같은 모델에 수정 요청하며 검증을 완화하지 않는다.
+const noodlePlan = fixturePlan(["2026-10-16"]);
+noodlePlan.days[0].meals[0].slots["1"] = "라면";
+const noodleAnswer = JSON.stringify(noodlePlan);
+const properAnswer = JSON.stringify(fixturePlan(["2026-10-16"]));
+let correctionCalls = 0;
+const correctionsSeen: Array<
+  { attempt: number; error: string; answer: string }
+> = [];
+const correctedPlan = await runValidatedMenuAttempt(
+  (item) => {
+    correctionCalls++;
+    if (item) {
+      assert(
+        item.error.includes("라면") && item.answer === noodleAnswer,
+        "정확한 오류와 이전 JSON을 수정 요청에 전달",
+      );
+    }
+    return Promise.resolve(item ? properAnswer : noodleAnswer);
+  },
+  (answer) => parseMenuPlanJson(answer, ["2026-10-16"], MEALS),
+  { onCorrection: (item) => correctionsSeen.push(item) },
+);
+assert(
+  correctionCalls === 2 && correctionsSeen.length === 1 &&
+    correctionsSeen[0].attempt === 1,
+  "검증 실패 한 번 뒤 같은 모델 수정 성공",
+);
+assert(
+  correctedPlan.days[0].meals[0].slots["1"] !== "라면",
+  "국 칸을 검증 없이 면으로 승인하지 않음",
+);
+const boundedCorrections: number[] = [];
+correctionCalls = 0;
+await rejects(
+  () =>
+    runValidatedMenuAttempt(
+      () => {
+        correctionCalls++;
+        return Promise.resolve(noodleAnswer);
+      },
+      (answer) => parseMenuPlanJson(answer, ["2026-10-16"], MEALS),
+      { onCorrection: (item) => boundedCorrections.push(item.attempt) },
+    ),
+  /입력: 라면/,
+  "수정한 답도 국 오류이면 끝까지 거절",
+);
+equal(boundedCorrections, [1, 2], "모델별 수정 요청은 최대 2회");
+assert(correctionCalls === 3, "최초 한 번과 수정 두 번만 호출");
+correctionCalls = 0;
+await rejects(
+  () =>
+    runValidatedMenuAttempt(() => {
+      correctionCalls++;
+      return Promise.reject(new Error("LLM timeout"));
+    }, (answer) => answer),
+  /timeout/,
+  "transport timeout은 같은 모델 수정 대상이 아님",
+);
+assert(correctionCalls === 1, "transport 오류에 추가 비용 유발하지 않음");
+const abortedCorrection = new AbortController();
+let abortedCalls = 0;
+await rejects(
+  () =>
+    runValidatedMenuAttempt(() => {
+      abortedCalls++;
+      return Promise.resolve(noodleAnswer);
+    }, () => {
+      abortedCorrection.abort(new Error("generation deadline"));
+      throw new Error("bad reply");
+    }, {
+      signal: abortedCorrection.signal,
+      onCorrection: () => {
+        throw new Error("종료 뒤 수정 요청이 발생함");
+      },
+    }),
+  /bad reply/,
+  "공유 deadline 뒤 수정 요청 없음",
+);
+assert(abortedCalls === 1, "취소 후 두 번째 LLM 호출하지 않음");
+const promptWithCorrection = buildPrompt(
+  ["2026-10-16"],
+  MEALS,
+  {},
+  {
+    "2026-10-13|야식|2": "양념치킨",
+    "2026-10-14|조식|10": "간장수육",
+    "2026-10-14|조식|4": "두부조림",
+  },
+  correctionsSeen[0].error,
+  noodleAnswer,
+);
+assert(
+  promptWithCorrection.includes(JSON.stringify(noodleAnswer)),
+  "이전 후보 전체는 인용 데이터로 전달",
+);
+const bannedLine =
+  promptWithCorrection.split("\n").find((line) =>
+    line.startsWith("신규 메인 슬롯")
+  ) || "";
+assert(
+  ["양념치킨", "간장수육", "두부조림"].every((name) =>
+    bannedLine.includes(name)
+  ),
+  "금지 신규 메인은 검증과 같은 모든 주변 음식/추가메뉴를 포함",
+);
+assert(
+  promptWithCorrection.includes("라면·국수·우동·냉면"),
+  "국 칸에 면 요리 금지 명시",
+);
+
+// KST 자정 기준 quota, legacy 범위, no-op, 정확한 cooldown 경계를 확인한다.
+equal(
+  kstDayStartIso("2026-10-01T14:59:59.000Z"),
+  "2026-09-30T15:00:00.000Z",
+  "KST 자정 직전",
+);
+equal(
+  kstDayStartIso("2026-10-01T15:00:00.000Z"),
+  "2026-10-01T15:00:00.000Z",
+  "KST 자정 직후",
+);
+const retryDate = "2026-10-16";
+const retryNow = "2026-10-02T03:00:00.000Z";
+equal(selectRetryMenuDates([retryDate], [], retryNow), {
+  dates: [retryDate],
+  deferred: [],
+}, "이력 없는 누락 날짜 생성 가능");
+const cooling = selectRetryMenuDates([retryDate], [{
+  started_at: "2026-10-02T02:45:00.000Z",
+  targets: [retryDate],
+}], retryNow);
+equal(cooling.dates, [], "15분 뒤 cron tick은 LLM 재호출하지 않음");
+equal(
+  selectRetryMenuDates(
+    [retryDate],
+    [{ started_at: "2026-10-02T02:45:00.000Z", targets: [retryDate] }],
+    retryNow,
+    { force: true },
+  ).dates,
+  [retryDate],
+  "인증된 운영 force는 cooldown만 해제",
+);
+equal(cooling.deferred[0], {
+  date: retryDate,
+  attempts: 1,
+  reason: "cooldown",
+  nextAt: "2026-10-02T03:15:00.000Z",
+}, "정확한 다음 재시도 시각");
+equal(
+  selectRetryMenuDates([retryDate], [{
+    started_at: "2026-10-02T02:30:00.000Z",
+    targets: [retryDate],
+  }], retryNow).dates,
+  [retryDate],
+  "30분 경과 경계에서 재시도 가능",
+);
+const capped = selectRetryMenuDates(
+  [retryDate],
+  ["00", "01", "02"].map((hour) => ({
+    started_at: `2026-10-02T${hour}:00:00.000Z`,
+    targets: [retryDate],
+  })),
+  retryNow,
+);
+equal(
+  selectRetryMenuDates(
+    [retryDate],
+    ["00", "01", "02"].map((hour) => ({
+      started_at: `2026-10-02T${hour}:00:00.000Z`,
+      targets: [retryDate],
+    })),
+    retryNow,
+    { force: true },
+  ).dates,
+  [],
+  "force도 하루 3회 한도는 우회하지 않음",
+);
+equal(capped.deferred[0], {
+  date: retryDate,
+  attempts: 3,
+  reason: "daily_limit",
+  nextAt: "2026-10-02T15:00:00.000Z",
+}, "KST 하루 3회 제한 및 다음날 초기화 시각");
+const midnight = selectRetryMenuDates([retryDate], [
+  { started_at: "2026-10-01T14:40:00.000Z", targets: [retryDate] },
+  { started_at: "2026-10-01T14:30:00.000Z", targets: [retryDate] },
+  { started_at: "2026-10-01T14:20:00.000Z", targets: [retryDate] },
+], "2026-10-01T15:00:00.000Z");
+assert(
+  midnight.deferred[0].reason === "cooldown" &&
+    midnight.deferred[0].attempts === 0,
+  "자정에 한도는 초기화하지만 직전 실행 cooldown 유지",
+);
+equal(
+  selectRetryMenuDates([retryDate], [{
+    started_at: retryNow,
+    targets: [],
+    target_start: null,
+    target_end: null,
+  }], retryNow).dates,
+  [retryDate],
+  "no-op tick은 횟수 및 cooldown을 소모하지 않음",
+);
+equal(
+  selectRetryMenuDates([retryDate], [{
+    started_at: "2026-10-02T02:45:00.000Z",
+    targets: [],
+    target_start: "2026-10-15",
+    target_end: retryDate,
+  }], retryNow).dates,
+  [],
+  "이전 target range 기록도 실제 시도로 계산",
+);
+equal(
+  selectRetryMenuDates([retryDate], [{
+    started_at: retryNow,
+    targets: ["2026-10-15"],
+    target_start: "2026-10-15",
+    target_end: retryDate,
+  }], retryNow).dates,
+  [retryDate],
+  "명시적 targets가 있으면 넓은 range의 다른 날짜는 횟수에서 제외",
+);
+
+// 한 날짜 검증/충돌 실패가 다른 날짜 또는 원본 상태를 손상시키지 않는다.
+const independentlyMergedPlan = fixturePlan(["2026-10-15", "2026-10-16"]);
+independentlyMergedPlan.days[0].meals[3].extras = ["맥주"];
+const independentInput: State = {
+  menus: { "2026-10": { "16|조식|n": "999" } },
+  headcountMeta: { "2026-10-16|조식": { by: "manual", updated: "keep" } },
+};
+const independentBefore = structuredClone(independentInput);
+const independent = mergeMenuPlanDays(
+  independentInput,
+  independentlyMergedPlan,
+  {
+    updated: retryNow,
+    model: "fixture",
+    runId: "partial",
+    meals: MEALS,
+    headcountDates: [],
+  },
+);
+equal(independent.succeededDates, ["2026-10-16"], "유효한 두 번째 날짜만 성공");
+assert(
+  independent.failedDates.length === 1 &&
+    independent.failedDates[0].date === "2026-10-15" &&
+    independent.failedDates[0].error.includes("주류"),
+  "실패 날짜/실제 오류 반환",
+);
+assert(
+  !Object.keys(independent.state.menus!["2026-10"]).some((key) =>
+    key.startsWith("15|")
+  ),
+  "실패 날짜 앞선 끼니도 부분 변경 없이 폐기",
+);
+assert(
+  completeMenuDates(independent.state, MEALS).includes("2026-10-16"),
+  "다른 성공 날짜 필수24칸 보존",
+);
+equal(
+  independentInput,
+  independentBefore,
+  "입력 원본을 변경하지 않아 CAS 재시도 안전",
+);
+equal(
+  independent.state.menus!["2026-10"]["16|조식|n"],
+  "999",
+  "성공 날짜도 수동 식수 보존",
+);
+
+const concurrentPlan = fixturePlan(["2026-10-15", "2026-10-16"]);
+const concurrentManual: State = {
+  menus: {
+    "2026-10": {
+      "15|조식|3": concurrentPlan.days[0].meals[0].slots["4"],
+      "16|조식|2": "동시수동메인",
+    },
+  },
+};
+const concurrent = mergeMenuPlanDays(concurrentManual, concurrentPlan, {
+  updated: retryNow,
+  model: "fixture",
+  runId: "concurrent",
+  meals: MEALS,
+  headcountDates: [],
+});
+equal(
+  concurrent.succeededDates,
+  ["2026-10-16"],
+  "수동 셀 중복 충돌 날짜만 거절",
+);
+assert(
+  concurrent.failedDates[0].error.includes("수동 셀 병합 후 중복"),
+  "동시 변경 오류 명확히 반환",
+);
+equal(
+  concurrent.state.menus!["2026-10"]["16|조식|2"],
+  "동시수동메인",
+  "성공 날짜의 동시 수동 메뉴 보존",
+);
+
+const varietyPlan = fixturePlan(["2026-10-15", "2026-10-16"]);
+const varietyState: State = {
+  menus: {
+    "2026-10": { "14|중식|2": varietyPlan.days[0].meals[0].slots["2"] },
+  },
+};
+const varietyPartial = mergeMenuPlanDays(varietyState, varietyPlan, {
+  updated: retryNow,
+  model: "fixture",
+  runId: "variety",
+  meals: MEALS,
+  headcountDates: [],
+});
+equal(
+  varietyPartial.succeededDates,
+  ["2026-10-16"],
+  "앞뒤7일 중복 날짜만 거절하고 다른 날짜 성공",
+);
+assert(
+  varietyPartial.failedDates.length === 1,
+  "partial 처리로 variety 검증을 우회하지 않음",
+);
 
 // 9월 24일 기준 2개 블록은 월 경계를 넘어 정확히 10월 7일까지다.
 equal(initialAnchors(2), ["2026-09-24", "2026-10-01"], "2주 앵커");

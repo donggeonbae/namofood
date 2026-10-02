@@ -50,7 +50,7 @@ export function logValues(row: Record<string, unknown>) {
       [k, v],
     ) => [
       k,
-      ["targets", "added", "headcounts"].includes(k)
+      ["targets", "added", "headcounts", "generation"].includes(k)
         ? sql.json(v as postgres.JSONValue)
         : v,
     ]),
