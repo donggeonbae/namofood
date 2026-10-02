@@ -750,16 +750,16 @@ function validateFoodSafety(R: Recipe): string {
       !/(익힌|가열완료|조리완료|통조림|캔참치|캔\s*참치|분말|액젓|새우젓|소스|조미김|건멸치|건새우|마른|말린|육수용)/
         .test(name)
     );
-  const meat = raw.some((name) =>
+  const meat = raw.filter((name) =>
     /(소고기|쇠고기|돼지고기|닭고기|오리고기|우육|돈육|계육|홍두깨|목살|삼겹|안심|등심|부채살|설도|전각|생닭|돈까스|돈가스|치킨까스|치킨가스)/
       .test(name)
   );
-  const seafood = raw.some((name) =>
+  const seafood = raw.filter((name) =>
     /(오징어|낙지|쭈꾸미|주꾸미|문어|새우|꽃게|게살|대게|홍합|조개|바지락|굴|전복|가리비|생선|고등어|삼치|갈치|꽁치|명태|대구|연어|가자미|참치|해물|어패류)/
       .test(name)
   );
-  if (!meat && !seafood) return "";
-  const minimum = seafood ? 85 : 75;
+  if (!meat.length && !seafood.length) return "";
+  const minimum = seafood.length ? 85 : 75;
   const steps = normalizeTemperature(normalizeMethod(R.method || "")).split(
     /\r?\n/,
   );
@@ -782,7 +782,15 @@ function validateFoodSafety(R: Recipe): string {
   });
   return safe
     ? ""
-    : `${seafood ? "어패류" : "육류"} 중심온도 ${minimum}℃ 1분 이상 확인 누락`;
+    : `${
+      seafood.length ? "어패류" : "육류"
+    } 중심온도 ${minimum}℃ 1분 이상 확인 누락 (판정 재료: ${
+      JSON.stringify(
+        [...new Set(seafood.length ? seafood : meat)].slice(0, 4).map((name) =>
+          name.slice(0, 100)
+        ),
+      )
+    })`;
 }
 function recipeText(R: Recipe) {
   return [

@@ -632,6 +632,82 @@ if (
   );
 }
 
+// The menu name cannot waive the raw-seafood requirement: classify actual
+// ingredients and report the triggering names so failed generations are diagnosable.
+const cheeseEggMethod = bulkBeefMethod
+  .replace(
+    "소고기 홍두깨살을 같은 두께로 손질하고 전용 칼과 도마를 구분한다",
+    "달걀을 풀고 치즈와 손질한 채소를 배치별로 준비한다",
+  )
+  .replace(
+    "밀가루와 계란물을 각각 준비해 배치별로 소고기에 묻힌다",
+    "계란물에 치즈와 채소를 배치별로 섞는다",
+  )
+  .replace(
+    "고기를 겹치지 않게 배치별로 부친다",
+    "계란물을 일정한 두께로 배치별로 부친다",
+  );
+const cheeseEggRecipe = {
+  menu: "치즈계란전",
+  comp: "부찬",
+  items: [
+    { item: "달걀", qty: 1, unit: "ea" },
+    { item: "모짜렐라 치즈", qty: 20, unit: "g" },
+    { item: "대파", qty: 5, unit: "g" },
+    { item: "굴소스", qty: 2, unit: "g" },
+  ],
+  method: cheeseEggMethod,
+};
+const plainCheeseEgg = JSON.parse('{"recipes":[],"recipeMeta":{}}');
+if (
+  mergeRecipes(plainCheeseEgg, [cheeseEggRecipe], "2026-10-02").added[0] !==
+    "치즈계란전"
+) {
+  throw new Error("계란·치즈·채소·굴소스만 있는 전을 생어패류로 오인했습니다");
+}
+for (const ingredient of ["새우", "생굴", "대구살", "참치액"]) {
+  const ambiguous = {
+    ...cheeseEggRecipe,
+    items: [...cheeseEggRecipe.items, { item: ingredient, qty: 5, unit: "g" }],
+  };
+  let diagnostic = "";
+  try {
+    await generateRecipesWithFallback({
+      prompt: "오프라인 재료 판정 회귀 테스트",
+      targetMenus: ["치즈계란전"],
+      apiKey: "fixture",
+      baseUrl: "https://example.test",
+      primaryModel: "fixture-ingredient-check",
+      fallbackModel: "fixture-ingredient-check",
+      timeoutMs: 10,
+      maxTokens: 1000,
+      fetchImpl: (() =>
+        Promise.resolve(Response.json({
+          choices: [{
+            finish_reason: "stop",
+            message: { content: JSON.stringify({ recipes: [ambiguous] }) },
+          }],
+        }))) as typeof fetch,
+    });
+  } catch (error) {
+    diagnostic = String(error);
+  }
+  if (
+    !diagnostic.includes("어패류 중심온도 85℃") ||
+    !diagnostic.includes("판정 재료") || !diagnostic.includes(ingredient)
+  ) {
+    throw new Error(
+      `어패류 실패 로그에 실제 판정 재료가 없습니다: ${ingredient}: ${diagnostic}`,
+    );
+  }
+  const unsafe = JSON.parse('{"recipes":[],"recipeMeta":{}}');
+  if (mergeRecipes(unsafe, [ambiguous], "2026-10-02").added.length) {
+    throw new Error(
+      `85℃ 기준 미달 판정 재료를 음식명만으로 허용했습니다: ${ingredient}`,
+    );
+  }
+}
+
 const bulkFallbackCalls: string[] = [];
 const bulkFallback = await generateRecipesWithFallback({
   prompt: "대량 김치 배식 작업서",
