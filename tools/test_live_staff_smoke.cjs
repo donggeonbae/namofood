@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 (async()=>{
-  const expected=process.env.NMF_EXPECTED_VER||'1006-1-staff-history';
+  const expected=process.env.NMF_EXPECTED_VER||'1006-2-weekly-staff';
   const password=process.env.NMF_PW;if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
@@ -29,6 +29,29 @@ const {chromium} = require('playwright');
     assert.deepEqual(staff.wages,{총괄:15000,조리:15000,보조:13000,이송:13000});
     assert.deepEqual(staff.named,[20000,20000,20000]);assert(staff.workedOnly);
     assert.equal(await page.locator('#staffArchive').getAttribute('open'),null);
+    assert.match(await page.locator('#staffArchive summary').innerText(),/^보관된 명단/);
+    assert.equal(await page.locator('#staff-directory-table .staff-action').first().innerText(),'삭제/보관');
+    const directoryWidths=[];
+    for(const width of [1280,1024,390,320]){
+      await page.setViewportSize({width,height:1000});
+      const size=await page.evaluate(()=>{
+        const table=document.getElementById('staff-directory-table'),wrap=document.getElementById('staff-directory-wrap');
+        return {width:innerWidth,table:table.scrollWidth,tableClient:table.clientWidth,wrap:wrap.scrollWidth,wrapClient:wrap.clientWidth,fields:table.tBodies[0].rows[0].cells.length};
+      });
+      assert(size.table<=size.tableClient+1&&size.wrap<=size.wrapClient+1,'live directory fits at '+width);
+      assert.equal(size.fields,10);directoryWidths.push(size);
+    }
+    await page.setViewportSize({width:1280,height:1000});
+    const rosterBefore=await page.evaluate(()=>JSON.stringify(S.roster));
+    await page.locator('button[data-roster-bulk-week]').nth(1).click();
+    assert.equal(await page.locator('#rosterBulkPanel').count(),1);
+    assert.equal(await page.locator('#rb_s_h').count(),1);
+    await page.locator('.roster-week-card[data-week="1"] input.roster-bulk-check').first().check();
+    assert.match(await page.locator('#rosterBulkCount').innerText(),/1칸/);
+    await page.locator('#rosterBulkCancel').click();
+    assert.equal(await page.evaluate(()=>JSON.stringify(S.roster)),rosterBefore,'opening/selecting/canceling never changes real roster');
+    assert.equal(await page.locator('.roster-bulk-check').count(),0);
+    await page.setViewportSize({width:1440,height:1000});
     assert.equal(await page.locator('#staffRoleSettings').count(),1);
     await page.locator('#staffRoleSettings summary').click();
     assert.equal(await page.locator('input[data-role-wage]').count(),4);
@@ -44,6 +67,6 @@ const {chromium} = require('playwright');
     await page.waitForTimeout(9000);
     assert.equal(documents,1,'new deployed page must not reload itself');
     assert.equal(await page.locator('#newver').count(),0);
-    console.log(JSON.stringify({version:expected,staffChecks:staff,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
+    console.log(JSON.stringify({version:expected,staffChecks:staff,directoryWidths,weeklySelectionCanceledWithoutChanges:true,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
   }finally{await browser.close();}
 })().catch(error=>{console.error(error.message);process.exit(1);});

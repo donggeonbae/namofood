@@ -279,10 +279,11 @@ async function csvText(page) {
     assert.deepEqual(await read(), restartPay, "restore/remerge cannot change historical pay");
 
     await page.evaluate(() => {
-      S.month = "2026-11"; S.staffEdits = {}; S.rosterEdits = {};
+      // October's first week contains days 1-4, so the snapshot oracle fits one real week.
+      S.month = "2026-10"; S.staffEdits = {}; S.rosterEdits = {};
       const employee = id => ({ id, name: id === "bulkA" ? "일괄 현직" : "일괄 보관", role: "조리", wage: 10000, bonus: 0, def: { s: "09:00", e: "18:00", b: 60 }, off: [] });
       S.staff = [employee("bulkA")]; S.staffArchive = [{ ...employee("bulkB"), archivedAt: new Date().toISOString() }];
-      S.roster = { "2026-10": { "bulkA|31": { s: "22:00", e: "06:00", b: 60 }, "bulkB|31": "휴" }, "2026-11": { "bulkA|1": { s: "09:00", e: "11:00", b: 0 }, "bulkA|2": { s: "12:00", e: "15:00", b: 0 }, "bulkA|3": { s: "09:00", e: "09:00", b: 0 }, "bulkA|5": { s: "17:00", e: "19:00", b: 0 }, "bulkB|4": { s: "00:00", e: "05:00", b: 0 } } };
+      S.roster = { "2026-09": { "bulkA|30": { s: "22:00", e: "06:00", b: 60 }, "bulkB|30": "휴" }, "2026-10": { "bulkA|1": { s: "09:00", e: "11:00", b: 0 }, "bulkA|2": { s: "12:00", e: "15:00", b: 0 }, "bulkA|3": { s: "09:00", e: "09:00", b: 0 }, "bulkA|5": { s: "17:00", e: "19:00", b: 0 }, "bulkB|4": { s: "00:00", e: "05:00", b: 0 } } };
       toggleRosterBulk(false); go("roster");
     });
     const protectedData = () => page.evaluate(() => structuredClone({ roster: S.roster, edits: S.rosterEdits, staff: S.staff, archive: S.staffArchive, settings: S.settings }));
@@ -293,7 +294,7 @@ async function csvText(page) {
       await page.locator("#rb_e_h").selectOption(end.slice(0, 2)); await page.locator("#rb_e_m").selectOption(end.slice(3));
       await page.locator("#rb_b").fill(String(rest));
     };
-    await page.locator("#rosterBulkEnabled").check();
+    await page.locator('button[data-roster-bulk-week="0"]').click();
     await checkCell("bulkA", 1); await checkCell("bulkA", 2);
     assert.deepEqual(await selectedKeys(), ["bulkA|1", "bulkA|2"], "real checkboxes select only the requested staff/day IDs");
     const beforeBulk = await protectedData();
@@ -312,32 +313,33 @@ async function csvText(page) {
     await apply.click();
     const afterBulk = await protectedData();
     const expectedBulk = structuredClone(beforeBulk);
-    for (const key of ["bulkA|1", "bulkA|2"]) expectedBulk.roster["2026-11"][key] = { s: "22:00", e: "06:00", b: 60 };
+    for (const key of ["bulkA|1", "bulkA|2"]) expectedBulk.roster["2026-10"][key] = { s: "22:00", e: "06:00", b: 60 };
     assert.deepEqual(afterBulk.roster, expectedBulk.roster, "overnight bulk input changes only selected cells across all months");
     assert.deepEqual([afterBulk.staff, afterBulk.archive, afterBulk.settings], [beforeBulk.staff, beforeBulk.archive, beforeBulk.settings], "bulk edits cannot alter staff metadata or payroll settings");
-    assert.deepEqual(Object.keys(afterBulk.edits["2026-11"]).sort(), ["bulkA|1", "bulkA|2"], "bulk input records only selected-cell edit markers");
-    assert(Object.values(afterBulk.edits["2026-11"]).every(edit => edit.deleted === false), "bulk input creates re-entry markers, not deletions");
+    assert.deepEqual(Object.keys(afterBulk.edits["2026-10"]).sort(), ["bulkA|1", "bulkA|2"], "bulk input records only selected-cell edit markers");
+    assert(Object.values(afterBulk.edits["2026-10"]).every(edit => edit.deleted === false), "bulk input creates re-entry markers, not deletions");
     assert.deepEqual(await selectedKeys(), [], "successful apply clears selection");
     await page.evaluate(() => {
-      S.roster["2026-11"]["bulkA|1"] = { s: "09:00", e: "11:00", b: 0 };
-      S.roster["2026-11"]["bulkA|2"] = { s: "12:00", e: "15:00", b: 0 }; S.rosterEdits = {}; render();
+      S.roster["2026-10"]["bulkA|1"] = { s: "09:00", e: "11:00", b: 0 };
+      S.roster["2026-10"]["bulkA|2"] = { s: "12:00", e: "15:00", b: 0 }; S.rosterEdits = {}; render();
     });
     for (const [id, day] of [["bulkA", 1], ["bulkA", 2], ["bulkA", 3], ["bulkA", 4], ["bulkB", 1], ["bulkB", 2]]) await checkCell(id, day);
     const beforePrevious = await protectedData();
     await page.getByRole("button", { name: "각 칸에 전날 근무시간 적용", exact: true }).click();
     const afterPrevious = await protectedData(), expectedPrevious = structuredClone(beforePrevious.roster);
-    expectedPrevious["2026-11"]["bulkA|1"] = beforePrevious.roster["2026-10"]["bulkA|31"];
-    expectedPrevious["2026-11"]["bulkA|2"] = beforePrevious.roster["2026-11"]["bulkA|1"];
-    expectedPrevious["2026-11"]["bulkA|3"] = beforePrevious.roster["2026-11"]["bulkA|2"];
+    expectedPrevious["2026-10"]["bulkA|1"] = beforePrevious.roster["2026-09"]["bulkA|30"];
+    expectedPrevious["2026-10"]["bulkA|2"] = beforePrevious.roster["2026-10"]["bulkA|1"];
+    expectedPrevious["2026-10"]["bulkA|3"] = beforePrevious.roster["2026-10"]["bulkA|2"];
     assert.deepEqual(afterPrevious.roster, expectedPrevious, "previous-day copy crosses the month boundary, uses the old snapshot, skips leave/missing/zero-hour sources, and protects all unselected cells");
-    assert.deepEqual(Object.keys(afterPrevious.edits["2026-11"]).sort(), ["bulkA|1", "bulkA|2", "bulkA|3"], "skipped selections do not create edit markers");
-    await page.evaluate(() => selectRosterBulkRow("bulkA"));
-    assert.deepEqual(await selectedKeys(), Array.from({ length: 30 }, (_, i) => "bulkA|" + (i + 1)).sort(), "employee group selects valid dates of the current month only");
-    await page.evaluate(() => clearRosterBulkSelection());
+    assert.deepEqual(Object.keys(afterPrevious.edits["2026-10"]).sort(), ["bulkA|1", "bulkA|2", "bulkA|3"], "skipped selections do not create edit markers");
+    await page.getByRole("checkbox", { name: "일괄 현직 1주 전체 선택", exact: true }).check();
+    assert.deepEqual(await selectedKeys(), ["bulkA|1", "bulkA|2", "bulkA|3", "bulkA|4"], "employee group selects only valid dates in the active week");
+    await page.getByRole("button", { name: "선택 해제", exact: true }).click();
     await page.getByRole("checkbox", { name: "2일 전체 선택", exact: true }).check();
     assert.deepEqual(await selectedKeys(), ["bulkA|2", "bulkB|2"], "day group includes the visible archived employee without extra dates");
-    await page.evaluate(() => { clearRosterBulkSelection(); selectRosterBulkWeek(0); });
-    assert.deepEqual(await selectedKeys(), ["bulkA|1", "bulkB|1"], "first November week selects only its one valid day");
+    await page.getByRole("button", { name: "선택 해제", exact: true }).click();
+    await page.getByRole("button", { name: "이 주 전체 선택/해제", exact: true }).click();
+    assert.deepEqual(await selectedKeys(), ["bulkA|1", "bulkA|2", "bulkA|3", "bulkA|4", "bulkB|1", "bulkB|2", "bulkB|3", "bulkB|4"], "first October week selects only its four valid dates");
     const beforeMonthSwitch = await protectedData();
     await month("2026-12");
     assert.deepEqual(await selectedKeys(), [], "changing month resets bulk selection");
