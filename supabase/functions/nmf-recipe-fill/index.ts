@@ -28,18 +28,29 @@ import {
 const env = (k: string, d = "") => (Deno.env.get(k) ?? d).trim();
 const TABLE = env("NMF_TABLE", "namofood_state"),
   ROOM = env("NMF_ROOM", "namofood");
-const json = (b: unknown, s = 200) =>
-  new Response(JSON.stringify(b), {
-    status: s,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Access-Control-Allow-Origin": "https://donggeonbae.github.io",
-      "Access-Control-Allow-Headers":
-        "authorization, apikey, content-type, x-nmf-time, x-nmf-signature",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Cache-Control": "no-store",
-    },
-  });
+const CORS_ORIGINS = new Set([
+  "https://d-bae.com",
+  "https://donggeonbae.github.io",
+]);
+function jsonForRequest(req: Request) {
+  const origin = req.headers.get("origin");
+  const allowedOrigin = origin && CORS_ORIGINS.has(origin) ? origin : null;
+  return (b: unknown, s = 200) =>
+    new Response(JSON.stringify(b), {
+      status: s,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        ...(allowedOrigin
+          ? { "Access-Control-Allow-Origin": allowedOrigin }
+          : {}),
+        "Access-Control-Allow-Headers":
+          "authorization, apikey, content-type, x-nmf-time, x-nmf-signature",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Vary": "Origin",
+        "Cache-Control": "no-store",
+      },
+    });
+}
 
 type LogResult = { ok: true } | { ok: false; message: string };
 async function logRun(row: Record<string, unknown>): Promise<LogResult> {
@@ -144,6 +155,7 @@ async function saveCurrentStateWithCas(
 }
 
 Deno.serve(async (req) => {
+  const json = jsonForRequest(req);
   if (req.method === "OPTIONS") return json({ ok: true });
   if (req.method !== "POST") {
     return json({ ok: false, reason: "method_not_allowed" }, 405);

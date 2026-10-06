@@ -84,7 +84,7 @@ else { try { const saved = localStorage.getItem('nmf_pw'); const sess = sessionS
 '''
 os.makedirs(outdir, exist_ok=True)
 import re as _re
-_m = _re.search(r'id="appver">버전 ([0-9-]+)', plain.decode('utf-8', 'ignore')); VER = _m.group(1) if _m else 'dev'
+_m = _re.search(r'id="appver">버전 ([^<\s]+)', plain.decode('utf-8', 'ignore')); VER = _m.group(1) if _m else 'dev'
 open(os.path.join(outdir, 'index.html'), 'w', encoding='utf-8').write(LOADER.replace('__PAYLOAD__', payload).replace('__VER__', VER))
 open(os.path.join(outdir, 'ver.json'), 'w', encoding='utf-8').write(json.dumps({"v": VER}))
 print(f"encrypted: {len(plain)//1024} KB -> index.html {len(payload)//1024} KB, iterations={ITER}")
