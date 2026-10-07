@@ -29,6 +29,7 @@ import {
   type OpenCodeProtocol,
   parseMenuPlanJson,
   parseOpenCodeResponse,
+  recipeCandidateDishes,
   runModelFallback,
   runValidatedMenuAttempt,
   selectAnchorBlocks,
@@ -516,6 +517,7 @@ Deno.serve(async (request: Request) => {
                       Boolean,
                     ).join(" / "),
                     correction?.answer,
+                    recipeCandidateDishes(generationState),
                   );
                   return await callLLM(
                     prompt,
