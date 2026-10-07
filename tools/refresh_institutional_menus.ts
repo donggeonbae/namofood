@@ -10,7 +10,17 @@ import {
   type State,
   validateMenuVariety,
 } from "../supabase/functions/nmf-menu-plan/lib.ts";
-import { canonicalDish } from "../supabase/functions/_shared/institutional-menu.ts";
+import {
+  canonicalDish,
+  mainProfileKey,
+} from "../supabase/functions/_shared/institutional-menu.ts";
+import {
+  createPremiumDishProfiler,
+  MANUAL_FAMILIAR_DISHES,
+  type ManualRecipeState,
+  MENU_MANUAL_VERSION,
+  menuManualViolations,
+} from "../supabase/functions/_shared/menu-manual.ts";
 import {
   mergeRecipes,
   type Recipe,
@@ -33,6 +43,8 @@ export type RefreshOptions = {
   updated: string;
   runId: string;
   force?: boolean;
+  /** Explicit opt-in: repair only manual-policy violations, including today. */
+  manualPolicy?: boolean;
   maxSearch?: number;
 };
 export type RefreshPlan = {
@@ -137,7 +149,7 @@ export function deriveRecoveryOwnedCells(
 function appendCatalog(
   before: State,
   after: State,
-  bank: CatalogEntry[],
+  bank: readonly CatalogEntry[],
   today: string,
 ) {
   const recipes = before.recipes === undefined ? [] : before.recipes;
@@ -284,10 +296,381 @@ function knownNonAnimalMain(protein: string): boolean {
   ].includes(protein.toLowerCase().trim());
 }
 
+function mealContents(state: State, mealKey: string) {
+  const cells = [...allMenuCells(state)].filter(([key, value]) =>
+    key.startsWith(`${mealKey}|`) && filled(value) &&
+    /^\d+$/.test(key.split("|")[2]) && Number(key.split("|")[2]) > 0
+  );
+  const slots = Object.fromEntries(
+    cells.filter(([key]) =>
+      (SLOT_INDICES as readonly string[]).includes(key.split("|")[2])
+    ).map((
+      [key, value],
+    ) => [key.split("|")[2], String(value)]),
+  );
+  const extras = cells.filter(([key]) =>
+    !(SLOT_INDICES as readonly string[]).includes(key.split("|")[2])
+  ).map(([, value]) => String(value));
+  return { slots, extras };
+}
+
+function manualRecipeState(state: State): ManualRecipeState {
+  return {
+    recipes: state.recipes,
+    methods: state.methods,
+    recipeAsk: state.recipeAsk,
+  };
+}
+
+/** Variety validation mutates no recipe maps; clone only the food cells we stage. */
+function clonedMenuContext(state: State): State {
+  return { ...state, menus: structuredClone(state.menus) };
+}
+
+function completeRecipeNames(state: State): Set<string> {
+  const names = new Set<string>();
+  for (const row of (state.recipes || []) as Array<Record<string, unknown>>) {
+    if (
+      typeof row.menu === "string" && typeof row.item === "string" &&
+      row.item.trim() && row.item.trim() !== "물" && Number(row.qty) > 0 &&
+      typeof (state.methods as Record<string, unknown> | undefined)
+          ?.[row.menu] === "string" &&
+      filled((state.methods as Record<string, unknown>)[row.menu]) &&
+      !Object.hasOwn((state.recipeAsk || {}) as object, row.menu)
+    ) names.add(row.menu);
+  }
+  return names;
+}
+
+/** Minimal repair: retain valid old dishes and add the missing protein upgrade. */
+function planManualPolicyRefresh(
+  before: State,
+  bank: readonly CatalogEntry[],
+  ownership: OwnershipProofs,
+  options: RefreshOptions,
+): RefreshPlan {
+  const after = structuredClone(before),
+    validationBase = clonedMenuContext(before);
+  const recipeState = manualRecipeState(before);
+  const complete = completeRecipeNames(before);
+  const premium = createPremiumDishProfiler(recipeState);
+  const bankProfiles = new Map(
+    bank.map((entry) => [canonicalDish(entry.recipe.menu), entry]),
+  );
+  const familiar = new Set(MANUAL_FAMILIAR_DISHES.map(canonicalDish));
+  const useCounts = new Map<string, number>();
+  for (const [, value] of allMenuCells(before)) {
+    if (typeof value !== "string") continue;
+    const name = canonicalDish(value);
+    useCounts.set(name, (useCounts.get(name) || 0) + 1);
+  }
+  // Saved legacy recipes may themselves be erroneous AI drafts. Composition
+  // comes only from the reviewed main-dish catalog and confirmed human-edited
+  // examples; recipe readiness is necessary, but is not a source endorsement.
+  const approved = new Set([
+    ...bank.filter((entry) => entry.role === "main").map((entry) =>
+      canonicalDish(entry.recipe.menu)
+    ),
+    ...familiar,
+  ]);
+  const candidates = [...complete].filter((name) =>
+    approved.has(canonicalDish(name)) && premium(name).substantial
+  );
+  const profileKey = (name: string): string | undefined => {
+    const known = mainProfileKey(name);
+    if (known) return known;
+    const profile = premium(name);
+    if (
+      profile.substantial && profile.protein && profile.method &&
+      profile.seasoning
+    ) {
+      return `${profile.protein}|${profile.method}|${profile.seasoning}`;
+    }
+    const entry = bankProfiles.get(canonicalDish(name));
+    return entry?.role === "main"
+      ? `${entry.protein}|${entry.method}|${entry.seasoning}`
+      : undefined;
+  };
+  const owned = new Set<string>(), allowed = new Set<string>();
+  const targets: string[] = [], skippedMeals: RefreshPlan["skippedMeals"] = [];
+  for (
+    const [mealKey, meta] of Object.entries(before.menuPlanMeta || {}).sort((
+      [a],
+      [b],
+    ) => a.localeCompare(b))
+  ) {
+    const [date] = mealKey.split("|");
+    validDate(date);
+    if (date < options.today || meta.by !== "ai") continue;
+    const contents = mealContents(before, mealKey);
+    if (
+      !menuManualViolations(
+        contents.slots,
+        contents.extras,
+        recipeState,
+        premium,
+      ).length
+    ) {
+      skippedMeals.push({ meal: mealKey, reason: "manual policy compliant" });
+      continue;
+    }
+    const keys = (ownership.runAdded[meta.runId] || []).filter((key) =>
+      key.startsWith(`${mealKey}|`) && /^\d+$/.test(key.split("|")[2]) &&
+      Number(key.split("|")[2]) > 0 && filled(cellValue(before, key))
+    );
+    if (!keys.length) {
+      throw new Error(
+        `Missing verified AI ownership for ${mealKey}; provide an audited --ownership-file`,
+      );
+    }
+    targets.push(mealKey);
+    for (const key of keys) {
+      owned.add(key);
+      allowed.add(key);
+    }
+  }
+  const plan: MenuPlan = { days: [] };
+  const byDay = new Map<string, MenuPlan["days"][number]>();
+  let attempts = 0;
+  for (const mealKey of targets) {
+    const [date, meal] = mealKey.split("|");
+    const contents = mealContents(after, mealKey);
+    const slots = { ...contents.slots }, extras = [...contents.extras];
+    const current: PlanMeal = { meal, slots, extras };
+    const currentPlan: MenuPlan = { days: [{ date, meals: [current] }] };
+    const context = clonedMenuContext(after);
+    const replacements: string[] = [];
+    for (const slot of ["2", "7"]) {
+      if (slots[slot] && premium(slots[slot]).substantial) {
+        continue;
+      }
+      const key = `${mealKey}|${slot}`;
+      if (filled(slots[slot]) && !owned.has(key)) {
+        throw new Error(
+          `Manual main prevents policy repair at ${key}; manual cells were not changed`,
+        );
+      }
+      replacements.push(slot);
+    }
+    if (
+      !replacements.length &&
+      ![slots["2"], slots["7"]].some((name) => premium(name).anchor)
+    ) {
+      const replaceable = ["7", "2"].find((slot) =>
+        owned.has(`${mealKey}|${slot}`)
+      );
+      if (!replaceable) {
+        throw new Error(
+          `Manual anchors prevent policy repair at ${mealKey}; manual cells were not changed`,
+        );
+      }
+      replacements.push(replaceable);
+    }
+    for (const slot of replacements) {
+      delete slots[slot];
+      setCell(context, `${mealKey}|${slot}`, undefined);
+    }
+    const changedSlots: Record<string, string> = {};
+    const preservedContextCells = [...allMenuCells(context)];
+    const nearbyDishes = new Set(
+      preservedContextCells.filter(([key, value]) =>
+        typeof value === "string" && /^\d+$/.test(key.split("|")[2]) &&
+        Number(key.split("|")[2]) > 0 &&
+        Math.abs(Date.parse(key.split("|")[0]) - Date.parse(date)) <=
+          7 * 86400000
+      ).map(([, value]) => canonicalDish(String(value))),
+    );
+    const sameDayProfileAllowed = (name: string): boolean => {
+      const key = profileKey(name);
+      if (!key) return true;
+      const peers = preservedContextCells.filter(([cell, value]) =>
+        cell.split("|")[0] === date && typeof value === "string" &&
+        premium(value).substantial &&
+        profileKey(value) === key
+      );
+      const staged = [
+        ...Object.values(changedSlots),
+        ...extras.filter((dish) => !contents.extras.includes(dish)),
+      ];
+      const matching = staged.filter((dish) => profileKey(dish) === key).length;
+      return !peers.some(([cell]) => cell.startsWith(`${mealKey}|`)) &&
+        !matching && peers.length + matching < 2;
+    };
+    const choices = (task: string) =>
+      [...candidates].sort((a, b) => {
+        const pa = premium(a),
+          pb = premium(b);
+        return Number(pb.anchor) - Number(pa.anchor) ||
+          Number(familiar.has(canonicalDish(b))) -
+            Number(familiar.has(canonicalDish(a))) ||
+          (useCounts.get(canonicalDish(a)) || 0) -
+            (useCounts.get(canonicalDish(b)) || 0) ||
+          hash(`${mealKey}|${task}|${a}`) - hash(`${mealKey}|${task}|${b}`);
+      });
+    const validCandidate = (name: string): boolean => {
+      if (++attempts > (options.maxSearch ?? 40000)) {
+        throw new Error(
+          `Bounded manual-policy repair exhausted at ${mealKey}; no state changed`,
+        );
+      }
+      if (
+        nearbyDishes.has(canonicalDish(name)) ||
+        [...Object.values(slots), ...extras].some((dish) =>
+          canonicalDish(dish) === canonicalDish(name)
+        )
+      ) return false;
+      return sameDayProfileAllowed(name);
+    };
+    const search = (position: number): boolean => {
+      if (position < replacements.length) {
+        const slot = replacements[position];
+        for (const name of choices(slot)) {
+          if (!validCandidate(name)) continue;
+          // A newly repaired primary dish should provide the real animal-protein
+          // anchor when the other preserved main does not do so already.
+          if (
+            ![slots["2"], slots["7"]].filter(Boolean).some((dish) =>
+              premium(dish).anchor
+            ) && !premium(name).anchor
+          ) continue;
+          slots[slot] = name;
+          changedSlots[slot] = name;
+          try {
+            validateMenuVariety(context, currentPlan);
+            if (search(position + 1)) return true;
+          } catch (error) {
+            if (String(error).includes("Bounded manual-policy")) throw error;
+          }
+          delete slots[slot];
+          delete changedSlots[slot];
+        }
+        return false;
+      }
+      if (!menuManualViolations(slots, extras, recipeState, premium).length) {
+        try {
+          validateMenuVariety(context, currentPlan);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      for (const name of choices("upgrade")) {
+        if (!validCandidate(name)) continue;
+        extras.push(name);
+        try {
+          if (
+            !menuManualViolations(slots, extras, recipeState, premium).length
+          ) {
+            validateMenuVariety(context, currentPlan);
+            return true;
+          }
+        } catch {
+          /* Try the next actual registered main; keep preserved dishes. */
+        }
+        extras.pop();
+      }
+      return false;
+    };
+    if (!search(0)) {
+      throw new Error(
+        `No valid manual-policy repair for ${mealKey}; fixed cells kept intact`,
+      );
+    }
+    for (const [slot, name] of Object.entries(changedSlots)) {
+      const key = `${mealKey}|${slot}`;
+      setCell(after, key, name);
+      setCell(validationBase, key, undefined);
+      allowed.add(key);
+    }
+    for (
+      const name of extras.filter((dish) => !contents.extras.includes(dish))
+    ) {
+      let slot = 10;
+      while (filled(cellValue(after, `${mealKey}|${slot}`))) slot++;
+      const key = `${mealKey}|${slot}`;
+      setCell(after, key, name);
+      allowed.add(key);
+      const canonical = canonicalDish(name);
+      useCounts.set(canonical, (useCounts.get(canonical) || 0) + 1);
+    }
+    for (const name of Object.values(changedSlots)) {
+      const canonical = canonicalDish(name);
+      useCounts.set(canonical, (useCounts.get(canonical) || 0) + 1);
+    }
+    after.menuPlanMeta ||= {};
+    after.menuPlanMeta[mealKey] = {
+      by: "ai",
+      updated: options.updated,
+      model: MENU_MANUAL_VERSION,
+      runId: options.runId,
+    };
+    const day = byDay.get(date) || { date, meals: [] };
+    if (!byDay.has(date)) {
+      byDay.set(date, day);
+      plan.days.push(day);
+    }
+    day.meals.push(current);
+  }
+  validateMenuVariety(validationBase, plan);
+  for (const mealKey of targets) {
+    const contents = mealContents(after, mealKey);
+    const errors = menuManualViolations(
+      contents.slots,
+      contents.extras,
+      recipeState,
+      premium,
+    );
+    if (errors.length) {
+      throw new Error(
+        `Manual-policy postcheck failed ${mealKey}: ${errors.join("; ")}`,
+      );
+    }
+  }
+  const protectedChanged = assertRefreshProtected(
+    before,
+    after,
+    allowed,
+    new Set(targets),
+    new Set(),
+  );
+  const bCells = allMenuCells(before), aCells = allMenuCells(after);
+  const changedCells = [...new Set([...bCells.keys(), ...aCells.keys()])]
+    .filter((key) => !equal(bCells.get(key), aCells.get(key))).sort();
+  const missingNewRecipes = [
+    ...new Set(changedCells.map((key) => String(aCells.get(key)))),
+  ]
+    .filter((name) => !complete.has(name));
+  if (missingNewRecipes.length) {
+    throw new Error(
+      `New menu recipe coverage failed: ${missingNewRecipes.join(", ")}`,
+    );
+  }
+  if (changedCells.length) after.updatedAt = options.updated;
+  return {
+    after,
+    plan,
+    ownedCells: [...owned].sort(),
+    changedCells,
+    refreshedMeals: targets,
+    skippedMeals,
+    catalogAdded: [],
+    catalogSkipped: [],
+    protectedChanged,
+    generatedOwnership: {
+      runAdded: {
+        [options.runId]: [...allowed].filter((key) =>
+          filled(cellValue(after, key))
+        ).sort(),
+      },
+    },
+    missingNewRecipes,
+  };
+}
+
 /** Pure planner: caller supplies audited ownership and an injectable dish bank. */
 export function planInstitutionalRefresh(
   before: State,
-  bank: CatalogEntry[],
+  bank: readonly CatalogEntry[],
   ownership: OwnershipProofs,
   options: RefreshOptions,
 ): RefreshPlan {
@@ -296,8 +679,17 @@ export function planInstitutionalRefresh(
     throw new Error("Refresh run/time are required");
   }
   validateOwnershipProofs(ownership);
+  if (options.manualPolicy) {
+    return planManualPolicyRefresh(before, bank, ownership, options);
+  }
   const base = structuredClone(before), after = structuredClone(before);
   const catalog = appendCatalog(before, after, bank, options.today);
+  // Newly appended, validated recipes are part of this refresh's prospective
+  // state, so unfamiliar protein dishes receive the same variety classification
+  // as recipes that were registered before the refresh.
+  for (const field of ["recipes", "methods", "recipeAsk"]) {
+    if (Object.hasOwn(after, field)) base[field] = after[field];
+  }
   const completeRecipes = new Set<string>();
   for (
     const row of (after.recipes || []) as Array<
@@ -585,10 +977,11 @@ export function planInstitutionalRefresh(
 export async function applyInstitutionalRefresh(options: {
   password: string;
   today: string;
-  bank: CatalogEntry[];
+  bank: readonly CatalogEntry[];
   ownership?: OwnershipProofs;
   apply?: boolean;
   force?: boolean;
+  manualPolicy?: boolean;
   storage: RefreshStorage;
   now?: () => string;
   uuid?: () => string;
@@ -606,11 +999,29 @@ export async function applyInstitutionalRefresh(options: {
     const before = JSON.parse(
       await decryptText(options.password, row.data),
     ) as State;
+    const beforeRecipes = manualRecipeState(before);
+    const beforeProfile = options.manualPolicy
+      ? createPremiumDishProfiler(beforeRecipes)
+      : undefined;
     const runIds = [
       ...new Set(
         Object.entries(before.menuPlanMeta || {}).filter(([key, meta]) =>
-          key.split("|")[0] > options.today && meta.by === "ai" &&
-          (options.force || meta.model !== REFRESH_MODEL)
+          (options.manualPolicy
+            ? key.split("|")[0] >= options.today
+            : key.split("|")[0] > options.today) &&
+          meta.by === "ai" &&
+          (options.manualPolicy
+            ? (() => {
+              const content = mealContents(before, key);
+              return menuManualViolations(
+                content.slots,
+                content.extras,
+                beforeRecipes,
+                beforeProfile,
+              )
+                .length > 0;
+            })()
+            : options.force || meta.model !== REFRESH_MODEL)
         ).map(([, meta]) => meta.runId),
       ),
     ];
@@ -649,6 +1060,7 @@ export async function applyInstitutionalRefresh(options: {
       updated: at,
       runId,
       force: options.force,
+      manualPolicy: options.manualPolicy,
     });
     const report = {
       catalogAdded: planned.catalogAdded,
@@ -813,6 +1225,7 @@ async function main() {
     "--ownership-file",
     "--apply",
     "--force",
+    "--manual-policy",
   ]);
   for (let i = 0; i < Deno.args.length; i++) {
     if (!allowed.has(Deno.args[i])) {
@@ -851,6 +1264,7 @@ async function main() {
     ownership,
     apply: Deno.args.includes("--apply"),
     force: Deno.args.includes("--force"),
+    manualPolicy: Deno.args.includes("--manual-policy"),
     storage: await restStorage(),
   });
   console.log(JSON.stringify(result, null, 2));

@@ -38,9 +38,12 @@ function full(date = DATE): MenuPlan {
         meal,
         slots: {
           "1": `시험국-${date}-${i}`,
-          "2": `시험메인-${date}-${i}-A`,
-          "7": `시험메인-${date}-${i}-B`,
-          "3": `시험부찬-${date}-${i}-A`,
+          "2": ["제육볶음", "소불고기", "닭갈비", "돼지갈비찜"][i] +
+            `-${date}-${i}`,
+          "7": ["고등어구이", "생선까스", "삼치조림", "오징어튀김"][i] +
+            `-${date}-${i}`,
+          "3": ["계란말이", "두부조림", "군만두", "두부고추장조림"][i] +
+            `-${date}-${i}`,
           "4": `시험부찬-${date}-${i}-B`,
           "8": "배추김치",
         },
@@ -233,6 +236,7 @@ const cases: Array<[string, () => void]> = [
       "4": "콩나물무침",
       "8": "어묵볶음",
     });
+    plan.days[0].meals[0].extras = ["닭강정"];
     rejects(
       () => parseMenuPlanJson(JSON.stringify(plan), [DATE], MEALS),
       /부찬.*김치/,
@@ -246,6 +250,7 @@ const cases: Array<[string, () => void]> = [
       "4": "콩나물무침",
       "8": "어묵볶음",
     });
+    plan.days[0].meals[0].extras = ["닭강정"];
     const fixed = {
       [`${DATE}|조식|3`]: "감자조림",
       [`${DATE}|조식|4`]: "콩나물무침",
@@ -265,6 +270,7 @@ const cases: Array<[string, () => void]> = [
   ["fixed manual side in a main slot is preserved", () => {
     const plan = full();
     plan.days[0].meals[0].slots["2"] = "시금치나물";
+    plan.days[0].meals[0].extras = ["닭강정"];
     parseMenuPlanJson(JSON.stringify(plan), [DATE], MEALS, {
       [`${DATE}|조식|2`]: "시금치나물",
     });
@@ -276,6 +282,7 @@ const cases: Array<[string, () => void]> = [
       const meal = plan.days[0].meals[0];
       meal.slots["2"] = "제육볶음";
       meal.slots["7"] = "돈육고추장볶음";
+      meal.extras = ["닭강정"];
       parseMenuPlanJson(JSON.stringify(plan), [DATE], MEALS, {
         [`${DATE}|조식|2`]: "제육볶음",
         [`${DATE}|조식|7`]: "돈육고추장볶음",
@@ -320,7 +327,7 @@ const cases: Array<[string, () => void]> = [
       );
     },
   ],
-  ["unknown fixture dishes remain accepted", () => {
+  ["recognizable varied premium fixture dishes remain accepted", () => {
     const plan = full();
     parseMenuPlanJson(JSON.stringify(plan), [DATE], MEALS);
     validateMenuVariety({}, plan);
@@ -329,6 +336,7 @@ const cases: Array<[string, () => void]> = [
     const bad = full();
     bad.days[0].meals[0].slots["2"] = "제육볶음";
     const good = full("2026-10-16");
+    good.days[0].meals[0].extras = ["닭강정"];
     const input: State = {
       menus: {
         "2026-10": {

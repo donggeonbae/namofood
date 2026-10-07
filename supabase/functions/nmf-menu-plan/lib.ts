@@ -10,8 +10,16 @@ import {
   INSTITUTIONAL_MENU_RULES,
   mainProfileKey,
 } from "../_shared/institutional-menu.ts";
+import {
+  createPremiumDishProfiler,
+  MANUAL_FAMILIAR_DISHES,
+  type ManualRecipeState,
+  MENU_MANUAL_VERSION,
+  menuManualViolations,
+  type PremiumDishProfiler,
+} from "../_shared/menu-manual.ts";
 
-export type State = {
+export type State = ManualRecipeState & {
   menus?: Record<string, Record<string, unknown>>;
   menuPlanMeta?: Record<string, MenuPlanMeta>;
   headcountMeta?: Record<string, HeadcountMeta>;
@@ -639,6 +647,7 @@ export type RecipeCandidateDishes = {
 
 /** Read-only inspiration bank: never rename or mutate existing recipes. */
 export function recipeCandidateDishes(state: State): RecipeCandidateDishes {
+  const profile = createPremiumDishProfiler(state);
   const recipes = Array.isArray(state.recipes) ? state.recipes : [];
   const methods = (state.methods || {}) as Record<string, unknown>;
   const unresolved = (state.recipeAsk || {}) as Record<string, unknown>;
@@ -668,6 +677,7 @@ export function recipeCandidateDishes(state: State): RecipeCandidateDishes {
       : ["부찬", "김치"].includes(comp)
       ? "sides"
       : undefined;
+    if (group === "mains" && !profile(name).substantial) continue;
     if (group) groups.set(name, group);
   }
   const bank: RecipeCandidateDishes = { mains: [], soups: [], sides: [] };
@@ -709,12 +719,16 @@ export function buildPrompt(
     ),
   ].sort();
   return [
-    "당신은 한국 산업체 급식·공장 구내식당·함바식당의 실무 식단 편성자입니다. 반드시 JSON 하나만 출력하고 설명, 마크다운, 코드펜스를 쓰지 마세요.",
+    "당신은 나모푸드의 식단 작성 매뉴얼을 실행하는 편성 담당자입니다. 일반적인 AI 가정식 아이디어보다 실제 운영자가 수정한 식단에서 도출한 아래 매뉴얼을 우선하세요. 반드시 JSON 하나만 출력하고 설명, 마크다운, 코드펜스를 쓰지 마세요.",
+    `적용 매뉴얼 버전: ${MENU_MANUAL_VERSION}. 운영자가 실제 수정한 식단의 이름과 구성으로 기준을 세웁니다. 고등어구이 + 위샹로우스 + 닭강정(부찬 칸), 대패삼겹콩나물볶음 + 동그랑땡 + 왕교자튀김(추가 칸), 고추장삼겹 + 만두튀김초고추장무침 + 탕수육 + 새우튀김 등의 식단은 주찬급 음식이 여러 가지 보이는 운영 의도를 보여줍니다. 예시 전체를 기계적으로 복사하거나 예시 음식만 반복하지 마세요.`,
     "한 끼 판매가는 10,000원입니다. 공장 근무자 만족을 최우선으로 육류·튀김·볶음·구이·매콤한 메뉴를 푸짐하고 공격적으로 구성하세요. 영양 균형은 최우선 기준이 아니며 맛·포만감·메인메뉴의 양과 체감 품질을 우선하세요.",
     "아침·점심·저녁·야식 모두 같은 10,000원 산업체 급식 기준입니다. 가정식 반찬 몇 가지, 브런치, 샌드위치 위주 구성이나 개별 접시 장식은 피하세요. 100~500인분을 회전솥·대형 볶음솥·스팀 오븐·튀김기·밧드로 조리하고 배식할 수 있는 실제 구내식당 음식명을 쓰세요. 꽃게·장어·고가 스테이크를 연속 편성해 가격을 넘기지 마세요.",
     "쌀밥은 매 끼니에 암묵적으로 기본 제공되므로 slots나 extras에 절대 출력하지 마세요. 편집 가능한 필수 6칸은 국, 메인1, 메인2, 부찬1, 부찬2, 부찬3입니다.",
-    "매 끼니는 실속 있는 주찬 2개(슬롯 2·7), 실제 국 1개(슬롯 1), 부찬 3개(슬롯 3·4·8)로 구성하세요. 부찬 3개 중 1개는 배추김치·깍두기·겉절이 등 김치류로 하고, 나머지 2개는 서로 다른 채소·조림·볶음·무침류로 하세요. 메인 2개를 김치·나물·장아찌·샐러드·국으로 채우지 마세요. 하나는 육류·생선·해물 중심, 다른 하나는 충분한 양의 별도 육류·생선·해물·두부·달걀 주찬으로 배식하세요. 이미 고정된 수동 셀의 구성을 바꾸지는 마세요.",
-    "필수 6칸 외에 가격과 만족도를 살릴 추가 메뉴를 가능하면 1~3개 extras에 넣으세요. extras는 없어도 되며 그때는 빈 배열로 출력하세요. 후식은 고정 칸이 아니고 필요할 때만 extras에 넣으세요.",
+    "매 끼니는 실속 있는 서로 다른 주찬 2개(슬롯 2·7), 실제 국 1개(슬롯 1), 부찬 3개(슬롯 3·4·8)로 구성하세요. 메인 2개 중 최소 하나는 고기·생선·해물 중심의 확실한 주찬이며 가능하면 둘 다 그렇게 하세요. 김치·나물·장아찌·샐러드·국, 소량 고기 고명만 올린 채소 요리 또는 불분명한 창작 음식은 메인이 아닙니다. 부찬 중 한 개는 김치류를 쓰되 나머지 부찬에 닭강정·달걀말이·두부조림·고기만두 등 추가 주찬을 배치할 수 있습니다. 이미 고정된 수동 셀은 바꾸지 마세요.",
+    "만원 식사의 체감 기준은 메인급 음식이 최소 3가지 보이는 것입니다. 두 메인 외에 별도 고기·생선·해물·달걀·두부·고기만두 중심의 추가 주찬을 부찬 슬롯 3·4 또는 extras에 반드시 넣으세요. 추가 주찬을 부찬에 넣었다면 extras는 빈 배열도 가능합니다. 채소·감자튀김·잡채의 소량 고기 고명·과일·후식·음료를 세 번째 메인으로 세지 마세요. extras는 최대 3개이고 후식은 선택 사항입니다. 사람이 고정해 둔 칸을 삭제·변경해 기준을 맞추지 마세요.",
+    `실제 수정 식단에서 확인된 익숙한 현장 음식명(닫힌 선택 목록 아님): ${
+      JSON.stringify(MANUAL_FAMILIAR_DISHES)
+    }. 낯선 채소·양념을 기존 음식명에 붙이는 변형으로 다양성을 부풀리지 말고 실제 함바·급식 주찬을 골라 조리법과 단백질을 교차하세요.`,
     "공장 급식에는 맥주·소주·막걸리·와인·위스키·하이볼 등 주류 음료를 어떤 slots나 extras에도 절대 넣지 마세요. 논알콜/무알콜 맥주 같은 주류형 음료 및 주류 브랜드도 제외하세요. 와인소스스테이크처럼 술이 조리 재료인 실제 음식은 가능하지만 술 자체를 메뉴로 제공하지 마세요.",
     "하루 4식이 서로 단조롭지 않게 하고 같은 끼니 안에서는 필수 메뉴와 extras를 합쳐 음식명을 절대 중복하지 마세요. 주간 전체는 다양하게 구성하되 육류·채소·양념 같은 식재료는 인접 끼니에 현실적으로 재활용해 발주와 전처리가 가능하게 하세요.",
     "각 생성일 앞뒤 7일의 모든 끼니·모든 음식 칸·extras와 이번 응답의 다른 날짜를 비교하세요. 새 메인과 주찬 extras는 동일한 실제 음식을 앞뒤 7일 안에 반복하지 마세요. 제육볶음/돈육고추장볶음/돼지고기고추장볶음, 돈까스/돈가스 같은 별칭이나 띄어쓰기 변경도 동일 음식입니다. 돼지간장불고기와 제육볶음처럼 간장·고추장 양념이 실제로 다른 음식은 별개입니다. 금지된 이름에 단순히 매콤·수제·특선이라는 말을 붙여 회피하지 마세요.",
@@ -792,6 +806,66 @@ function assertKimchiSide(
   }
 }
 
+function assertPremiumMain(
+  name: string,
+  state: State | undefined,
+  location: string,
+  profile = createPremiumDishProfiler(state),
+): void {
+  if (!profile(name).substantial) {
+    throw new Error(
+      `${location}: 메인 슬롯에는 실속 있는 실제 단백질 중심 주찬이 필요합니다. ${name}는 매뉴얼의 메인급 음식으로 확인되지 않습니다`,
+    );
+  }
+}
+
+function assertGeneratedMealManual(
+  slots: Record<string, string>,
+  extras: string[],
+  fixedSlots: Set<string>,
+  state: State | undefined,
+  location: string,
+  profile: PremiumDishProfiler,
+): void {
+  if (SLOT_INDICES.every((slot) => fixedSlots.has(slot))) return;
+  const violations = menuManualViolations(slots, extras, state, profile).filter(
+    (violation) => {
+      if (fixedSlots.has("2") && violation.startsWith("메인1에는")) {
+        return false;
+      }
+      if (fixedSlots.has("7") && violation.startsWith("메인2에는")) {
+        return false;
+      }
+      if (
+        fixedSlots.has("2") && fixedSlots.has("7") &&
+        (violation.startsWith("메인1·메인2는") ||
+          violation.startsWith("메인1·메인2 중"))
+      ) return false;
+      return true;
+    },
+  );
+  if (violations.length) {
+    throw new Error(
+      `${location}: 식단 작성 매뉴얼 검증 실패 — ${violations.join("; ")}`,
+    );
+  }
+}
+
+function existingMealExtras(
+  state: State,
+  date: string,
+  meal: string,
+): string[] {
+  const { ym, day } = dateCell(date);
+  return Object.entries(state.menus?.[ym] || {}).filter(([key, value]) => {
+    const [cellDay, cellMeal, slot] = key.split("|");
+    return String(Number(cellDay)) === day && cellMeal === meal &&
+      /^\d+$/.test(slot) && Number(slot) > 0 &&
+      !SLOT_INDICES.includes(slot as typeof SLOT_INDICES[number]) &&
+      nonempty(value);
+  }).map(([, value]) => String(value).trim());
+}
+
 /** Across month/year boundaries, include every real dish slot, including extras. */
 export function surroundingMenuCells(
   state: State,
@@ -817,6 +891,18 @@ export function surroundingMenuCells(
 
 /** Compare proposed dishes with originals and one another, preserving fixed cells. */
 export function validateMenuVariety(state: State, plan: MenuPlan): void {
+  // A finished meal can contain hundreds of historical recipes. Memoize only
+  // within this validation call so concurrent/manual recipe edits never inherit
+  // stale classification, while every repeated lookup reuses the same evidence.
+  const profileFor = createPremiumDishProfiler(state);
+  const cookingProfileFor = (dish: string): string | undefined => {
+    const known = mainProfileKey(dish);
+    if (known) return known;
+    const profile = profileFor(dish);
+    return profile.substantial && profile.protein && profile.method
+      ? `${profile.protein}|${profile.method}|${profile.seasoning}`
+      : undefined;
+  };
   type DishCell = {
     key: string;
     date: string;
@@ -835,12 +921,14 @@ export function validateMenuVariety(state: State, plan: MenuPlan): void {
     dish: string,
     proposed: boolean,
   ) => {
-    const profile = dishProfile(dish);
+    const profile = profileFor(dish);
     const kind = profile.kind === "kimchi" || profile.kind === "rice"
       ? profile.kind
       : slot === "1"
       ? "soup"
       : slot === "2" || slot === "7"
+      ? "main"
+      : profile.substantial
       ? "main"
       : ["3", "4", "8"].includes(slot)
       ? "side"
@@ -889,7 +977,9 @@ export function validateMenuVariety(state: State, plan: MenuPlan): void {
         if (!dish || byKey.has(`${day.date}|${meal.meal}|${slot}`)) continue;
         assertMealMenuAllowed(dish);
         if (slot === "2" || slot === "7") {
-          assertSubstantialMain(dish, `${day.date}|${meal.meal}|${slot}`);
+          if (!profileFor(dish).substantial) {
+            assertSubstantialMain(dish, `${day.date}|${meal.meal}|${slot}`);
+          }
         }
         add(day.date, meal.meal, slot, dish, true);
       }
@@ -939,11 +1029,11 @@ export function validateMenuVariety(state: State, plan: MenuPlan): void {
           `${cell.key}: 앞뒤 7일 메인 중복 ${cell.dish} (${duplicate.key}), 별칭이 아닌 다른 메뉴로 교체하세요`,
         );
       }
-      const profile = mainProfileKey(cell.dish);
+      const profile = cookingProfileFor(cell.dish);
       if (profile) {
         const peers = cells.filter((other) =>
           other.kind === "main" && other.date === cell.date &&
-          mainProfileKey(other.dish) === profile
+          cookingProfileFor(other.dish) === profile
         );
         const sameMeal = peers.find((other) =>
           other.key !== cell.key && other.meal === cell.meal
@@ -1000,7 +1090,9 @@ export function parseMenuPlanJson(
   expectedDates: string[],
   expectedMeals: string[],
   fixedCells: Record<string, string> = {},
+  recipeState?: State,
 ): MenuPlan {
+  const profile = createPremiumDishProfiler(recipeState);
   const value = extractJson(text) as { days?: unknown };
   if (!value || !Array.isArray(value.days)) {
     throw new Error("days 배열이 없습니다");
@@ -1074,7 +1166,12 @@ export function parseMenuPlanJson(
         }
         assertMealMenuAllowed(slots[ci]);
         if ((ci === "2" || ci === "7") && fixed === undefined) {
-          assertSubstantialMain(slots[ci], `${date} ${meal} 메인 슬롯 ${ci}`);
+          assertPremiumMain(
+            slots[ci],
+            recipeState,
+            `${date} ${meal} 메인 슬롯 ${ci}`,
+            profile,
+          );
         }
       }
       assertKimchiSide(
@@ -1110,6 +1207,29 @@ export function parseMenuPlanJson(
       if (hasProposedDuplicate(dishes)) {
         throw new Error(
           `${date} ${meal}: 같은 끼니 안에 중복 음식이 있습니다`,
+        );
+      }
+      // A complete manual meal is left alone. For a partly fixed meal, preserve
+      // every fixed main while requiring enough new protein upgrades; a fixed
+      // kimchi or vegetable cell must not disable the premium quality floor.
+      {
+        const fixedExtras = Object.entries(fixedCells).filter(([key]) => {
+          const [cellDate, cellMeal, slot] = key.split("|");
+          return cellDate === date && cellMeal === meal && /^\d+$/.test(slot) &&
+            Number(slot) > 0 &&
+            !SLOT_INDICES.includes(slot as typeof SLOT_INDICES[number]);
+        }).map(([, name]) => name);
+        assertGeneratedMealManual(
+          slots,
+          [...fixedExtras, ...extras],
+          new Set(
+            SLOT_INDICES.filter((ci) =>
+              fixedCells[`${date}|${meal}|${ci}`] !== undefined
+            ),
+          ),
+          recipeState,
+          `${date} ${meal}`,
+          profile,
         );
       }
       // 기존 운영 식단의 닭개장·우동육수도 국 칸의 정상 메뉴다.
@@ -1272,6 +1392,16 @@ export function mergeMenuPlan(
     headcountDates?: string[];
   },
 ): MergeResult {
+  const profile = createPremiumDishProfiler(state);
+  // Safety exclusions cover the whole response before composition errors in
+  // an earlier partly manual meal can mask a prohibited dish in a later meal.
+  for (const day of plan.days) {
+    for (const meal of day.meals) {
+      for (
+        const name of [...Object.values(meal.slots), ...(meal.extras || [])]
+      ) assertMealMenuAllowed(name);
+    }
+  }
   // 파서를 우회한 호출도 전체 후보를 먼저 검사한다. 금지 메뉴가 뒤에 있어도
   // 앞선 날짜의 저장이나 빈 menus/메타 생성 같은 부분 변경을 남기지 않는다.
   for (const dayPlan of plan.days) {
@@ -1297,11 +1427,28 @@ export function mergeMenuPlan(
       for (const name of mealPlan.extras ?? []) assertMealMenuAllowed(name);
       for (const slot of ["2", "7"]) {
         if (!nonempty(state.menus?.[ym]?.[`${day}|${mealPlan.meal}|${slot}`])) {
-          assertSubstantialMain(
+          assertPremiumMain(
             mealPlan.slots[slot],
+            state,
             `${dayPlan.date}|${mealPlan.meal}|${slot}`,
+            profile,
           );
         }
+      }
+      if (
+        SLOT_INDICES.every((slot) => nonempty(effectiveSlots[slot]))
+      ) {
+        assertGeneratedMealManual(
+          effectiveSlots,
+          [
+            ...existingMealExtras(state, dayPlan.date, mealPlan.meal),
+            ...(mealPlan.extras || []),
+          ],
+          fixedSlots,
+          state,
+          `${dayPlan.date} ${mealPlan.meal}`,
+          profile,
+        );
       }
     }
   }

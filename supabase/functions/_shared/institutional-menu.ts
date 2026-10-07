@@ -15,7 +15,9 @@ export type DishProfile = {
 };
 
 export function normalizedDishName(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("ko-KR")
+  // Korean uses default Unicode casing; avoid repeated ICU locale setup while
+  // checking thousands of stored food cells against the surrounding week.
+  return value.normalize("NFKC").toLowerCase()
     .replace(/[\s·ㆍ,()（）]/g, "");
 }
 
@@ -96,6 +98,11 @@ const MAIN_GROUPS: MainGroup[] = [
     "수제돈가스",
     "등심돈까스",
     "등심돈가스",
+    "수제등심돈까스",
+    "돼지등심수제돈까스",
+    "돼지등심돈까스",
+    "돼지안심돈까스",
+    "안심돈까스",
   ],
   ["탕수육", "pork", "fry", "sweet-sour", "돈육탕수육", "돼지고기탕수육"],
   ["돼지갈비찜", "pork", "braise", "soy", "돈육갈비찜", "간장돼지갈비찜"],
@@ -119,6 +126,15 @@ const MAIN_GROUPS: MainGroup[] = [
     "보쌈수육",
   ],
   ["삼겹살구이", "pork", "roast", "plain", "통삼겹오븐구이", "삼겹오븐구이"],
+  [
+    "고추장삼겹살구이",
+    "pork",
+    "roast",
+    "gochujang",
+    "고추장삼겹",
+    "고추장삼겹구이",
+    "고추장삼겹살",
+  ],
   ["돼지고기고추장구이", "pork", "roast", "gochujang", "돈육고추장구이"],
   [
     "소불고기",
@@ -149,6 +165,8 @@ const MAIN_GROUPS: MainGroup[] = [
     "닭고추장볶음",
     "닭고기고추장볶음",
     "매콤닭갈비",
+    "매콤닭갈비볶음",
+    "닭갈비볶음",
     "춘천닭갈비",
   ],
   [
@@ -228,6 +246,8 @@ const MAIN_GROUPS: MainGroup[] = [
     "생선가스",
     "생선커틀릿",
     "흰살생선까스",
+    "수제생선까스",
+    "수제생선가스",
   ],
   [
     "오징어볶음",
@@ -298,6 +318,7 @@ for (
     ["콩나물국", "맑은콩나물국"],
     ["계란국", "달걀국"],
     ["배추김치", "포기김치"],
+    ["위샹로우스", "위샹로우쓰"],
   ]
 ) {
   for (const name of group) {

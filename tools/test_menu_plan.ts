@@ -74,11 +74,17 @@ const MEALS = ["조식", "중식", "석식", "야식"];
 const DISHES: Record<string, string> = {
   "1": "소고기무국",
   "2": "제육볶음",
-  "3": "감자조림",
+  "3": "계란말이",
   "4": "콩나물무침",
   "7": "고등어구이",
-  "8": "어묵볶음",
+  "8": "배추김치",
 };
+const MAIN_TRIOS = [
+  ["제육볶음", "고등어구이", "계란말이"],
+  ["소불고기", "생선까스", "두부조림"],
+  ["닭갈비", "삼치조림", "군만두"],
+  ["돼지갈비찜", "오징어튀김", "두부고추장조림"],
+];
 
 function fixturePlan(dates: string[], meals = MEALS): MenuPlan {
   return {
@@ -89,7 +95,16 @@ function fixturePlan(dates: string[], meals = MEALS): MenuPlan {
         slots: Object.fromEntries(
           SLOT_INDICES.map((
             ci,
-          ) => [ci, `${DISHES[ci]} ${dateIndex + 1}-${mealIndex + 1}`]),
+          ) => [
+            ci,
+            `${
+              ({
+                "2": MAIN_TRIOS[mealIndex][0],
+                "7": MAIN_TRIOS[mealIndex][1],
+                "3": MAIN_TRIOS[mealIndex][2],
+              } as Record<string, string>)[ci] || DISHES[ci]
+            } ${dateIndex + 1}-${mealIndex + 1}`,
+          ]),
         ),
       })),
     })),
@@ -502,6 +517,9 @@ equal(
 );
 
 const concurrentPlan = fixturePlan(["2026-10-15", "2026-10-16"]);
+concurrentPlan.days.forEach((day) =>
+  day.meals[0].extras = [`닭강정-${day.date}`]
+);
 const concurrentManual: State = {
   menus: {
     "2026-10": {

@@ -301,12 +301,12 @@ function llmResponse(input: LlmInput, badSoup = false): Response {
     "7": "생선구이",
     "3": "감자조림",
     "4": "콩나물무침",
-    "8": "어묵볶음",
+    "8": "배추김치",
   };
   const plan = {
     days: [{
       date: input.date,
-      meals: MEALS.map((meal) => ({
+      meals: MEALS.map((meal, index) => ({
         meal,
         slots: Object.fromEntries(
           SLOT_INDICES.map((
@@ -314,7 +314,15 @@ function llmResponse(input: LlmInput, badSoup = false): Response {
           ) => [
             slot,
             fixed[`${input.date}|${meal}|${slot}`] ??
-              `${input.date}${meal}${dishes[slot]}`,
+              `${input.date}${meal}${
+                ({
+                  "2": ["제육볶음", "소불고기", "닭갈비", "돼지갈비찜"][index],
+                  "7":
+                    ["고등어구이", "생선까스", "삼치조림", "오징어튀김"][index],
+                  "3":
+                    ["계란말이", "두부조림", "군만두", "두부고추장조림"][index],
+                } as Record<string, string>)[slot] || dishes[slot]
+              }`,
           ]),
         ),
         extras: [],

@@ -536,6 +536,7 @@ Deno.serve(async (request: Request) => {
                     dates,
                     meals,
                     fixedCells,
+                    generationState,
                   );
                   validateMenuVariety(generationState, candidate);
                   mergeMenuPlan(generationState, candidate, {
