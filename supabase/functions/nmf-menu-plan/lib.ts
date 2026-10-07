@@ -641,6 +641,7 @@ export type RecipeCandidateDishes = {
 export function recipeCandidateDishes(state: State): RecipeCandidateDishes {
   const recipes = Array.isArray(state.recipes) ? state.recipes : [];
   const methods = (state.methods || {}) as Record<string, unknown>;
+  const unresolved = (state.recipeAsk || {}) as Record<string, unknown>;
   const meta = (state.recipeMeta || {}) as Record<
     string,
     { cookingProfile?: string }
@@ -649,6 +650,7 @@ export function recipeCandidateDishes(state: State): RecipeCandidateDishes {
   for (const row of recipes) {
     if (!row || typeof row !== "object") continue;
     const name = String(row.menu || "").trim();
+    if (Object.hasOwn(unresolved, name)) continue;
     const comp = String(row.comp || "").trim();
     if (
       !name || !String(row.item || "").trim() || !(Number(row.qty) > 0) ||

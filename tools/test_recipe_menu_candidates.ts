@@ -15,6 +15,7 @@ const state = {
     { menu: "조리법없는찬", comp: "주찬", item: "닭고기", qty: 100 },
     { menu: "쌀밥", comp: "밥", item: "쌀", qty: 100 },
     { menu: "맥주", comp: "주찬", item: "맥주", qty: 300 },
+    { menu: "확인필요한메뉴", comp: "주찬", item: "돼지고기", qty: 120 },
   ],
   methods: {
     새로운도미구이: "100명 기준 분할 조리 작업서",
@@ -25,8 +26,10 @@ const state = {
     미완성찬: "이름만 존재",
     쌀밥: "쌀밥 조리법",
     맥주: "주류",
+    확인필요한메뉴: "자동으로 작성된 임시 조리법",
   },
   recipeMeta: { 새로운도미구이: { cookingProfile: "institutional-v1" } },
+  recipeAsk: { 확인필요한메뉴: { reason: "음식명 확인이 필요함" } },
 };
 const before = JSON.stringify(state);
 const candidates = recipeCandidateDishes(state);
