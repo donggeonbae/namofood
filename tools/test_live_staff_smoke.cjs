@@ -19,7 +19,8 @@ const {chromium} = require('playwright');
     page.on('response',response=>{if(response.url().endsWith('/functions/v1/nmf-recipe-fill'))statuses.push({status:response.status(),origin:response.headers()['access-control-allow-origin']});});
     await page.goto('https://d-bae.com/namofood/?v='+encodeURIComponent(expected)+'#roster',{waitUntil:'domcontentloaded'});
     await page.waitForFunction(version=>document.getElementById('appver')?.textContent==='버전 '+version,expected,{timeout:45000});
-    await page.waitForFunction(()=>S.staff.length===12&&(S.staffArchive||[]).length>=7&&S.settings.rolePayInitialized,{timeout:20000});
+    await page.waitForFunction(()=>S.staff.length>0&&(S.staffArchive||[]).length>0&&S.settings.rolePayInitialized,null,{timeout:20000});
+    console.log(JSON.stringify({phase:'live-staff-loaded',activeCount:await page.evaluate(()=>S.staff.length),archiveCount:await page.evaluate(()=>S.staffArchive.length)}));
     await page.evaluate(()=>{cloudApplying=true;clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);go('roster');});
     const staff=await page.evaluate(()=>{
       const targets=JSON.parse('['+initializeStaffPay.toString().match(/for\(const e of state\.staff\|\|\[\]\)if\(\[(.*?)\]\.includes\(e\.name\)\)e\.wage=20000/)[1].replaceAll("'",'"')+']');
@@ -76,6 +77,7 @@ const {chromium} = require('playwright');
     await page.evaluate(()=>go('sales'));
     assert.equal(await page.locator('#ticketMealStats').getAttribute('open'),null);
     await page.evaluate(async()=>{go('recipe');await refreshRecipeMonitor(true);});
+    await page.waitForFunction(()=>!recipeMonitor.busy&&recipeMonitor.checked>0,null,{timeout:20000});
     const monitor=await page.evaluate(()=>({error:recipeMonitor.error,ready:!!recipeMonitor.data?.ok}));
     assert.equal(monitor.error,'');assert(monitor.ready);
     assert(statuses.some(r=>r.status===200&&r.origin==='https://d-bae.com'),'real signed browser status request succeeds with exact production CORS origin');

@@ -176,6 +176,7 @@ const {chromium} = require('playwright');
     await page.evaluate(()=>{go('recipe');recipeSetIngredient('고기');});
     await page.screenshot({path:'/tmp/nmf-live-recipe-browse.png',fullPage:true});
     await page.evaluate(async()=>{await refreshRecipeMonitor(true);});
+    await page.waitForFunction(()=>!recipeMonitor.busy&&recipeMonitor.checked>0,null,{timeout:20000});
     const status=await page.evaluate(()=>({error:recipeMonitor.error,ready:!!recipeMonitor.data?.ok}));
     assert.equal(status.error,'');assert(status.ready);
     await page.waitForTimeout(9000);
