@@ -83,6 +83,7 @@ const aiReply = (day, model = 'mock-ai-provider') => ({ok: true, date: day, sour
     assert.equal(requests.length, 2); assert.notEqual(requests.at(-1).nonce, firstNonce); assert.equal(await page.evaluate(day => menuRecommendCached(day).model, date), 'mock-ai-refreshed');
     assert.deepEqual(await snapshot(), before, 'a replacement cache remains isolated');
     await page.evaluate(() => openPicker(12, '중식', 2));
+    assert.equal(await page.locator('#pk-recommendations > summary > span').first().evaluate(el=>el.firstChild.textContent), '뭐 할지 모르겠다면? 동건이의 추천!', 'picker uses the requested personal recommendation title');
     assert.equal(await page.locator('#pk-recommendations').evaluate(element => element.tagName), 'DETAILS', 'the picker AI recommendations are a native expandable section');
     assert.equal(await page.locator('#pk-recommendations').evaluate(element => element.open), false, 'a fresh meal picker starts with AI recommendations collapsed');
     await page.waitForFunction(() => !menuRecommendPending.size);

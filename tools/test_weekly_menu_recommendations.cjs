@@ -150,6 +150,7 @@ const reply = day => ({ok: true, date: day, source: 'ai', serverStored: true, st
     assert.deepEqual(await snapshot(), before, 'recommendation storage quota errors never alter main app data');
     for (const ci of slotOrder) {
       await page.evaluate(ci => openPicker(1, '중식', +ci), ci);
+      assert.equal(await page.locator('#pk-recommendations > summary > span').first().evaluate(el=>el.firstChild.textContent), '뭐 할지 모르겠다면? 동건이의 추천!', 'every slot uses the requested personal recommendation title');
       assert.equal(await page.locator('#pk-recommendations').evaluate(element => element.tagName), 'DETAILS', 'each picker uses a native expandable AI recommendation section');
       assert.equal(await page.locator('#pk-recommendations').evaluate(element => element.open), false, 'each fresh picker starts collapsed, independently of earlier pickers');
       assert.equal(await page.locator('#pk-recommend-content').isVisible(), false);

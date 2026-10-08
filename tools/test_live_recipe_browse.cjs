@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-4-server-recommend';
+  const version=process.env.NMF_EXPECTED_VER||'1009-5-donggeon-recommend';
   const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
@@ -138,6 +138,7 @@ const {chromium} = require('playwright');
       assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'real AI week preparation cannot change stored menus, headcounts or other state');
       for(const ci of [1,2,7,8,3,4]){
         await page.evaluate(ci=>{recipeDraft.date=menuRecommend.date;openDraftPicker(ci);},ci);
+        assert.equal(await page.locator('#pk-recommendations > summary > span').first().evaluate(el=>el.firstChild.textContent),'뭐 할지 모르겠다면? 동건이의 추천!');
         assert.equal(await page.locator('#pk-recommendations').evaluate(el=>el.open),false,'fresh live picker defaults collapsed');
         await page.locator('#pk-recommendations > summary').click();
         assert.equal(await page.locator('#pk-recommendations button[data-recommend-name]').count(),3,'live draft slot '+ci+' exposes three compatible candidates');
