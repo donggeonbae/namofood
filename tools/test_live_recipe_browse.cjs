@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-7-menu-staff';
+  const version=process.env.NMF_EXPECTED_VER||'1009-8-archive-delete';
   const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');

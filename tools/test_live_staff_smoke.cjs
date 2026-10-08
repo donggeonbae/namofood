@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 (async()=>{
-  const expected=process.env.NMF_EXPECTED_VER||'1009-7-menu-staff';
+  const expected=process.env.NMF_EXPECTED_VER||'1009-8-archive-delete';
   const password=process.env.NMF_PW;if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
@@ -39,12 +39,19 @@ const {chromium} = require('playwright');
     const archiveButton=page.locator('[data-staff-archive-open]').filter({hasText:/.+/}).first();
     await archiveButton.focus();await archiveButton.press('Enter');
     const archiveNavigation=await page.evaluate(()=>{
-      const input=document.activeElement,id=input?.dataset.staffArchiveName,index=(S.staffArchive||[]).findIndex(e=>e.id===id);
+      const input=document.activeElement,id=input?.dataset.staffArchiveName,index=staffArchiveDisplayRows().findIndex(e=>e.id===id);
       return {open:document.getElementById('staffArchive').open,filter:staffArchiveSearch,page:staffArchivePage,expectedPage:Math.floor(index/10)+1,focused:!!id,nameCorrect:input?.value===findStaff(id)?.name,editableInputs:document.querySelectorAll('[data-staff-archive-name]').length};
     });
     assert(archiveNavigation.open&&archiveNavigation.focused&&archiveNavigation.nameCorrect,'payroll name opens the correct editable archived employee');
     assert.equal(archiveNavigation.filter,'');assert.equal(archiveNavigation.page,archiveNavigation.expectedPage);assert(archiveNavigation.editableInputs>0&&archiveNavigation.editableInputs<=10);
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),archiveUiState,'archive navigation, search, focus and page selection cannot mutate production data');
+    const visibleDeletions=await page.evaluate(()=>Array.from(document.querySelectorAll('[data-staff-archive-name]')).filter(el=>isStaffArchiveListed(el.dataset.staffArchiveName)).length);
+    assert.equal(await page.locator('[data-staff-archive-delete]').count(),visibleDeletions,'each normally listed archive row has its own Delete button');
+    assert(visibleDeletions>0,'the production archive contains a listed row for the cancel-only Delete check');
+    const dialogReady=page.waitForEvent('dialog',{timeout:5000}),deletePress=page.locator('[data-staff-archive-delete]').first().press('Enter');
+    const dialog=await dialogReady;assert.equal(dialog.type(),'confirm');assert.match(dialog.message(),/보관된 명단에서 삭제/);assert.match(dialog.message(),/근무시간·인건비/);
+    await dialog.dismiss();await deletePress;
+    assert.equal(await page.evaluate(()=>JSON.stringify(S)),archiveUiState,'canceling Delete cannot modify any real employee, shift or payroll');
     await page.screenshot({path:'/tmp/nmf-live-staff-archive-edit.png',fullPage:true});
     await page.locator('#staffArchive summary').click();
     const directoryWidths=[];
@@ -84,6 +91,6 @@ const {chromium} = require('playwright');
     await page.waitForTimeout(9000);
     assert.equal(documents,1,'new deployed page must not reload itself');
     assert.equal(await page.locator('#newver').count(),0);
-    console.log(JSON.stringify({version:expected,staffChecks:staff,archiveNavigation,directoryWidths,weeklySelectionCanceledWithoutChanges:true,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
+    console.log(JSON.stringify({version:expected,staffChecks:staff,archiveNavigation,archiveDeleteButtons:visibleDeletions,archiveDeleteCanceledWithoutChanges:true,directoryWidths,weeklySelectionCanceledWithoutChanges:true,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
   }finally{await browser.close();}
 })().catch(error=>{console.error(error.message);process.exit(1);});
