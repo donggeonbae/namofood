@@ -1,12 +1,15 @@
 // Actual nmf-menu-recommend HTTP handler, isolated database/runtime.
 // Run: deno run -A tools/test_menu_recommend.ts
 import { encryptText } from "../supabase/functions/nmf-recipe-fill/lib.ts";
+import { ModelFallbackError } from "../supabase/functions/nmf-menu-plan/lib.ts";
 import {
   buildRecommendationInput,
   buildRecommendationPrompt,
   type MenuRecommendState,
   parseRecommendationOpenCodeResponse,
   recipeFoodProfile,
+  type RecommendationModelOptions,
+  runRecommendationModel,
   validateRecommendationAnswer,
 } from "../supabase/functions/nmf-menu-recommend/lib.ts";
 
@@ -282,6 +285,23 @@ function messagesResponse(
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }
+async function expectedModelFailure(
+  request: Promise<unknown>,
+  label: string,
+): Promise<ModelFallbackError> {
+  try {
+    await request;
+  } catch (error) {
+    assert(
+      error instanceof ModelFallbackError,
+      `${label}: failure has attempts`,
+    );
+    return error;
+  }
+  throw new Error(
+    `${label}: invalid output must not become AI recommendations`,
+  );
+}
 
 try {
   for (const key of envKeys) Deno.env.delete(key);
@@ -506,6 +526,263 @@ try {
   equal(input.expectedCounts["3"], 3, "side slot 3 has full count");
   equal(input.expectedCounts["4"], 3, "side slot 4 has full count");
 
+  const modelOptions: Omit<RecommendationModelOptions, "fetcher"> = {
+    apiKey: "offline-opencode-key",
+    baseUrl: "https://offline-opencode.invalid/v1",
+    primaryModel: "primary-bad",
+    fallbackModel: "minimax-m3",
+    timeoutMs: 45_000,
+    maxTokens: 8192,
+  };
+  const missingSide = { ...providerSuccessSlots, "4": [] };
+  const correctionCalls: Array<{ model: string; prompt: string }> = [];
+  const corrected = await runRecommendationModel(input, {
+    ...modelOptions,
+    fetcher: async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      correctionCalls.push({
+        model: body.model,
+        prompt: body.messages[0].content,
+      });
+      if (correctionCalls.length === 1) {
+        throw new DOMException("primary timeout", "TimeoutError");
+      }
+      return messagesResponse(
+        correctionCalls.length === 2 ? missingSide : providerSuccessSlots,
+      );
+    },
+  });
+  equal(
+    correctionCalls.length,
+    3,
+    "semantic fallback failure gets one correction",
+  );
+  equal(
+    correctionCalls.map((call) => call.model).join(","),
+    "primary-bad,minimax-m3,minimax-m3",
+    "correction repeats only the final fallback after normal model order",
+  );
+  assert(
+    correctionCalls[2].prompt.includes(
+      "부찬2(야채) 추천 수가 0개입니다. 정확히 3개여야 합니다",
+    ),
+    "correction prompt carries the exact validation failure",
+  );
+  equal(
+    corrected.source,
+    "ai",
+    "corrected data comes from actual model output",
+  );
+  equal(corrected.model, "minimax-m3", "correction reports the fallback model");
+  equal(corrected.fallbackUsed, true, "correction remains fallback provenance");
+  equal(
+    corrected.validatedCount,
+    18,
+    "correction still validates exactly eighteen",
+  );
+  equal(
+    corrected.attempts.map((attempt) => attempt.ok).join(","),
+    "false,false,true",
+    "all three attempt outcomes are retained",
+  );
+  equal(
+    Object.values(corrected.slots).flat().filter((item) =>
+      item.name === "제육볶음"
+    )
+      .length,
+    0,
+    "correction cannot reintroduce excluded nearby dishes",
+  );
+  let correctionFailures = 0;
+  const invalidAgain = await expectedModelFailure(
+    runRecommendationModel(input, {
+      ...modelOptions,
+      fetcher: async () => {
+        correctionFailures++;
+        if (correctionFailures === 1) {
+          throw new DOMException("primary timeout", "TimeoutError");
+        }
+        return messagesResponse(missingSide);
+      },
+    }),
+    "invalid correction",
+  );
+  equal(
+    correctionFailures,
+    3,
+    "an invalid correction cannot start another retry",
+  );
+  equal(
+    invalidAgain.attempts.length,
+    3,
+    "invalid correction keeps all diagnostics",
+  );
+  assert(
+    invalidAgain.attempts.every((attempt) => !attempt.ok),
+    "invalid correction never records success",
+  );
+  for (const status of [401, 429, 503]) {
+    let calls = 0;
+    const failure = await expectedModelFailure(
+      runRecommendationModel(input, {
+        ...modelOptions,
+        fetcher: async () => {
+          calls++;
+          return new Response("provider unavailable", { status });
+        },
+      }),
+      `HTTP ${status}`,
+    );
+    equal(calls, 2, `HTTP ${status} never gets a corrective third request`);
+    equal(failure.attempts.length, 2, `HTTP ${status} retains normal attempts`);
+  }
+  let networkCalls = 0;
+  await expectedModelFailure(
+    runRecommendationModel(input, {
+      ...modelOptions,
+      fetcher: async () => {
+        networkCalls++;
+        throw new TypeError("failed to fetch");
+      },
+    }),
+    "network failure",
+  );
+  equal(networkCalls, 2, "pure transport failure does not get a third request");
+  let timeoutCalls = 0;
+  const timedOut = await expectedModelFailure(
+    runRecommendationModel(input, {
+      ...modelOptions,
+      fetcher: async () => {
+        timeoutCalls++;
+        throw new DOMException("provider timeout", "TimeoutError");
+      },
+    }),
+    "both model timeouts",
+  );
+  equal(timeoutCalls, 2, "pure timeout failure does not get a third request");
+  equal(
+    timedOut.attempts.length,
+    2,
+    "timeouts retain normal attempt diagnostics",
+  );
+  for (const truncatedJson of [false, true]) {
+    let calls = 0;
+    const failure = await expectedModelFailure(
+      runRecommendationModel(input, {
+        ...modelOptions,
+        fetcher: async () => {
+          calls++;
+          if (calls === 1) return chatResponse(missingSide);
+          return new Response(
+            JSON.stringify({
+              stop_reason: truncatedJson ? "end_turn" : "max_tokens",
+              content: [{ type: "text", text: truncatedJson ? "{" : "{}" }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        },
+      }),
+      truncatedJson ? "truncated JSON" : "provider truncation",
+    );
+    equal(
+      calls,
+      2,
+      "final truncation suppresses even earlier validation failures",
+    );
+    equal(failure.attempts.length, 2, "truncation keeps only normal attempts");
+  }
+  const abortController = new AbortController();
+  let abortCalls = 0;
+  const aborted = await expectedModelFailure(
+    runRecommendationModel(input, {
+      ...modelOptions,
+      signal: abortController.signal,
+      fetcher: async () => {
+        abortCalls++;
+        if (abortCalls === 1) {
+          throw new DOMException("primary timeout", "TimeoutError");
+        }
+        abortController.abort();
+        return messagesResponse(missingSide);
+      },
+    }),
+    "aborted correction",
+  );
+  equal(abortCalls, 2, "an aborted request never starts a correction");
+  equal(
+    aborted.attempts.length,
+    2,
+    "abort preserves existing attempt diagnostics",
+  );
+  const nativeNow = Date.now, nativeTimeout = AbortSignal.timeout;
+  try {
+    let now = 1000;
+    Date.now = () => now;
+    const timeouts: number[] = [];
+    AbortSignal.timeout = (delay: number) => {
+      timeouts.push(delay);
+      return nativeTimeout(delay);
+    };
+    let calls = 0;
+    const withinBudget = await runRecommendationModel(input, {
+      ...modelOptions,
+      fetcher: async () => {
+        calls++;
+        if (calls === 1) {
+          now += 45_000;
+          throw new DOMException("primary timeout", "TimeoutError");
+        }
+        if (calls === 2) {
+          now += 45_000;
+          return messagesResponse(missingSide);
+        }
+        now += 19_999;
+        return messagesResponse();
+      },
+    });
+    equal(
+      withinBudget.validatedCount,
+      18,
+      "a correction within budget succeeds",
+    );
+    equal(
+      withinBudget.attempts.map((attempt) => attempt.elapsedMs).join(","),
+      "45000,45000,19999",
+      "correction diagnostics preserve each attempt's actual elapsed time",
+    );
+    equal(
+      timeouts.join(","),
+      "45000,45000,20000",
+      "per-call timeout is limited to the remaining 110-second total budget",
+    );
+    now = 1000;
+    timeouts.length = 0;
+    calls = 0;
+    const expired = await expectedModelFailure(
+      runRecommendationModel(input, {
+        ...modelOptions,
+        fetcher: async () => {
+          calls++;
+          now += 55_000;
+          if (calls === 1) {
+            throw new DOMException("primary timeout", "TimeoutError");
+          }
+          return messagesResponse(missingSide);
+        },
+      }),
+      "expired model budget",
+    );
+    equal(calls, 2, "expired total budget prevents a third provider call");
+    equal(
+      expired.attempts.length,
+      2,
+      "expired budget retains normal diagnostics",
+    );
+  } finally {
+    Date.now = nativeNow;
+    AbortSignal.timeout = nativeTimeout;
+  }
+
   const encrypted = await encryptText(APP_PASSWORD, JSON.stringify(state));
   globals.__menuRecommendDb = {
     async readState(table: string, room: string) {
@@ -705,7 +982,21 @@ try {
       !String(failedBody.error || "").includes("모든 메뉴 생성 모델 실패"),
     "recommendation failure copy cannot look like retired menu auto-generation",
   );
-  equal(scenarioCalls, 2, "failed run tried primary and fallback");
+  equal(
+    scenarioCalls,
+    3,
+    "failed run tried primary, fallback, and one correction",
+  );
+  const failedAttempts = failedBody.attempts as Array<{ ok: boolean }>;
+  equal(
+    failedAttempts.length,
+    3,
+    "failed HTTP result retains all three attempts",
+  );
+  assert(
+    failedAttempts.every((attempt) => !attempt.ok),
+    "failed corrective reply is not recorded as success",
+  );
 
   scenarioCalls = 0;
   globalThis.fetch = async (url) => {
@@ -824,7 +1115,7 @@ try {
   );
 
   console.log(
-    "MENU_RECOMMEND_OK / PROMPT_EXAMPLE_COUNTS_11_CASES / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / READ_ONLY / CACHE / FAILURE_RETRY / INFLIGHT_COALESCE / BOUNDED_CACHE",
+    "MENU_RECOMMEND_OK / PROMPT_EXAMPLE_COUNTS_11_CASES / BOUNDED_SEMANTIC_CORRECTION / MODEL_DEADLINE_110S / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / READ_ONLY / CACHE / FAILURE_RETRY / INFLIGHT_COALESCE / BOUNDED_CACHE",
   );
 } finally {
   globalThis.fetch = nativeFetch;

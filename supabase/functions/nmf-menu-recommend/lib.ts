@@ -8,6 +8,7 @@ import {
 import {
   type ModelAttemptDiagnostic,
   ModelFallbackError,
+  type ModelFallbackResult,
   type OpenCodeProtocol,
   runModelFallback,
 } from "../nmf-menu-plan/lib.ts";
@@ -83,6 +84,7 @@ const SLOT_GROUPS: Record<SlotId, CandidateSlotGroup> = {
   "4": "야채",
 };
 const PROMPT_POOL_LIMIT = 36;
+const MODEL_TOTAL_TIMEOUT_MS = 110_000;
 
 const RECIPE_METHODS = [
   "튀김",
@@ -1059,18 +1061,93 @@ export async function runRecommendationModel(
   options: RecommendationModelOptions,
 ): Promise<RecommendationResult> {
   if (!options.apiKey) throw new Error("OPENCODE_API_KEY 가 없습니다");
-  const result = await runModelFallback(
-    [options.primaryModel, options.fallbackModel],
-    async (model, protocol, previousFailure) => {
-      const answer = await callOpenCode(
-        buildRecommendationPrompt(input, previousFailure),
-        model,
-        protocol,
-        options,
+  const deadline = Date.now() + MODEL_TOTAL_TIMEOUT_MS;
+  const finalAttempt: {
+    validation?: { model: string; protocol: OpenCodeProtocol; error: string };
+  } = {};
+  const boundedCall = async (
+    prompt: string,
+    model: string,
+    protocol: OpenCodeProtocol,
+  ): Promise<string> => {
+    options.signal?.throwIfAborted();
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new DOMException(
+        "AI 추천 전체 응답 시간이 초과됐습니다",
+        "TimeoutError",
       );
-      return validateRecommendationAnswer(answer, input);
-    },
-  );
+    }
+    const answer = await callOpenCode(prompt, model, protocol, {
+      ...options,
+      timeoutMs: Math.min(options.timeoutMs, remaining),
+    });
+    options.signal?.throwIfAborted();
+    if (Date.now() >= deadline) {
+      throw new DOMException(
+        "AI 추천 전체 응답 시간이 초과됐습니다",
+        "TimeoutError",
+      );
+    }
+    return answer;
+  };
+  let result: ModelFallbackResult<RecommendationSlots>;
+  try {
+    result = await runModelFallback(
+      [options.primaryModel, options.fallbackModel],
+      async (model, protocol, previousFailure) => {
+        delete finalAttempt.validation;
+        const answer = await boundedCall(
+          buildRecommendationPrompt(input, previousFailure),
+          model,
+          protocol,
+        );
+        try {
+          return validateRecommendationAnswer(answer, input);
+        } catch (error) {
+          if (error instanceof RecommendationValidationError) {
+            finalAttempt.validation = { model, protocol, error: error.message };
+          }
+          throw error;
+        }
+      },
+    );
+  } catch (error) {
+    const invalid = finalAttempt.validation;
+    if (
+      !(error instanceof ModelFallbackError) || error.attempts.length !== 2 ||
+      !invalid || invalid.model !== options.fallbackModel.trim() ||
+      options.signal?.aborted || Date.now() >= deadline
+    ) throw error;
+    const attempts = error.attempts.map((attempt) => ({ ...attempt }));
+    const started = Date.now();
+    try {
+      const answer = await boundedCall(
+        buildRecommendationPrompt(input, invalid.error),
+        invalid.model,
+        invalid.protocol,
+      );
+      const value = validateRecommendationAnswer(answer, input);
+      attempts.push({
+        model: invalid.model,
+        protocol: invalid.protocol,
+        ok: true,
+        elapsedMs: Math.max(0, Date.now() - started),
+      });
+      result = { value, model: invalid.model, fallbackUsed: true, attempts };
+    } catch (correctionError) {
+      attempts.push({
+        model: invalid.model,
+        protocol: invalid.protocol,
+        ok: false,
+        elapsedMs: Math.max(0, Date.now() - started),
+        error: (correctionError instanceof Error
+          ? correctionError.message
+          : String(correctionError)).replace(/\s+/g, " ").trim().slice(0, 400),
+      });
+      throw new ModelFallbackError(attempts);
+    }
+  }
   const validatedCount = SLOT_IDS.reduce(
     (sum, slot) => sum + result.value[slot].length,
     0,
