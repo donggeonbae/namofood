@@ -4,7 +4,7 @@ const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1008-2-manual-menu';
+  const version=process.env.NMF_EXPECTED_VER||'1008-3-manual-menu';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
@@ -81,6 +81,7 @@ const {chromium} = require('playwright');
     assert.equal(await page.locator('#main .ai-menu').count(),0,'meal editing contains no AI menu badges');
     assert.equal(await page.locator('#main').getByText(/AI기반|AI 기반|AI 식단/).count(),0,'meal editing contains no AI menu update controls');
     assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available');
+    assert.doesNotMatch(await page.locator('#recipe-monitor').innerText(),/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'visiting meal editing does not migrate legacy food values or headcounts');
     await page.evaluate(()=>go('recipe'));
     await page.screenshot({path:'/tmp/nmf-live-recipe-browse.png',fullPage:true});

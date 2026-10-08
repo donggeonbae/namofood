@@ -51,6 +51,9 @@ const {chromium}=require('playwright');
       await page.evaluate(mode=>{S.view={range:'day',mode,ing:false};render();},mode);
       assert.equal((await page.locator('#menu-print-sheet').innerText()).includes('🤖'),false,'menu print shows no AI badge in either mode');
     }
+    const monitorText=await page.locator('#recipe-monitor').innerText();
+    assert.doesNotMatch(monitorText,/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
+    assert.match(monitorText,/새 메뉴 레시피는.*즉시|새 메뉴 레시피는 저장 직후/,'the separate immediate recipe workflow remains documented');
     const original=await page.evaluate(()=>({state:JSON.stringify(S),stored:localStorage.getItem(KEY)}));
     // Rendering an old kimchi value in the newly-labelled main slot is not a migration.
     assert.equal(await page.evaluate(()=>menuGet(12,'중식',8)),'배추김치');
