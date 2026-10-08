@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.nmf-menu-plan]
 verify_jwt = false
+
+[functions.nmf-menu-recommend]
+verify_jwt = false

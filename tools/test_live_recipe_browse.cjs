@@ -1,16 +1,18 @@
 // Read-only live checks. Never submit drafts, generate AI recipes, or save state.
+// NMF_VERIFY_RECOMMEND=1 opts into one read-only AI recommendation request.
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-1-meat-methods';
+  const version=process.env.NMF_EXPECTED_VER||'1009-2-daily-recommend';
+  const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
     const page=await browser.newPage({viewport:{width:1280,height:900}});
-    const errors=[];let blockedWrites=0,documents=0;
+    const errors=[];let blockedWrites=0,documents=0,recommendRequests=0;
     page.on('pageerror',e=>errors.push(e.message));
     await page.addInitScript(pw=>sessionStorage.setItem('nmf_session_pw',pw),password);
     await page.route('**/*',route=>{
@@ -19,6 +21,13 @@ const {chromium} = require('playwright');
       if(['GET','HEAD','OPTIONS'].includes(req.method()))return route.continue();
       let action;try{action=req.postDataJSON()?.action;}catch{}
       if(req.method()==='POST'&&req.url().endsWith('/functions/v1/nmf-recipe-fill')&&action==='status')return route.continue();
+      if(verifyRecommend&&req.method()==='POST'&&req.url().endsWith('/functions/v1/nmf-menu-recommend')){
+        const body=req.postDataJSON(),headers=req.headers();
+        assert.deepEqual(Object.keys(body).sort(),['date','nonce']);
+        assert.match(body.date,/^\d{4}-\d{2}-\d{2}$/);assert.match(body.nonce,/^[A-Za-z0-9_-]{1,64}$/);
+        assert.match(headers['x-nmf-time'],/^\d{13}$/);assert.match(headers['x-nmf-signature'],/^[a-f0-9]{64}$/);
+        recommendRequests++;return route.continue();
+      }
       blockedWrites++;return route.abort();
     });
     await page.goto('https://d-bae.com/namofood/?v='+encodeURIComponent(version)+'#recipe',{waitUntil:'domcontentloaded'});
@@ -98,6 +107,30 @@ const {chromium} = require('playwright');
     assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available');
     assert.doesNotMatch(await page.locator('#recipe-monitor').innerText(),/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'visiting meal editing does not migrate legacy food values or headcounts');
+    let recommendation=null;
+    if(verifyRecommend){
+      await page.evaluate(()=>{go('menu');menuRecommendDate(todayStr());});
+      const result=await page.evaluate(async()=>{
+        const date=menuRecommend.date,data=await menuRecommendLoad(date);
+        if(!data)throw Error(menuRecommend.error||'AI recommendation failed');
+        const slots=menuRecommendCandidates(data,date);
+        return {date,source:data.source,model:data.model,counts:Object.fromEntries(SLOT_ORDER.map(ci=>[ci,(slots[ci]||[]).length])),reasonCount:Object.values(slots).flat().filter(x=>x.reason).length,excludedCount:data.excludedCount,aliases:Object.keys(data.aliases||{}).length};
+      });
+      assert.equal(result.source,'ai');assert(result.model);
+      assert.deepEqual(result.counts,{'1':3,'2':3,'7':3,'8':3,'3':3,'4':3},'all six live slot groups contain three compatible recommendations');
+      assert.equal(result.reasonCount,18);assert(result.aliases>0);
+      assert.equal(await page.locator('#menu-recommendations button[data-recommend-name]').count(),18);
+      await page.evaluate(async()=>{await menuRecommendLoad(menuRecommend.date);});assert.equal(recommendRequests,1,'same-date display uses the session cache');
+      assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'a real AI request cannot change stored menus, headcounts or other state');
+      for(const ci of [1,2,7,8,3,4]){
+        await page.evaluate(ci=>{recipeDraft.date=menuRecommend.date;openDraftPicker(ci);},ci);
+        assert.equal(await page.locator('#pk-recommendations button[data-recommend-name]').count(),3,'live draft slot '+ci+' exposes three compatible candidates');
+        await page.evaluate(()=>closePicker());
+      }
+      await page.emulateMedia({media:'print'});assert.equal(await page.locator('#menu-recommendations').evaluate(el=>getComputedStyle(el).display),'none');await page.emulateMedia({media:'screen'});
+      await page.screenshot({path:'/tmp/nmf-live-daily-recommend.png',fullPage:true});
+      recommendation={...result,requests:recommendRequests,stateUnchanged:true,printHidden:true};
+    }
     await page.evaluate(()=>{go('recipe');recipeSetIngredient('고기');});
     await page.screenshot({path:'/tmp/nmf-live-recipe-browse.png',fullPage:true});
     await page.evaluate(async()=>{await refreshRecipeMonitor(true);});
@@ -105,6 +138,6 @@ const {chromium} = require('playwright');
     assert.equal(status.error,'');assert(status.ready);
     await page.waitForTimeout(9000);
     assert.equal(documents,1);assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({version,...evidence,meatMethods,meatClassification,widths,status,ingredientFirst:true,meatSpeciesCollapsed:true,thirdMainPicker:true,draftPreservedState:true,productionWrites:0,blockedWrites,documents}));
+    console.log(JSON.stringify({version,...evidence,meatMethods,meatClassification,widths,status,recommendation,ingredientFirst:true,meatSpeciesCollapsed:true,thirdMainPicker:true,draftPreservedState:true,productionWrites:0,blockedWrites,documents}));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e.message);process.exit(1);});

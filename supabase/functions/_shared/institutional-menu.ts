@@ -331,6 +331,11 @@ export function canonicalDish(value: string): string {
   return aliases.get(normalized) ?? normalized;
 }
 
+/** A copy for read-only recommendation clients, including unsaved local menus. */
+export function dishAliases(): Record<string, string> {
+  return Object.fromEntries(aliases);
+}
+
 export function dishProfile(value: string): DishProfile {
   const name = canonicalDish(value);
   const known = profiles.get(name);
