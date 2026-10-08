@@ -14,6 +14,10 @@ const {chromium} = require('playwright');
     const page=await browser.newPage({viewport:{width:1280,height:900}});
     const errors=[];let blockedWrites=0,blockedRecommendationRequests=0,documents=0,recommendRequests=0;
     page.on('pageerror',e=>errors.push(e.message));
+    page.on('response',async response=>{
+      if(!verifyRecommend||!response.url().endsWith('/functions/v1/nmf-menu-recommend'))return;
+      try{const body=response.request().postDataJSON(),data=await response.json();console.log(JSON.stringify({phase:'weekly-ai-response',date:body.date,status:response.status(),ok:data?.ok===true,model:data?.model||null}));}catch{}
+    });
     await page.addInitScript(pw=>sessionStorage.setItem('nmf_session_pw',pw),password);
     await page.route('**/*',route=>{
       const req=route.request();

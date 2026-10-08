@@ -213,6 +213,53 @@ function idSlotsFor(input: ReturnType<typeof buildRecommendationInput>) {
     ]),
   );
 }
+function assertPromptExample(
+  input: ReturnType<typeof buildRecommendationInput>,
+  expectedTotal: number,
+  label: string,
+) {
+  const prompt = buildRecommendationPrompt(input);
+  assert(
+    !/구성 목표는 국 1개/.test(prompt),
+    `${label}: a recommendation prompt cannot ask for only one soup candidate`,
+  );
+  assert(
+    /형식만 참고/.test(prompt),
+    `${label}: the example is explicitly format-only, not the recommendation`,
+  );
+  const example = prompt.trim().split("\n").at(-1)!;
+  const parsed = JSON.parse(example) as {
+    slots: Record<string, Array<{ id: number }>>;
+  };
+  equal(
+    Object.keys(parsed.slots).sort().join(","),
+    "1,2,3,4,7,8",
+    `${label}: the example includes all six slots`,
+  );
+  for (const slot of Object.keys(input.expectedCounts)) {
+    const key = slot as keyof typeof input.expectedCounts;
+    equal(
+      parsed.slots[key].length,
+      input.expectedCounts[key],
+      `${label}: example slot ${key} has the exact required count`,
+    );
+    for (const { id } of parsed.slots[key]) {
+      assert(
+        Number.isInteger(id) && id > 0 &&
+          id <= input.promptPools[key].length,
+        `${label}: example slot ${key} uses only in-range numeric IDs`,
+      );
+    }
+  }
+  const accepted = validateRecommendationAnswer(example, input);
+  const names = Object.values(accepted).flat().map((item) => item.name);
+  equal(names.length, expectedTotal, `${label}: example validates exactly`);
+  equal(
+    new Set(names).size,
+    expectedTotal,
+    `${label}: the complete example does not repeat a vegetable or other dish`,
+  );
+}
 function chatResponse(slots: Record<string, unknown> = providerSuccessSlots) {
   return new Response(
     JSON.stringify({
@@ -310,6 +357,57 @@ try {
     "prompt carries the aggressive factory-meal quality rules",
   );
   assert(/\[1\]/.test(prompt), "prompt uses compact numeric candidate IDs");
+  equal(
+    input.expectedCounts["1"],
+    3,
+    "full recommendation bank needs three soups",
+  );
+  assertPromptExample(input, 18, "full bank");
+  for (let vegetableCount = 0; vegetableCount <= 6; vegetableCount++) {
+    const shortageState = fixtureState();
+    let keptVegetables = 0;
+    shortageState.recipes = shortageState.recipes!.filter((row) =>
+      !["부찬", "김치"].includes(String(row.comp)) ||
+      keptVegetables++ < vegetableCount
+    );
+    const shortageInput = buildRecommendationInput(
+      shortageState,
+      "2026-10-24",
+      "nonce-1",
+    );
+    equal(
+      shortageInput.expectedCounts["3"] + shortageInput.expectedCounts["4"],
+      vegetableCount,
+      `vegetable shortage ${vegetableCount} preserves the available count`,
+    );
+    assertPromptExample(
+      shortageInput,
+      12 + vegetableCount,
+      `vegetable shortage ${vegetableCount}`,
+    );
+  }
+  for (let soupCount = 0; soupCount < 3; soupCount++) {
+    const shortageState = fixtureState();
+    let keptSoups = 0;
+    shortageState.recipes = shortageState.recipes!.filter((row) =>
+      row.comp !== "국" || keptSoups++ < soupCount
+    );
+    const shortageInput = buildRecommendationInput(
+      shortageState,
+      "2026-10-24",
+      "nonce-1",
+    );
+    equal(
+      shortageInput.expectedCounts["1"],
+      soupCount,
+      `soup shortage ${soupCount} preserves the available count`,
+    );
+    assertPromptExample(
+      shortageInput,
+      15 + soupCount,
+      `soup shortage ${soupCount}`,
+    );
+  }
   const numericAnswer = JSON.stringify({ slots: providerSuccessSlots });
   const fencedAnswer = `\`\`\`json\n${numericAnswer}\n\`\`\``;
   equal(
@@ -726,7 +824,7 @@ try {
   );
 
   console.log(
-    "MENU_RECOMMEND_OK / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / READ_ONLY / CACHE / FAILURE_RETRY / INFLIGHT_COALESCE / BOUNDED_CACHE",
+    "MENU_RECOMMEND_OK / PROMPT_EXAMPLE_COUNTS_11_CASES / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / READ_ONLY / CACHE / FAILURE_RETRY / INFLIGHT_COALESCE / BOUNDED_CACHE",
   );
 } finally {
   globalThis.fetch = nativeFetch;

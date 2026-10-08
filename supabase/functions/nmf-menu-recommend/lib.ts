@@ -782,6 +782,30 @@ export function buildRecommendationPrompt(
     }`
   ).join("\n");
   const familiar = MANUAL_FAMILIAR_DISHES.slice(0, 60).join(", ");
+  const exampleSlots = {} as Record<
+    SlotId,
+    Array<{ id: number; reason: string }>
+  >;
+  const exampleUsed = new Set<string>();
+  for (const slot of SLOT_IDS) {
+    const entries: Array<{ id: number; reason: string }> = [];
+    for (const [index, candidate] of input.promptPools[slot].entries()) {
+      if (entries.length === input.expectedCounts[slot]) break;
+      const canonical = canonicalDish(candidate.name);
+      if (exampleUsed.has(canonical)) continue;
+      exampleUsed.add(canonical);
+      entries.push({ id: index + 1, reason: "짧은 이유 예시" });
+    }
+    if (entries.length !== input.expectedCounts[slot]) {
+      throw new RecommendationValidationError(
+        `${
+          SLOT_LABELS[slot]
+        } 중복 없는 응답 형식 예시를 구성할 후보가 부족합니다`,
+      );
+    }
+    exampleSlots[slot] = entries;
+  }
+  const vegetableCount = input.expectedCounts["3"] + input.expectedCounts["4"];
   return [
     "나모푸드 공장 급식 식단 추천기입니다.",
     "반드시 후보 번호 id만 골라 JSON 하나로 답하세요. 음식명은 쓰지 마세요.",
@@ -789,10 +813,17 @@ export function buildRecommendationPrompt(
     `식단 매뉴얼 버전: ${MENU_MANUAL_VERSION}. 한 끼 10,000원 공장노동자/함바 급식 기준입니다.`,
     "100~500인 대량 배식 공정(회전솥·대형솥·튀김기·전판)에서 현실적으로 나갈 수 있고, 맛·포만감·주찬 체감 품질이 강한 구성을 우선하세요.",
     "영양 균형은 최우선이 아니지만 식품 안전과 대량 조리 현실성은 반드시 지키세요. 가정식·브런치·소량 고명뿐인 메뉴를 주찬처럼 고르지 마세요.",
-    "구성 목표는 국 1개 + 고기 메인 3개 후보 + 생선/해산물 메인 3개 후보 + 기타 주찬 3개 후보 + 야채 부찬 6개 후보입니다.",
+    "실제 한 끼의 국은 한 칸이지만, 이번 응답은 식단 자체가 아니라 각 자리에서 사람이 고를 대안 후보 목록입니다.",
+    `추천 목록 목표는 국 ${input.expectedCounts["1"]}개 후보 + 고기 메인 ${
+      input.expectedCounts["2"]
+    }개 후보 + 생선/해산물 메인 ${
+      input.expectedCounts["7"]
+    }개 후보 + 기타 주찬 ${
+      input.expectedCounts["8"]
+    }개 후보 + 야채 부찬 ${vegetableCount}개 후보입니다.`,
     "같은 조리법·양념만 몰리지 않게 볶음/구이/튀김/부침/조림/찜/무침을 섞고, 튀김만 반복하는 선택은 피하세요.",
     `익숙한 운영 예시/방향: ${familiar}`,
-    "슬롯 3과 4의 야채 부찬은 서로 겹치지 않게 총 6개를 우선 구성하세요.",
+    `슬롯 3과 4의 야채 부찬은 서로 겹치지 않게 총 ${vegetableCount}개를 구성하세요. 각 슬롯 수는 아래 지정된 수를 정확히 지키세요.`,
     "전체 슬롯 사이에서도 같은 실제 음식/동일 canonical 음식은 중복 금지입니다.",
     "이 추천은 저장하지 않고 사람이 고르기 위한 후보입니다.",
     "reason은 20자 안팎으로 짧게 쓰고, 생략해도 됩니다.",
@@ -801,8 +832,8 @@ export function buildRecommendationPrompt(
       : "",
     `추천 날짜: ${input.date}`,
     sections,
-    "응답 형식:",
-    '{"slots":{"1":[{"id":1,"reason":"짧은 이유"}],"2":[],"7":[],"8":[],"3":[],"4":[]}}',
+    "응답 형식 예시(형식만 참고하며, 예시 번호를 그대로 추천하지 말고 후보의 품질과 조리 다양성을 보고 직접 고르세요):",
+    JSON.stringify({ slots: exampleSlots }),
   ].filter(Boolean).join("\n\n");
 }
 
