@@ -1,6 +1,6 @@
-// 나모푸드: 7일 단위 식단을 OpenCode Zen으로 만들고 암호화 상태의 빈 셀에만 병합한다.
+// 식단 AI 자동 작성은 운영자 요청으로 영구 중지했다 (2026-10-08).
+// 과거 호출 주소는 인증된 중지 응답만 반환하며 레시피 자동 작성은 별도 함수로 유지한다.
 // 호출 인증: Authorization: Bearer <NMF_CRON_SECRET>
-// body: {"weeks":2} 재호출하며 9/24~10/7 중 누락 7일씩 채움 · {"dry":true} 현황만 · {"preview":true} 생성하되 미저장
 import {
   logValues,
   readState,
@@ -52,6 +52,9 @@ const SAVE_RESERVE_MS = 15_000;
 const LLM_PRIMARY_TIMEOUT_MS = 35_000;
 const LLM_FALLBACK_TIMEOUT_MS = 60_000;
 const STALE_RUN_MINUTES = 5;
+// Intentionally not configurable through env or request flags. Historical
+// generation code remains below for provenance and isolated regression checks.
+const NMF_MENU_AUTOMATION_ENABLED = false;
 
 type StateRow = { data: string; updated_at: string };
 type RequestBody = {
@@ -322,6 +325,20 @@ Deno.serve(async (request: Request) => {
   const suppliedSecret = bearer?.[1].trim() || "";
   if (!configuredSecret || !safeEqual(suppliedSecret, configuredSecret)) {
     return json({ ok: false, reason: "unauthorized" }, 401);
+  }
+
+  // Keep this before request parsing, run claims/cleanup, database state reads,
+  // model calls, and encrypted-state writes. force/retry/preview/dry cannot
+  // revive the retired feature, including from an old cron or saved client.
+  if (!NMF_MENU_AUTOMATION_ENABLED) {
+    return json({
+      ok: true,
+      disabled: true,
+      reason: "운영자 요청으로 AI 식단 자동 업데이트가 중지되었습니다.",
+      generated: 0,
+      saved: 0,
+      runId: null,
+    });
   }
 
   const runId = crypto.randomUUID();

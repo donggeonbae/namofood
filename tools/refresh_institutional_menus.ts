@@ -1,4 +1,4 @@
-// Reviewed institutional catalog + future AI refresh. Dry unless --apply.
+// Historical reviewed catalog/AI refresh. Production menu writes are retired.
 // Required: NMF_PW and --today YYYY-MM-DD. No password-file fallback.
 import {
   dateCell,
@@ -1216,6 +1216,11 @@ async function restStorage(): Promise<RefreshStorage> {
 }
 
 async function main() {
+  if (Deno.args.includes("--apply")) {
+    throw new Error(
+      "AI 식단 작성은 종료되었습니다. 과거 식단 재생성 도구는 저장할 수 없습니다.",
+    );
+  }
   if (Deno.args.includes("--self-test")) {
     await import("./test_institutional_refresh.ts");
     return;

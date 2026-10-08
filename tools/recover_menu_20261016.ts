@@ -1,4 +1,4 @@
-// One-time, reviewed recovery for the approved missing date; dry unless --apply.
+// Historical reviewed recovery. Production menu writes are permanently retired.
 import {
   decryptText,
   encryptText,
@@ -8,6 +8,11 @@ import {
   type State,
   validateMenuVariety,
 } from "../supabase/functions/nmf-menu-plan/lib.ts";
+if (Deno.args.includes("--apply")) {
+  throw new Error(
+    "AI 식단 작성은 종료되었습니다. 과거 식단 재생성 도구는 저장할 수 없습니다.",
+  );
+}
 const date = "2026-10-16", meals = ["조식", "중식", "석식", "야식"];
 const rows = [
   [

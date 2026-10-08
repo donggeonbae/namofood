@@ -1,4 +1,4 @@
-// One-off, user-approved AI menu refresh. Dry-run unless --apply is supplied.
+// Historical one-off AI menu refresh. Production writes are permanently retired.
 // Only Oct 5–11 meals still marked AI are changed; encrypted backup + CAS required.
 import {
   decryptText,
@@ -8,6 +8,11 @@ import {
   validateMenuVariety,
 } from "../supabase/functions/nmf-menu-plan/lib.ts";
 import { missingList } from "../supabase/functions/nmf-recipe-fill/lib.ts";
+if (Deno.args.includes("--apply")) {
+  throw new Error(
+    "AI 식단 작성은 종료되었습니다. 과거 식단 재생성 도구는 저장할 수 없습니다.",
+  );
+}
 const meals = ["조식", "중식", "석식", "야식"];
 // 국 | 메인1 | 메인2 | 부찬1 | 부찬2 | 김치 | 추가찬
 const rows = [

@@ -1,3 +1,8 @@
+// Historical generation regression only: menu automation was retired by the
+// operator on 2026-10-08. The harness explicitly bypasses the source retirement
+// guard in-memory to retain the prior CAS/retry/manual-cell checks. No runtime
+// option can do this. test_menu_automation_disabled.ts exercises the current,
+// unmodified production guard and requires zero database or model calls.
 import {
   completeMenuDates,
   decryptText,
@@ -434,6 +439,14 @@ try {
   let source = await Deno.readTextFile(
     new URL("../supabase/functions/nmf-menu-plan/index.ts", import.meta.url),
   );
+  assert(
+    source.includes("const NMF_MENU_AUTOMATION_ENABLED = false;"),
+    "historical harness must observe the permanent production retirement guard",
+  );
+  source = source.replace(
+    "const NMF_MENU_AUTOMATION_ENABLED = false;",
+    "const NMF_MENU_AUTOMATION_ENABLED = true;",
+  );
   const negative = Deno.env.get("NMF_DAILY_HANDLER_NEGATIVE_CONTROL");
   if (negative === "discard-partial") {
     assert(
@@ -843,7 +856,7 @@ try {
     "2026-10-15",
   ], "aborted unfinished date remains pending");
   console.log(
-    "DAILY_AUTOMATION_OK / ACTUAL_HANDLER_PARTIAL_CAS_MANUAL / COOLDOWN_DAILY_CAP / FORCE_CAP_BOUND / CORRECTION_DIAGNOSTICS / PREVIEW_QUOTA / INVALID_FLAGS / STALE_PREVIEW / ATOMIC_BUSY / ABORT_COMPLETED_DAY",
+    "DAILY_AUTOMATION_OK / HISTORICAL_RETIREMENT_GUARD_BYPASSED_ONLY_OFFLINE / ACTUAL_HANDLER_PARTIAL_CAS_MANUAL / COOLDOWN_DAILY_CAP / FORCE_CAP_BOUND / CORRECTION_DIAGNOSTICS / PREVIEW_QUOTA / INVALID_FLAGS / STALE_PREVIEW / ATOMIC_BUSY / ABORT_COMPLETED_DAY",
   );
 } finally {
   globalThis.Date = nativeDate;

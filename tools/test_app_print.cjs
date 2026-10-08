@@ -76,7 +76,7 @@ async function readPdf(bytes) {
       assert.deepEqual(await page.locator(".editor .mealbox .mealbar").allTextContents(), meals, "print subset does not hide any of the four editing meals");
       assert.equal(await page.evaluate(() => JSON.stringify({ menus: S.menus, menuPlanMeta: S.menuPlanMeta, headcountMeta: S.headcountMeta, settings: S.settings })), stateBeforePrint, "printing selection cannot modify meals, headcounts, AI markings, or settings");
       const text = await page.locator("#menu-print-sheet").innerText();
-      assert.equal(text.includes("🤖"), mode === "internal", range+" "+mode);
+      assert.equal(text.includes("🤖"), false, range+" "+mode+" contains no AI menu badge");
       for (let mi = 0; mi < meals.length; mi++) assert.equal(text.includes(foods[mi]), chosen.includes(meals[mi]), range+" "+mode+" preview food inclusion: "+meals[mi]);
       const bytes = await page.pdf({preferCSSPageSize:true,printBackground:true,displayHeaderFooter:false});
       const pdf = await PDFDocument.load(bytes);
@@ -84,7 +84,7 @@ async function readPdf(bytes) {
       const printed = await readPdf(bytes);
       assert.equal(printed.pages, 1, "independent PDF parser confirms the single page");
       for (let mi = 0; mi < meals.length; mi++) assert.equal(printed.text.includes(foods[mi]), chosen.includes(meals[mi]), range+" "+mode+" actual PDF food inclusion: "+meals[mi]);
-      assert.equal(printed.text.includes("🤖"), mode === "internal", range+" "+mode+" actual PDF preserves public/internal AI policy");
+      assert.equal(printed.text.includes("🤖"), false, range+" "+mode+" actual PDF has no AI menu badge");
       if (chosen.length === 2 && range === "day" && mode === "public") {
         fs.writeFileSync("/tmp/nmf-print-subset-preview.pdf", bytes);
         await page.locator("#menu-print-sheet").screenshot({ path: "/tmp/nmf-print-subset-preview.png" });
@@ -111,6 +111,7 @@ async function readPdf(bytes) {
       clearTimeout(cloudTimer); clearTimeout(saveTimer); cloudApplying = false;
       S.recipes=[];S.methods={};S.sources={};S.recipeMeta={};S.recipeAsk={};
       S.menus={"2026-09":{"24|중식|2":"대기음식","24|중식|3":"완성음식"}};
+      S.menuPlanMeta={}; // These are freshly entered manual foods, not the retired print-fixture AI meals.
       S.month="2026-09";cloudRemoteAt=null;cloudBusy=false;cloudDirty=true;
       const other=structuredClone(S);
       other.recipes=[{menu:"완성음식",item:"감자",qty:100,unit:"g",comp:"부찬"}];
@@ -132,7 +133,7 @@ async function readPdf(bytes) {
     assert.equal(signedStatus,"");
     const version = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "ver.json"), "utf8")).v;
     assert.equal(await page.locator("#appver").textContent(), "버전 " + version, "visible full version tag exactly matches the deployed ver.json tag");
-    console.log(`PRINT_${pdfCount}_ALL_SUBSET_MODES_ONE_PAGE / PDF_FOOD_EXCLUSION / FOUR_MEAL_EDITOR_DATA_PROTECTED / MINIMUM_ONE_MEAL / PUBLIC_AI_HIDDEN / SALES_COLLAPSED / FULL_VERSION_MATCH / CAS_RETRY / AI_RECIPE_PRESERVED / IMMEDIATE_REQUEST_PASS`);
+    console.log(`PRINT_${pdfCount}_ALL_SUBSET_MODES_ONE_PAGE / PDF_FOOD_EXCLUSION / FOUR_MEAL_EDITOR_DATA_PROTECTED / MINIMUM_ONE_MEAL / ALL_MENU_AI_BADGES_HIDDEN / SALES_COLLAPSED / FULL_VERSION_MATCH / CAS_RETRY / AI_RECIPE_PRESERVED / IMMEDIATE_REQUEST_PASS`);
     console.log("APP_SOURCE_SHA256 " + createHash("sha256").update(source).digest("hex"));
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});
