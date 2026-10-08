@@ -38,7 +38,8 @@ async function csvText(page) {
   try {
     const page = await browser.newPage();
     let rejectNextConfirm = false;
-    const dialogs = [];
+    const dialogs = [], pageErrors = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
     page.on("dialog", async dialog => {
       dialogs.push({ type: dialog.type(), message: dialog.message() });
       if (dialog.type() === "confirm" && rejectNextConfirm) { rejectNextConfirm = false; await dialog.dismiss(); }
@@ -90,7 +91,9 @@ async function csvText(page) {
     assert.deepEqual(archived.settings, stable.settings, "archive cannot change global payroll rules");
     for (const key of ["id", "name", "role", "wage", "bonus", "def", "off"]) assert.deepEqual(archived.staff[key], stable.staff[key], "preserved staff field " + key);
     assert(!archived.active.includes("history") && archived.archive.includes("history"), "staff management excludes archived staff without losing their identity");
-    assert.equal(await page.locator('input[placeholder="이름"]').count(), 1, "only active staff have editable staff-management rows");
+    assert.equal(await page.locator('#staff-directory-table input[placeholder="이름"]').count(), 1, "the active employee directory still excludes archived staff");
+    assert.equal(await page.locator('input[data-staff-archive-name="history"]').count(), 1, "the archived employee has an editable name input targeted by stable ID");
+    assert.equal(await page.locator('button[data-staff-archive-open="history"]').count(), 1, "the archived employee's payroll name links to its archive entry by stable ID");
     const csv = await csvText(page);
     const csvHistory = csv.split(/\r?\n/).find(line => line.includes("보관 직원"));
     assert(csvHistory, "actual CSV contains archived employee");
@@ -582,7 +585,179 @@ async function csvText(page) {
     assert.deepEqual(await read(), inheritedPay, "restoring inherited wage cannot silently reprice historical payroll");
     await page.evaluate(() => setStaffField("inherited-restore", "wage", null));
     assert.equal(await page.evaluate(() => staffWage(findStaff("inherited-restore"))), 19500, "explicit personal override clearing after restore intentionally uses the current role wage");
+
+    // New archive-name workflow is isolated after the existing history/payroll
+    // scenarios so renaming cannot weaken their independently known oracles.
+    const archiveNameFixture = await page.evaluate(() => {
+      S.month = "2026-10"; S.staffFieldEdits = {}; S.staffEdits = {}; S.rosterEdits = {};
+      const at = new Date(Date.now() - 60000).toISOString();
+      const employee = (id, name) => ({ id, name, role: "조리", wage: 13000, bonus: 700, def: { s: "09:00", e: "18:00", b: 60 }, off: [6] });
+      S.staff = [employee("archive-nav-active", "현직 이동 확인")];
+      S.staffArchive = Array.from({ length: 14 }, (_, i) => ({ ...employee("archive-rename-" + (i + 1), "보관 이름 " + String(i + 1).padStart(2, "0")), archivedWage: 13000, archivedAt: at, historyNames: i === 12 ? ["더 오래된 별칭"] : [] }));
+      S.staffArchive.push({ ...employee("archive-unknown", "정보 미확인 이름"), wage: 0, bonus: 0, historyUnknown: true, archivedAt: at });
+      for (const e of S.staffArchive) S.staffEdits[e.id] = { at, status: "archive" };
+      S.staffEdits["archive-nav-active"] = { at, status: "active" };
+      S.roster = { "2026-09": { "archive-rename-13|30": { s: "23:00", e: "03:00", b: 0 } }, "2026-10": { "archive-rename-13|1": { s: "22:00", e: "06:00", b: 60 }, "archive-rename-13|2": { s: "09:00", e: "18:00", b: 60 }, "archive-unknown|3": { s: "01:00", e: "07:00", b: 0 }, "archive-nav-active|1": { s: "09:00", e: "11:00", b: 0 } } };
+      cloudStaffBase = null; staffArchiveOpen = false; staffArchiveSearch = "찾을 수 없는 잘못된 검색"; staffArchivePage = 1; render();
+      return structuredClone(S);
+    });
+    const archiveNamePay = await read();
+    const archiveNameInput = id => page.locator(`input[data-staff-archive-name="${id}"]`);
+    const archivePayrollButton = id => page.locator(`button[data-staff-archive-open="${id}"]`);
+    const readArchiveTarget = id => page.evaluate(id => structuredClone({ employee: findStaff(id), active: S.staff.map(e => e.id), archive: S.staffArchive.map(e => e.id), edits: S.staffFieldEdits[id], status: S.staffEdits[id], roster: S.roster, rosterEdits: S.rosterEdits, settings: S.settings }), id);
+    const metadataWithoutNames = employee => Object.fromEntries(Object.entries(employee).filter(([key]) => !["name", "historyNames"].includes(key)));
+    const targetId = "archive-rename-13";
+    assert.equal(await archivePayrollButton("archive-nav-active").count(), 0, "active payroll names remain normal labels rather than archive navigation buttons");
+    assert.equal(await page.locator('#staff-directory-table input[placeholder="이름"]').inputValue(), "현직 이동 확인", "archive navigation does not replace the active staff directory");
+    assert.equal(await archivePayrollButton(targetId).count(), 1, "a working archived employee has exactly one stable-ID payroll navigation button");
+    assert(await archivePayrollButton(targetId).getAttribute("aria-label"), "archive payroll navigation has an explicit accessible name");
+    const beforeArchiveNavigation = await page.evaluate(() => JSON.stringify(S));
+    await archivePayrollButton(targetId).focus(); await archivePayrollButton(targetId).press("Enter");
+    await page.waitForFunction(id => document.activeElement?.dataset.staffArchiveName === id, targetId);
+    assert.equal(await page.locator("#staffArchive").evaluate(element => element.open), true, "keyboard payroll activation expands the archived directory");
+    assert.equal(await page.locator("#staffArchiveSearch").inputValue(), "", "payroll navigation clears a wrong archive filter");
+    assert.equal(await page.evaluate(() => staffArchivePage), 2, "payroll navigation selects the target employee's second archive page");
+    assert.equal(await archiveNameInput(targetId).inputValue(), "보관 이름 13");
+    assert(await archiveNameInput(targetId).getAttribute("aria-label"), "the focused archive name input has an accessible label");
+    assert.equal(await page.evaluate(() => JSON.stringify(S)), beforeArchiveNavigation, "payroll-to-archive navigation is UI-only and cannot change stored data");
+
+    await archiveNameInput(targetId).fill("  수정된 보관 직원  "); await archiveNameInput(targetId).blur();
+    const renamedArchive = await readArchiveTarget(targetId);
+    assert.equal(renamedArchive.employee.name, "수정된 보관 직원", "the real archive input edits the intended stable employee ID");
+    assert.deepEqual(metadataWithoutNames(renamedArchive.employee), metadataWithoutNames(archiveNameFixture.staffArchive.find(e => e.id === targetId)), "name editing preserves wage, frozen wage, bonus, role, default hours, off days, archivedAt and ID exactly");
+    assert.deepEqual(renamedArchive.employee.historyNames, ["더 오래된 별칭", "보관 이름 13"], "a name edit records the previous name once alongside existing historical aliases");
+    assert(Number.isFinite(Date.parse(renamedArchive.edits.name.at)), "archive name edits record a durable field-level timestamp");
+    assert(Number.isFinite(Date.parse(renamedArchive.edits.historyNames.at)), "previous-name alias edits also record a durable field-level timestamp");
+    assert.deepEqual(Object.keys(renamedArchive.edits).sort(), ["historyNames", "name"], "name editing records only name/alias fields, never role or wage edit markers");
+    assert.deepEqual(renamedArchive.status, archiveNameFixture.staffEdits[targetId], "a name edit cannot change the employee's archived status or status timestamp");
+    assert.deepEqual(renamedArchive.roster, archiveNameFixture.roster, "renaming keeps every historical shift across all months untouched");
+    assert.deepEqual(renamedArchive.rosterEdits, archiveNameFixture.rosterEdits, "renaming cannot create or clear shift tombstones");
+    assert.deepEqual(renamedArchive.settings, archiveNameFixture.settings, "renaming cannot modify payroll settings");
+    assert(!renamedArchive.active.includes(targetId) && renamedArchive.archive.includes(targetId), "the renamed employee remains archived rather than silently restored");
+    assert.equal(await page.evaluate(() => staffArchivePage), 2, "renaming a second-page entry keeps that page and entry visible");
+    assert.equal(await archiveNameInput(targetId).inputValue(), "수정된 보관 직원");
+    const beforeEmptyArchiveName = await page.evaluate(() => JSON.stringify(S)), beforeEmptyNameDialogs = dialogs.length;
+    await archiveNameInput(targetId).fill("   "); await archiveNameInput(targetId).blur();
+    assert(dialogs.length > beforeEmptyNameDialogs && dialogs.at(-1).type === "alert", "blank archive names are explicitly rejected");
+    assert.equal(await archiveNameInput(targetId).inputValue(), "수정된 보관 직원", "rejecting a blank name restores the prior visible input value");
+    assert.equal(await page.evaluate(() => JSON.stringify(S)), beforeEmptyArchiveName, "rejecting an empty name is non-mutating, including name timestamps and historical aliases");
+    assert.deepEqual(await read(), archiveNamePay, "archive name editing leaves exact hours, wage, bonus, pay and total unchanged");
+    assert((await printedText(page)).includes("수정된 보관 직원"), "the renamed archive input value is readable as the employee name in the actual printed payroll/roster");
+    const nameEditsBeforeReload = renamedArchive.edits;
+    await page.waitForFunction(id => JSON.parse(localStorage.getItem(KEY) || "{}").staffArchive?.find(e => e.id === id)?.name === "수정된 보관 직원", targetId);
+    await page.reload();
+    await page.evaluate(() => { clearInterval(cloudPollTimer); clearTimeout(cloudTimer); clearTimeout(saveTimer); cloud.enabled = false; cloudApplying = true; S.month = "2026-10"; go("roster"); });
+    assert.equal((await readArchiveTarget(targetId)).employee.name, "수정된 보관 직원", "a real browser reload preserves the archived name edit");
+    assert.deepEqual((await readArchiveTarget(targetId)).edits, nameEditsBeforeReload, "reload preserves the archive name field timestamp");
+    await page.evaluate(remote => { mergeRemoteStaffHistory(remote); render(); }, archiveNameFixture);
+    let mergedArchiveName = await readArchiveTarget(targetId);
+    assert.equal(mergedArchiveName.employee.name, "수정된 보관 직원", "an old remote save cannot overwrite a newer archived name after restart without a merge baseline");
+    assert.deepEqual(mergedArchiveName.employee.historyNames, renamedArchive.employee.historyNames, "stale remote merge cannot discard the archive's accumulated historical names");
+    assert.deepEqual(mergedArchiveName.edits, nameEditsBeforeReload, "stale remote merge retains the newer name edit timestamp");
+    await page.evaluate(remote => { applyState(remote); render(); }, archiveNameFixture);
+    mergedArchiveName = await readArchiveTarget(targetId);
+    assert.equal(mergedArchiveName.employee.name, "수정된 보관 직원", "loading an older backup cannot overwrite the newer archived name");
+    assert.deepEqual(mergedArchiveName.employee.historyNames, renamedArchive.employee.historyNames, "older backup load preserves the previous-name search aliases");
+    assert.deepEqual(await read(), archiveNamePay, "reload and stale name merges leave historical payroll unchanged");
+    const newerArchiveName = await page.evaluate(id => {
+      const remote = structuredClone(S), e = remote.staffArchive.find(e => e.id === id);
+      e.historyNames = [...(e.historyNames || []), e.name]; e.name = "서버에서 바뀐 보관 직원";
+      const at = new Date(Date.parse(S.staffFieldEdits[id].name.at) + 5000).toISOString();
+      remote.staffFieldEdits[id].name = { at }; remote.staffFieldEdits[id].historyNames = { at };
+      return remote;
+    }, targetId);
+    await page.evaluate(remote => { mergeRemoteStaffHistory(remote); render(); }, newerArchiveName);
+    assert.equal((await readArchiveTarget(targetId)).employee.name, "서버에서 바뀐 보관 직원", "a genuinely newer server name edit can replace an older local name");
+    assert.deepEqual((await readArchiveTarget(targetId)).edits.name, newerArchiveName.staffFieldEdits[targetId].name, "the newer remote name timestamp is retained");
+    assert.deepEqual(await read(), archiveNamePay, "genuinely newer name edits still cannot alter historical pay");
+
+    await archivePayrollButton(targetId).click();
+    await page.locator("#staffArchiveSearch").fill("보관 이름 13");
+    assert.equal(await archiveNameInput(targetId).count(), 1, "a previous name still finds the renamed archive entry");
+    await archiveNameInput(targetId).fill("검색 중 수정한 보관 직원"); await archiveNameInput(targetId).blur();
+    assert.equal(await page.locator("#staffArchiveSearch").inputValue(), "보관 이름 13", "editing a filtered name retains the user's filter");
+    assert.equal(await archiveNameInput(targetId).inputValue(), "검색 중 수정한 보관 직원", "the renamed entry stays visible under its old-name filter via historical aliases");
+    assert.equal(await page.evaluate(id => { const names = findStaff(id).historyNames; return names.length === new Set(names).size; }, targetId), true, "repeated edits and cloud merges never duplicate historical name aliases");
+    await page.locator("#staffArchiveSearch").fill("");
+    await page.locator("#staffArchive").getByRole("button", { name: /다음/ }).click();
+    assert.equal(await archiveNameInput(targetId).inputValue(), "검색 중 수정한 보관 직원", "clearing a filter and changing pages retains the stable-ID name edit");
+
+    await archivePayrollButton("archive-unknown").click();
+    const unknownBeforeRename = await readArchiveTarget("archive-unknown");
+    await archiveNameInput("archive-unknown").fill("이름만 확인된 이전 직원"); await archiveNameInput("archive-unknown").blur();
+    const unknownRenamed = await readArchiveTarget("archive-unknown");
+    assert.equal(unknownRenamed.employee.name, "이름만 확인된 이전 직원");
+    assert.deepEqual(metadataWithoutNames(unknownRenamed.employee), metadataWithoutNames(unknownBeforeRename.employee), "editing an unknown-history employee's name cannot invent wage/role metadata or remove the unknown-history flag");
+    assert.equal(unknownRenamed.employee.historyUnknown, true);
+    assert.equal(await page.evaluate(() => staffWage(findStaff("archive-unknown"))), 0, "name-only confirmation does not invent an unknown employee's wage");
+    assert.match(await archivePayrollButton("archive-unknown").locator("xpath=ancestor::tr").innerText(), /시급 확인 필요|확인 필요/, "unknown wage warnings remain in payroll after a name-only edit");
+    await page.evaluate(() => staffRestore("archive-unknown"));
+    const afterUnknownRestore = await readArchiveTarget("archive-unknown");
+    assert.deepEqual(afterUnknownRestore, unknownRenamed, "the existing unknown-history restore guard remains non-mutating after a name edit");
+    assert.equal(await archiveNameInput("archive-unknown").locator("xpath=ancestor::tr").getByRole("button", { name: "명단으로 복귀", exact: true }).count(), 0, "a name-only edit never makes the unknown-history archive entry silently restorable");
+    assert.deepEqual(await read(), archiveNamePay, "unknown name editing and blocked restore cannot change any payroll totals");
+
+    await archivePayrollButton(targetId).click();
+    const hostileName = '<img src=x onerror="window.staffNameInjected=1">';
+    await archiveNameInput(targetId).fill(hostileName); await archiveNameInput(targetId).blur();
+    assert.equal(await archiveNameInput(targetId).inputValue(), hostileName, "HTML-like employee names stay literal input values");
+    assert.equal(await archivePayrollButton(targetId).textContent(), hostileName, "payroll navigation renders employee names as literal escaped text");
+    assert.equal(await page.locator('#staffArchive img, button[data-staff-archive-open] img').count(), 0, "archive input values, alias labels and payroll buttons cannot create HTML elements from names");
+    assert.equal(await page.evaluate(() => window.staffNameInjected || 0), 0, "hostile archive names cannot execute JavaScript");
+    await page.evaluate(() => { staffArchiveOpen = false; staffArchiveSearch = "wrong filter again"; staffArchivePage = 1; render(); });
+    await archivePayrollButton(targetId).focus(); await archivePayrollButton(targetId).press("Space");
+    await page.waitForFunction(id => document.activeElement?.dataset.staffArchiveName === id, targetId);
+    assert.equal(await page.locator("#staffArchive").evaluate(element => element.open), true, "Space activation is accessible even for escaped payroll name labels");
+    assert.equal(await page.evaluate(() => staffArchivePage), 2);
+    assert.equal(await page.locator("#staffArchiveSearch").inputValue(), "");
+    assert.deepEqual(await read(), archiveNamePay, "all archive navigation, search, rename and escaping scenarios preserve exact pay");
+
+    // A newer name may live on the status-losing snapshot. It must merge as a
+    // name-only change without importing that snapshot's salary or restoring it.
+    for (const operation of ["cloud", "load"]) for (const winner of ["localArchive", "remoteArchive"]) {
+      const crossStatus = await page.evaluate(({operation, winner}) => {
+        S.month = "2026-11"; S.settings.night = .5; S.settings.burden = .1; S.settings.vacancy = .05;
+        S.staff = []; S.staffArchive = []; S.staffEdits = {}; S.staffFieldEdits = {}; S.rosterEdits = {};
+        const now = Date.now(), id = "name-status-conflict";
+        const archiveAt = new Date(now - 50000).toISOString(), activeAt = new Date(now - 60000).toISOString();
+        const oldNameAt = new Date(now - 20000).toISOString(), newerNameAt = new Date(now + 1000).toISOString();
+        const archived = {id, name: "보관 스냅샷 이름", role: "조리", wage: null, archivedWage: 16000, bonus: 5000, def: {s: "22:00", e: "06:00", b: 60}, off: [6], archivedAt: archiveAt, historyNames: ["보관 이전 별칭"]};
+        const active = {id, name: "최신 이름만 수정됨", role: "보조", wage: 99999, bonus: 0, def: {s: "09:00", e: "17:00", b: 0}, off: [], historyNames: ["재직 이전 별칭"]};
+        S.roster = {"2026-11": {[id + "|1"]: {s: "22:00", e: "06:00", b: 60}}};
+        if (winner === "localArchive") {
+          S.staffArchive = [structuredClone(archived)]; S.staffEdits[id] = {at: archiveAt, status: "archive"};
+          S.staffFieldEdits[id] = {name: {at: oldNameAt}, historyNames: {at: oldNameAt}};
+        } else {
+          S.staff = [structuredClone(active)]; S.staffEdits[id] = {at: activeAt, status: "active"};
+          S.staffFieldEdits[id] = {name: {at: newerNameAt}, historyNames: {at: newerNameAt}};
+        }
+        const remote = structuredClone(S);
+        if (winner === "localArchive") {
+          remote.staff = [structuredClone(active)]; remote.staffArchive = []; remote.staffEdits[id] = {at: activeAt, status: "active"};
+          remote.staffFieldEdits[id] = {name: {at: newerNameAt}, historyNames: {at: newerNameAt}};
+        } else {
+          remote.staff = []; remote.staffArchive = [structuredClone(archived)]; remote.staffEdits[id] = {at: archiveAt, status: "archive"};
+          remote.staffFieldEdits[id] = {name: {at: oldNameAt}, historyNames: {at: oldNameAt}};
+        }
+        const roster = structuredClone(S.roster); cloudStaffBase = null;
+        if (operation === "cloud") mergeRemoteStaffHistory(remote); else applyState(remote);
+        return structuredClone({employee: findStaff(id), active: S.staff.map(e => e.id), archive: S.staffArchive.map(e => e.id), status: S.staffEdits[id], edits: S.staffFieldEdits[id], roster: S.roster, expectedRoster: roster, expectedSnapshot: archived, expectedName: active.name, expectedStatus: {at: archiveAt, status: "archive"}, newerNameAt});
+      }, {operation, winner});
+      const context = operation + "/" + winner;
+      assert.equal(crossStatus.employee.name, crossStatus.expectedName, context + ": a genuinely newer name on the status-losing snapshot is still applied");
+      assert.deepEqual(metadataWithoutNames(crossStatus.employee), metadataWithoutNames(crossStatus.expectedSnapshot), context + ": the winning archive's full frozen salary/bonus/default-hours snapshot is preserved");
+      assert.deepEqual(crossStatus.active, [], context + ": a name edit cannot silently restore an archived employee");
+      assert.deepEqual(crossStatus.archive, ["name-status-conflict"]);
+      assert.deepEqual(crossStatus.status, crossStatus.expectedStatus, context + ": the archive status and status timestamp remain authoritative");
+      assert.deepEqual(crossStatus.edits, {name: {at: crossStatus.newerNameAt}, historyNames: {at: crossStatus.newerNameAt}}, context + ": newer name/alias field timestamps survive either merge direction");
+      assert.deepEqual(crossStatus.roster, crossStatus.expectedRoster, context + ": every historical shift survives the name/status conflict");
+      assert.deepEqual([...new Set(crossStatus.employee.historyNames)].sort(), ["보관 이전 별칭", "보관 스냅샷 이름", "재직 이전 별칭"].sort(), context + ": both alias arrays and the superseded archive snapshot name remain searchable");
+      assert.deepEqual(await read(), [{id: "name-status-conflict", days: 1, hours: 7, nightHours: 7, wage: 16000, base: 112000, night: 56000, bonus: 5000, adjustment: 0, pay: 173000, total: 198950}], context + ": archive salary is independently known and cannot mix with the status-losing active snapshot");
+    }
+    assert.deepEqual(pageErrors, [], "the complete staff workflow has no uncaught browser errors");
     console.log("STAFF_HISTORY_ARCHIVE_EXACT_PAYROLL / WEEK_MONTH_RELOAD / CSV_PDF / ACTIVE_ONLY_FILL_COPY / MANUAL_DELETE_REENTRY / RESTORE / ORPHAN_LEGACY / ZERO_HOUR_PAYROLL / CLOUD_THREE_WAY_TOMBSTONES / IMPORT_HISTORY / ARCHIVE_SEARCH_PAGING / RESTART_ARCHIVE_RESTORE_INTENT / BULK_REAL_SELECTION_CANCEL_VALIDATION_SNAPSHOT_BOUNDARY_PROTECTION / ROLE_MIGRATION_EDIT_ADD_DELETE_ARCHIVE_WAGE / ROLE_CONFIG_THREE_WAY / PERSONAL_ROLE_WAGE_RESTART_LOAD_TIMESTAMPS / LEGACY_FIRST_SAVE_BACKUP_LOAD / PRIVATE_NAMES_RUNTIME_ONLY / ARCHIVE_BIDIRECTIONAL_FULL_METADATA_BONUS_PAYROLL_EXPLICIT_EDIT / RESTORED_ACTIVE_SNAPSHOT / RECOVERED_ARCHIVE_STATUS_SEED_INHERITED_WAGE_RESTORE_PASS");
+    console.log("ARCHIVE_NAME_STABLE_ID_TIMESTAMP_ALIASES_PAYROLL_PRESERVED / ARCHIVE_NAME_RELOAD_STALE_CLOUD_BACKUP_NEWER_REMOTE / PAYROLL_ARCHIVE_NAVIGATION_PAGE_SEARCH_FOCUS_ENTER_SPACE / UNKNOWN_NAME_ONLY_WAGE_GUARD / NAME_FILTER_PAGING_ESCAPING_PRINT_PASS");
+    console.log("NAME_STATUS_CONFLICT_BOTH_DIRECTIONS_CLOUD_LOAD_NEWER_FIELDS_FROZEN_ARCHIVE_EXACT_PAYROLL_ALIASES_PASS");
     console.log("APP_SOURCE_SHA256 " + createHash("sha256").update(source).digest("hex"));
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

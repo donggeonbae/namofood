@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 (async()=>{
-  const expected=process.env.NMF_EXPECTED_VER||'1006-2-weekly-staff';
+  const expected=process.env.NMF_EXPECTED_VER||'1009-6-menu-staff';
   const password=process.env.NMF_PW;if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
@@ -31,6 +31,21 @@ const {chromium} = require('playwright');
     assert.equal(await page.locator('#staffArchive').getAttribute('open'),null);
     assert.match(await page.locator('#staffArchive summary').innerText(),/^보관된 명단/);
     assert.equal(await page.locator('#staff-directory-table .staff-action').first().innerText(),'삭제/보관');
+    const archiveUiState=await page.evaluate(()=>JSON.stringify(S));
+    const archiveTarget=await page.evaluate(()=>laborRows().find(row=>isArchivedStaff(row.e.id))?.e.id||null);
+    assert(archiveTarget,'the current month contains at least one archived payroll row for read-only navigation checks');
+    await page.evaluate(()=>{staffArchiveSearch='no-match-read-only-check';staffArchivePage=1;render();});
+    const archiveButton=page.locator('[data-staff-archive-open]').filter({hasText:/.+/}).first();
+    await archiveButton.focus();await archiveButton.press('Enter');
+    const archiveNavigation=await page.evaluate(()=>{
+      const input=document.activeElement,id=input?.dataset.staffArchiveName,index=(S.staffArchive||[]).findIndex(e=>e.id===id);
+      return {open:document.getElementById('staffArchive').open,filter:staffArchiveSearch,page:staffArchivePage,expectedPage:Math.floor(index/10)+1,focused:!!id,nameCorrect:input?.value===findStaff(id)?.name,editableInputs:document.querySelectorAll('[data-staff-archive-name]').length};
+    });
+    assert(archiveNavigation.open&&archiveNavigation.focused&&archiveNavigation.nameCorrect,'payroll name opens the correct editable archived employee');
+    assert.equal(archiveNavigation.filter,'');assert.equal(archiveNavigation.page,archiveNavigation.expectedPage);assert(archiveNavigation.editableInputs>0&&archiveNavigation.editableInputs<=10);
+    assert.equal(await page.evaluate(()=>JSON.stringify(S)),archiveUiState,'archive navigation, search, focus and page selection cannot mutate production data');
+    await page.screenshot({path:'/tmp/nmf-live-staff-archive-edit.png',fullPage:true});
+    await page.locator('#staffArchive summary').click();
     const directoryWidths=[];
     for(const width of [1280,1024,390,320]){
       await page.setViewportSize({width,height:1000});
@@ -67,6 +82,6 @@ const {chromium} = require('playwright');
     await page.waitForTimeout(9000);
     assert.equal(documents,1,'new deployed page must not reload itself');
     assert.equal(await page.locator('#newver').count(),0);
-    console.log(JSON.stringify({version:expected,staffChecks:staff,directoryWidths,weeklySelectionCanceledWithoutChanges:true,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
+    console.log(JSON.stringify({version:expected,staffChecks:staff,archiveNavigation,directoryWidths,weeklySelectionCanceledWithoutChanges:true,recipeStatus:monitor,origin:'https://d-bae.com',documents,blockedWrites,productionWrites:0}));
   }finally{await browser.close();}
 })().catch(error=>{console.error(error.message);process.exit(1);});

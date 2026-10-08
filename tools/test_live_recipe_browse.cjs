@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-5-donggeon-recommend';
+  const version=process.env.NMF_EXPECTED_VER||'1009-6-menu-staff';
   const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
@@ -112,6 +112,20 @@ const {chromium} = require('playwright');
     assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available');
     assert.doesNotMatch(await page.locator('#recipe-monitor').innerText(),/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'visiting meal editing does not migrate legacy food values or headcounts');
+    await page.evaluate(()=>openPicker(selDay,'중식',2));
+    await page.getByRole('button',{name:'전체 메뉴에서 선택',exact:true}).click();
+    const fullCatalog=await page.evaluate(()=>({shown:pickerFilter().list.map(entry=>entry.m).sort((a,b)=>a.localeCompare(b,'ko')),expected:Object.keys(recipeMap()).filter(name=>!recipeDraftProhibitedReason(name)).sort((a,b)=>a.localeCompare(b,'ko')),slot:pk.ci}));
+    assert.deepEqual(fullCatalog.shown,fullCatalog.expected,'production whole-catalog picker shows every allowed recipe regardless of slot');
+    assert.equal(fullCatalog.slot,2);assert.equal(await page.locator('#pk-recommendations').evaluate(element=>element.open),false);
+    await page.locator('#pickerbox').screenshot({path:'/tmp/nmf-live-all-menu-picker.png'});
+    await page.evaluate(()=>closePicker());
+    await page.locator('[data-menu-rice="중식"]').click();
+    assert.equal(await page.evaluate(()=>pk.ci),0,'the default rice display opens stable rice slot zero');
+    assert.equal(await page.locator('#pk-recommendations').count(),0,'rice changes do not add a seventh AI recommendation category');
+    assert(await page.evaluate(()=>{const rmap=recipeMap();return pickerFilter().list.length>0&&pickerFilter().list.every(entry=>recipeRiceChoice(entry.m,rmap[entry.m]));}),'production rice choices include only rice dishes by default');
+    await page.locator('#pickerbox').screenshot({path:'/tmp/nmf-live-rice-picker.png'});
+    await page.evaluate(()=>closePicker());
+    assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'whole-catalog and rice browsing never mutate production data');
     let recommendation=null;
     if(verifyRecommend){
       await page.evaluate(()=>go('menu'));
