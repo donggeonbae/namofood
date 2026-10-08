@@ -227,7 +227,7 @@ Deno.serve(async (request: Request) => {
             Number(env("NMF_MENU_RECOMMEND_TIMEOUT_MS", "45000")) || 45_000,
           ),
         ),
-        maxTokens: Number(env("NMF_MENU_RECOMMEND_MAX_TOKENS", "4096")) || 4096,
+        maxTokens: Number(env("NMF_MENU_RECOMMEND_MAX_TOKENS", "8192")) || 8192,
       }).then((result) => {
         const response: ResponseBody = {
           ok: true,
@@ -258,12 +258,16 @@ Deno.serve(async (request: Request) => {
       ? (error as { attempts?: unknown }).attempts
       : undefined;
     const internal = status === 500;
+    const publicModelMessage = message.replace(
+      /^모든 메뉴 생성 모델 실패/,
+      "AI 추천 모델 응답 실패",
+    );
     return json({
       ok: false,
       reason: internal ? "recommendation_unavailable" : "recommendation_failed",
       error: internal
         ? "추천 자료를 읽지 못했습니다. 잠시 후 다시 요청해 주세요."
-        : message,
+        : publicModelMessage,
       ...(internal ? {} : { attempts }),
     }, status);
   }

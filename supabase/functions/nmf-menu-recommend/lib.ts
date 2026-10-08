@@ -9,7 +9,6 @@ import {
   type ModelAttemptDiagnostic,
   ModelFallbackError,
   type OpenCodeProtocol,
-  parseOpenCodeResponse,
   runModelFallback,
 } from "../nmf-menu-plan/lib.ts";
 
@@ -766,8 +765,10 @@ export function buildRecommendationInput(
   };
 }
 
-function jsonLineCandidate(candidate: RecipeCandidate): string {
-  return `${candidate.name} (${candidate.primary}/${candidate.method})`;
+function jsonLineCandidate(candidate: RecipeCandidate, index: number): string {
+  return `[${
+    index + 1
+  }] ${candidate.name}(${candidate.primary}/${candidate.method})`;
 }
 
 export function buildRecommendationPrompt(
@@ -783,8 +784,8 @@ export function buildRecommendationPrompt(
   const familiar = MANUAL_FAMILIAR_DISHES.slice(0, 60).join(", ");
   return [
     "나모푸드 공장 급식 식단 추천기입니다.",
-    "반드시 아래 후보 목록에 있는 기존 레시피명만 골라 JSON 하나로 답하세요.",
-    "새 음식명, 별칭, 띄어쓰기 변경, 후보 밖 음식은 금지입니다.",
+    "반드시 후보 번호 id만 골라 JSON 하나로 답하세요. 음식명은 쓰지 마세요.",
+    "새 음식명, 별칭, 띄어쓰기 변경, 후보 밖 번호는 금지입니다.",
     `식단 매뉴얼 버전: ${MENU_MANUAL_VERSION}. 한 끼 10,000원 공장노동자/함바 급식 기준입니다.`,
     "100~500인 대량 배식 공정(회전솥·대형솥·튀김기·전판)에서 현실적으로 나갈 수 있고, 맛·포만감·주찬 체감 품질이 강한 구성을 우선하세요.",
     "영양 균형은 최우선이 아니지만 식품 안전과 대량 조리 현실성은 반드시 지키세요. 가정식·브런치·소량 고명뿐인 메뉴를 주찬처럼 고르지 마세요.",
@@ -794,25 +795,54 @@ export function buildRecommendationPrompt(
     "슬롯 3과 4의 야채 부찬은 서로 겹치지 않게 총 6개를 우선 구성하세요.",
     "전체 슬롯 사이에서도 같은 실제 음식/동일 canonical 음식은 중복 금지입니다.",
     "이 추천은 저장하지 않고 사람이 고르기 위한 후보입니다.",
-    "각 추천 reason에는 왜 그 자리에 맞는지 한 줄로 짧게 적으세요.",
+    "reason은 20자 안팎으로 짧게 쓰고, 생략해도 됩니다.",
     previousFailure
       ? `이전 응답 검증 실패: ${previousFailure}. 같은 문제를 반복하지 마세요.`
       : "",
     `추천 날짜: ${input.date}`,
     sections,
     "응답 형식:",
-    '{"slots":{"1":[{"name":"후보명","reason":"짧은 이유"}],"2":[],"7":[],"8":[],"3":[],"4":[]}}',
+    '{"slots":{"1":[{"id":1,"reason":"짧은 이유"}],"2":[],"7":[],"8":[],"3":[],"4":[]}}',
   ].filter(Boolean).join("\n\n");
 }
 
 function extractJson(text: string): unknown {
-  const clean = String(text || "").replace(/```(?:json)?/gi, "").trim();
+  const clean = String(text || "").trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
   const first = clean.indexOf("{");
-  const last = clean.lastIndexOf("}");
-  if (first < 0 || last < first) {
+  if (first < 0) {
     throw new Error("LLM 응답에 JSON 객체가 없습니다");
   }
-  return JSON.parse(clean.slice(first, last + 1));
+  let depth = 0, inString = false, escaped = false, end = -1;
+  for (let i = first; i < clean.length; i++) {
+    const ch = clean[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+      if (depth < 0) break;
+    }
+  }
+  if (end < 0) throw new Error("LLM JSON 객체가 닫히지 않았습니다");
+  const trailing = clean.slice(end).trim();
+  if (trailing) {
+    throw new Error("LLM 응답 JSON 뒤에 추가 텍스트가 있습니다");
+  }
+  return JSON.parse(clean.slice(first, end));
 }
 
 export function validateRecommendationAnswer(
@@ -845,7 +875,7 @@ export function validateRecommendationAnswer(
         } 추천 수가 ${list.length}개입니다. 정확히 ${expected}개여야 합니다`,
       );
     }
-    const allowed = new Map(
+    const allowedByName = new Map(
       input.promptPools[slot].map((item) => [item.name, item]),
     );
     for (const raw of list) {
@@ -854,28 +884,101 @@ export function validateRecommendationAnswer(
         : raw && typeof raw === "object"
         ? raw as Record<string, unknown>
         : {};
+      const idValue = item.id;
+      const hasId = typeof idValue === "number" || typeof idValue === "string";
+      const id = typeof idValue === "number"
+        ? idValue
+        : typeof idValue === "string" && /^\d+$/.test(idValue)
+        ? Number(idValue)
+        : NaN;
+      const byId = Number.isInteger(id) && id >= 1
+        ? input.promptPools[slot][id - 1]
+        : undefined;
       const name = String(item.name || "").trim();
-      const candidate = allowed.get(name);
+      const byName = name ? allowedByName.get(name) : undefined;
+      if (hasId && name && byId && byId.name !== name) {
+        throw new RecommendationValidationError(
+          `${SLOT_LABELS[slot]} id와 name이 서로 다른 후보를 가리킵니다`,
+        );
+      }
+      if (hasId && !byId) {
+        throw new RecommendationValidationError(
+          `${SLOT_LABELS[slot]} 후보 밖 번호입니다: ${String(idValue)}`,
+        );
+      }
+      const candidate = byId || byName;
       if (!candidate) {
         throw new RecommendationValidationError(
           `${SLOT_LABELS[slot]} 후보 밖 음식입니다: ${name || "(빈 값)"}`,
         );
       }
-      const canonical = canonicalDish(name);
+      const canonical = canonicalDish(candidate.name);
       if (used.has(canonical)) {
-        throw new RecommendationValidationError(`중복 음식입니다: ${name}`);
+        throw new RecommendationValidationError(
+          `중복 음식입니다: ${candidate.name}`,
+        );
       }
       used.add(canonical);
       result[slot].push({
-        name,
-        reason: String(item.reason || `${SLOT_LABELS[slot]} 후보`).trim().slice(
-          0,
-          120,
-        ),
+        name: candidate.name,
+        reason: String(
+          item.reason ||
+            `AI가 고른 ${SLOT_LABELS[slot]} 등록 레시피 후보`,
+        ).trim().slice(0, 120),
       });
     }
   }
   return result;
+}
+
+function textFromOpenCodeContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((part) => {
+    if (typeof part === "string") return part;
+    if (!part || typeof part !== "object") return "";
+    const value = part as { type?: unknown; text?: unknown };
+    if (typeof value.text !== "string") return "";
+    if (value.type !== undefined && value.type !== "text") return "";
+    return value.text;
+  }).join("");
+}
+
+export function parseRecommendationOpenCodeResponse(
+  protocol: OpenCodeProtocol,
+  payload: unknown,
+): string {
+  const value = payload && typeof payload === "object"
+    ? payload as Record<string, unknown>
+    : {};
+  let finish: unknown;
+  let content: unknown;
+  if (protocol === "messages") {
+    finish = value.stop_reason;
+    if (
+      finish !== undefined && finish !== null && finish !== "end_turn" &&
+      finish !== "stop_sequence"
+    ) {
+      throw new Error(`LLM finish_reason=${String(finish)}`);
+    }
+    content = value.content;
+  } else {
+    const choices = Array.isArray(value.choices) ? value.choices : [];
+    const choice = choices[0] && typeof choices[0] === "object"
+      ? choices[0] as Record<string, unknown>
+      : {};
+    finish = choice.finish_reason;
+    if (finish !== undefined && finish !== null && finish !== "stop") {
+      throw new Error(`LLM finish_reason=${String(finish)}`);
+    }
+    const message = choice.message && typeof choice.message === "object"
+      ? choice.message as Record<string, unknown>
+      : {};
+    content = message.content;
+  }
+  const text = textFromOpenCodeContent(content).trim();
+  if (!text) throw new Error("LLM 응답이 비어 있습니다");
+  return text;
 }
 
 async function callOpenCode(
@@ -903,7 +1006,7 @@ async function callOpenCode(
       body: JSON.stringify({
         model,
         temperature: 0.35,
-        max_tokens: Math.max(512, options.maxTokens || 4096),
+        max_tokens: Math.min(12_000, Math.max(1024, options.maxTokens || 8192)),
         messages: [{ role: "user", content: prompt }],
       }),
       signal: AbortSignal.any([
@@ -917,7 +1020,7 @@ async function callOpenCode(
       `LLM ${response.status} ${(await response.text()).slice(0, 300)}`,
     );
   }
-  return parseOpenCodeResponse(protocol, await response.json());
+  return parseRecommendationOpenCodeResponse(protocol, await response.json());
 }
 
 export async function runRecommendationModel(

@@ -5,7 +5,9 @@ import {
   buildRecommendationInput,
   buildRecommendationPrompt,
   type MenuRecommendState,
+  parseRecommendationOpenCodeResponse,
   recipeFoodProfile,
+  validateRecommendationAnswer,
 } from "../supabase/functions/nmf-menu-recommend/lib.ts";
 
 type Handler = (req: Request) => Promise<Response>;
@@ -33,6 +35,7 @@ let handler!: Handler;
 let readCalls = 0;
 let fetchCalls = 0;
 let writes = 0;
+let providerSuccessSlots: Record<string, unknown>;
 
 function assert(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
@@ -42,6 +45,15 @@ function equal(actual: unknown, expected: unknown, message: string) {
     actual === expected,
     `${message}: expected ${expected}, got ${actual}`,
   );
+}
+function assertThrows(fn: () => unknown, message: string) {
+  let threw = false;
+  try {
+    fn();
+  } catch {
+    threw = true;
+  }
+  assert(threw, message);
 }
 function assertCors(response: Response, origin: string | null, label: string) {
   equal(response.headers.get("access-control-allow-origin"), origin, label);
@@ -187,7 +199,21 @@ function validSlots() {
     })),
   };
 }
-function chatResponse(slots: Record<string, unknown> = validSlots()) {
+function idSlotsFor(input: ReturnType<typeof buildRecommendationInput>) {
+  const names = validSlots();
+  return Object.fromEntries(
+    Object.entries(names).map(([slot, entries]) => [
+      slot,
+      entries.map((entry) => {
+        const index = input.promptPools[slot as keyof typeof input.promptPools]
+          .findIndex((candidate) => candidate.name === entry.name);
+        assert(index >= 0, `${entry.name} exists in prompt pool ${slot}`);
+        return { id: index + 1, reason: entry.reason };
+      }),
+    ]),
+  );
+}
+function chatResponse(slots: Record<string, unknown> = providerSuccessSlots) {
   return new Response(
     JSON.stringify({
       choices: [{
@@ -198,7 +224,9 @@ function chatResponse(slots: Record<string, unknown> = validSlots()) {
     { status: 200, headers: { "content-type": "application/json" } },
   );
 }
-function messagesResponse(slots: Record<string, unknown> = validSlots()) {
+function messagesResponse(
+  slots: Record<string, unknown> = providerSuccessSlots,
+) {
   return new Response(
     JSON.stringify({
       stop_reason: "end_turn",
@@ -274,11 +302,89 @@ try {
     );
   }
   const input = buildRecommendationInput(state, "2026-10-24", "nonce-1");
+  providerSuccessSlots = idSlotsFor(input);
   const prompt = buildRecommendationPrompt(input);
   assert(
-    /10,000원|공장노동자|100~500인|회전솥|튀김기|전판|포만감|고기 메인|생선\/해산물|기타 주찬|야채 부찬|reason/
+    /후보 번호 id만|10,000원|공장노동자|100~500인|회전솥|튀김기|전판|포만감|고기 메인|생선\/해산물|기타 주찬|야채 부찬|reason/
       .test(prompt),
     "prompt carries the aggressive factory-meal quality rules",
+  );
+  assert(/\[1\]/.test(prompt), "prompt uses compact numeric candidate IDs");
+  const numericAnswer = JSON.stringify({ slots: providerSuccessSlots });
+  const fencedAnswer = `\`\`\`json\n${numericAnswer}\n\`\`\``;
+  equal(
+    validateRecommendationAnswer(fencedAnswer, input)["2"][0].name,
+    "소불고기",
+    "numeric IDs map back to existing recipe names",
+  );
+  const protocolText = parseRecommendationOpenCodeResponse("messages", {
+    stop_reason: "end_turn",
+    content: [
+      { type: "thinking", text: '{"slots":{"1":[{"id":999}]}}' },
+      { type: "text", text: fencedAnswer },
+    ],
+  });
+  equal(
+    validateRecommendationAnswer(protocolText, input)["7"][1].name,
+    "오징어볶음",
+    "messages parser ignores non-text metadata blocks",
+  );
+  assertThrows(
+    () =>
+      validateRecommendationAnswer(
+        JSON.stringify({
+          slots: {
+            ...providerSuccessSlots,
+            "1": [{ id: 999 }, { id: 1 }, { id: 2 }],
+          },
+        }),
+        input,
+      ),
+    "outside numeric candidate IDs are rejected",
+  );
+  assertThrows(
+    () =>
+      validateRecommendationAnswer(
+        JSON.stringify({
+          slots: {
+            ...providerSuccessSlots,
+            "2": [
+              (providerSuccessSlots["2"] as Array<Record<string, unknown>>)[0],
+              (providerSuccessSlots["2"] as Array<Record<string, unknown>>)[0],
+              (providerSuccessSlots["2"] as Array<Record<string, unknown>>)[2],
+            ],
+          },
+        }),
+        input,
+      ),
+    "duplicate canonical IDs are rejected",
+  );
+  assertThrows(
+    () =>
+      validateRecommendationAnswer(
+        JSON.stringify({
+          slots: {
+            ...providerSuccessSlots,
+            "2": [
+              {
+                ...(providerSuccessSlots["2"] as Array<
+                  Record<string, unknown>
+                >)[0],
+                name: "닭갈비",
+              },
+              ...(providerSuccessSlots["2"] as Array<Record<string, unknown>>)
+                .slice(1),
+            ],
+          },
+        }),
+        input,
+      ),
+    "id/name ambiguity is rejected",
+  );
+  assertThrows(
+    () =>
+      validateRecommendationAnswer(`${numericAnswer}\n${numericAnswer}`, input),
+    "multiple JSON roots are rejected",
   );
   const unresolvedState = fixtureState();
   unresolvedState.recipeAsk = { 소불고기: { reason: "검토 중" } };
@@ -332,6 +438,7 @@ try {
         "primary uses chat completions",
       );
       equal(body.model, "primary-bad", "primary model");
+      equal(body.max_tokens, 8192, "recommendation default max tokens");
       return new Response(
         JSON.stringify({
           choices: [{
@@ -494,6 +601,11 @@ try {
     "source" in failedBody,
     false,
     "failed response never claims source ai",
+  );
+  assert(
+    String(failedBody.error || "").includes("AI 추천 모델 응답 실패") &&
+      !String(failedBody.error || "").includes("모든 메뉴 생성 모델 실패"),
+    "recommendation failure copy cannot look like retired menu auto-generation",
   );
   equal(scenarioCalls, 2, "failed run tried primary and fallback");
 
