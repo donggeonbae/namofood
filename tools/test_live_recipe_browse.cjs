@@ -78,7 +78,9 @@ const {chromium} = require('playwright');
       assert(fit.scroll<=fit.width,'recipe page fits '+width);widths.push(fit);
     }
     await page.evaluate(()=>go('menu'));
-    assert.equal(await page.locator('#main').getByText(/AI기반|AI 기반|🤖/).count(),0,'meal editing contains no AI update badges or controls');
+    assert.equal(await page.locator('#main .ai-menu').count(),0,'meal editing contains no AI menu badges');
+    assert.equal(await page.locator('#main').getByText(/AI기반|AI 기반|AI 식단/).count(),0,'meal editing contains no AI menu update controls');
+    assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available');
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'visiting meal editing does not migrate legacy food values or headcounts');
     await page.evaluate(()=>go('recipe'));
     await page.screenshot({path:'/tmp/nmf-live-recipe-browse.png',fullPage:true});
