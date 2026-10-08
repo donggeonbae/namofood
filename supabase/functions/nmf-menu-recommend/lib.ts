@@ -1,6 +1,6 @@
 // 나모푸드 식단 추천 — 기존 레시피명만 고르는 읽기 전용 Edge Function 순수 로직
 import { assertMealMenuAllowed } from "../_shared/menu-eligibility.ts";
-import { canonicalDish } from "../_shared/institutional-menu.ts";
+import { canonicalDish, dishAliases } from "../_shared/institutional-menu.ts";
 import {
   MANUAL_FAMILIAR_DISHES,
   MENU_MANUAL_VERSION,
@@ -53,6 +53,16 @@ export type RecommendationResult = {
   warnings: string[];
   excludedCount: number;
   validatedCount: number;
+};
+export type RecommendationBank = RecommendationResult & {
+  ok: true;
+  date: string;
+  generatedAt: string;
+  aliases: Record<string, string>;
+  cached: boolean;
+  serverStored: true;
+  storage: "server";
+  expectedCounts: RecommendationInput["expectedCounts"];
 };
 export type RecommendationModelOptions = {
   apiKey: string;
@@ -642,6 +652,116 @@ function stateFingerprint(state: MenuRecommendState, date: string): string {
     }
   }
   return hashText(JSON.stringify({ recipes, unresolved, neighbors }));
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
+        .join(",")
+    }}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+// Menus and headcounts intentionally do not revise the shared daily bank.
+// Every browser rechecks its current surrounding week before displaying/picking.
+export async function recommendationCatalogRevision(
+  state: MenuRecommendState,
+): Promise<string> {
+  const text = stableJson({
+    policy: "server-bank-v1",
+    manual: MENU_MANUAL_VERSION,
+    aliases: dishAliases(),
+    recipes: (state.recipes || []).map(stableJson).sort(),
+    methods: state.methods || {},
+    recipeAsk: state.recipeAsk || {},
+  });
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
+  );
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+export function validateStoredRecommendationBank(
+  value: unknown,
+  input: RecommendationInput,
+): RecommendationBank | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const bank = value as RecommendationBank;
+  if (
+    bank.ok !== true || bank.source !== "ai" || bank.date !== input.date ||
+    bank.serverStored !== true || bank.storage !== "server" ||
+    typeof bank.model !== "string" || !bank.model.trim() ||
+    bank.model.length > 200 || typeof bank.fallbackUsed !== "boolean" ||
+    typeof bank.generatedAt !== "string" ||
+    Number.isNaN(Date.parse(bank.generatedAt)) ||
+    new Date(bank.generatedAt).toISOString() !== bank.generatedAt ||
+    !Array.isArray(bank.warnings) ||
+    !bank.warnings.every((warning) => typeof warning === "string") ||
+    !Number.isInteger(bank.excludedCount) || bank.excludedCount < 0 ||
+    !bank.slots || typeof bank.slots !== "object" ||
+    Object.keys(bank.slots).sort().join(",") !==
+      [...SLOT_IDS].sort().join(",") ||
+    !bank.expectedCounts || typeof bank.expectedCounts !== "object" ||
+    Object.keys(bank.expectedCounts).sort().join(",") !==
+      [...SLOT_IDS].sort().join(",") ||
+    stableJson(bank.aliases) !== stableJson(dishAliases()) ||
+    !Array.isArray(bank.attempts) || bank.attempts.length < 1 ||
+    bank.attempts.length > 3
+  ) return null;
+  for (const attempt of bank.attempts) {
+    if (
+      !attempt || typeof attempt.model !== "string" || !attempt.model.trim() ||
+      !["chat-completions", "messages"].includes(attempt.protocol) ||
+      typeof attempt.ok !== "boolean" ||
+      !Number.isFinite(attempt.elapsedMs) || attempt.elapsedMs < 0
+    ) return null;
+  }
+  const lastAttempt = bank.attempts[bank.attempts.length - 1];
+  if (!lastAttempt.ok || lastAttempt.model !== bank.model) return null;
+  for (const slot of SLOT_IDS) {
+    const expected = bank.expectedCounts[slot];
+    if (
+      !Number.isInteger(expected) || expected < 0 || expected > 3 ||
+      expected > input.expectedCounts[slot]
+    ) return null;
+    if (!Array.isArray(bank.slots[slot])) return null;
+    for (const item of bank.slots[slot]) {
+      if (
+        !item || typeof item.name !== "string" || !item.name.trim() ||
+        item.name.trim() !== item.name ||
+        typeof item.reason !== "string" || !item.reason.trim() ||
+        item.reason.trim() !== item.reason ||
+        item.reason.length > 120
+      ) return null;
+    }
+  }
+  try {
+    // Persisted names may be outside a newly sampled prompt's 36-item subset.
+    // Validate against all current registered/grouped/canonical catalog entries.
+    const slots = validateRecommendationAnswer(
+      JSON.stringify({ slots: bank.slots }),
+      {
+        ...input,
+        promptPools: input.pools,
+        expectedCounts: bank.expectedCounts,
+      },
+    );
+    const count = Object.values(slots).reduce(
+      (sum, items) => sum + items.length,
+      0,
+    );
+    if (bank.validatedCount !== count) return null;
+    return { ...bank, slots };
+  } catch {
+    return null;
+  }
 }
 
 export function buildRecommendationInput(

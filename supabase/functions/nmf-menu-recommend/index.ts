@@ -1,5 +1,5 @@
-// 나모푸드 식단 AI 추천 — 기존 레시피명만 읽어 후보를 반환한다.
-// 상태/일정/메뉴/실행기록을 쓰지 않는다. 브라우저는 HMAC 서명만 보낸다.
+// 나모푸드 식단 AI 추천 — 날짜별 후보만 서버에 보관한다.
+// 실제 상태/식단/인원/레시피/스냅샷은 수정하지 않는다.
 import { readState } from "../_shared/database.ts";
 import { dishAliases } from "../_shared/institutional-menu.ts";
 import { decryptText } from "../nmf-recipe-fill/lib.ts";
@@ -7,45 +7,44 @@ import {
   assertDate,
   buildRecommendationInput,
   type MenuRecommendState,
+  type RecommendationBank,
+  recommendationCatalogRevision,
   recommendationErrorStatus,
-  type RecommendationResult,
   runRecommendationModel,
+  validateStoredRecommendationBank,
 } from "./lib.ts";
+import {
+  acquireRecommendationLease,
+  type BankKey,
+  readRecommendationBank,
+  releaseRecommendationLease,
+  saveRecommendationBank,
+  type StoredBank,
+} from "./storage.ts";
 
-type Body = { date?: unknown; nonce?: unknown };
-type CachedResponse = {
-  value: ResponseBody;
-  expiresAt: number;
-};
-type ResponseBody = {
-  ok: true;
-  date: string;
-  source: "ai";
-  model: string;
-  fallbackUsed: boolean;
-  generatedAt: string;
-  slots: RecommendationResult["slots"];
-  warnings: string[];
-  aliases: Record<string, string>;
-  excludedCount: number;
-  validatedCount: number;
-  cached: boolean;
-  attempts: RecommendationResult["attempts"];
-};
+type Body = { date?: unknown; nonce?: unknown; action?: unknown };
 
 const CORS_ORIGINS = new Set([
   "https://d-bae.com",
   "https://donggeonbae.github.io",
 ]);
-const CACHE_TTL_MS = 5 * 60_000;
-const CACHE_LIMIT = 32;
-const cache = new Map<string, CachedResponse>();
-const inflight = new Map<string, Promise<ResponseBody>>();
 
 const env = (key: string, fallback = ""): string =>
   (Deno.env.get(key) ?? fallback).trim();
 const TABLE = env("NMF_TABLE", "namofood_state");
 const ROOM = env("NMF_ROOM", "namofood");
+
+class BankStorageError extends Error {}
+
+async function storageOperation<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new BankStorageError(
+      "서버 추천 보관함을 읽거나 저장하지 못했습니다. 잠시 후 다시 확인해 주세요.",
+    );
+  }
+}
 
 function jsonForRequest(request: Request) {
   const origin = request.headers.get("origin") || "";
@@ -123,7 +122,10 @@ async function requestBody(request: Request): Promise<Body> {
   }
 }
 
-function cloneResponse(value: ResponseBody, cached: boolean): ResponseBody {
+function cloneResponse(
+  value: RecommendationBank,
+  cached: boolean,
+): RecommendationBank {
   return {
     ...value,
     cached,
@@ -131,19 +133,8 @@ function cloneResponse(value: ResponseBody, cached: boolean): ResponseBody {
     warnings: value.warnings.slice(),
     aliases: { ...value.aliases },
     attempts: value.attempts.map((item) => ({ ...item })),
+    expectedCounts: { ...value.expectedCounts },
   };
-}
-
-function remember(key: string, value: ResponseBody): void {
-  cache.set(key, {
-    value: cloneResponse(value, false),
-    expiresAt: Date.now() + CACHE_TTL_MS,
-  });
-  while (cache.size > CACHE_LIMIT) {
-    const oldest = cache.keys().next().value;
-    if (!oldest) break;
-    cache.delete(oldest);
-  }
 }
 
 async function loadState(password: string): Promise<MenuRecommendState> {
@@ -163,6 +154,10 @@ Deno.serve(async (request: Request) => {
   const body = await requestBody(request);
   const date = String(body.date || "").trim();
   const nonce = String(body.nonce || "").trim();
+  const preparing = body.action === "prepare";
+  if (body.action !== undefined && !preparing) {
+    return json({ ok: false, reason: "invalid_action" }, 400);
+  }
   try {
     assertDate(date);
   } catch (error) {
@@ -183,13 +178,51 @@ Deno.serve(async (request: Request) => {
   const password = env("NMF_PW");
   const timestamp = request.headers.get("x-nmf-time") || "";
   const signature = request.headers.get("x-nmf-signature") || "";
-  if (!(await verifyRequest(password, date, nonce, timestamp, signature))) {
+  const secret = env("NMF_CRON_SECRET");
+  const bearer = request.headers.get("authorization") || "";
+  const enc = new TextEncoder();
+  const authorized = preparing
+    ? Boolean(
+      secret && safeEqual(enc.encode(bearer), enc.encode(`Bearer ${secret}`)),
+    )
+    : await verifyRequest(password, date, nonce, timestamp, signature);
+  if (!authorized) {
     return json({ ok: false, reason: "unauthorized" }, 401);
+  }
+  if (preparing) {
+    const today = new Date(Date.now() + 9 * 60 * 60_000).toISOString().slice(
+      0,
+      10,
+    );
+    const lastDate = new Date(
+      Date.parse(`${today}T00:00:00Z`) + 14 * 86_400_000,
+    )
+      .toISOString().slice(0, 10);
+    if (date < today || date > lastDate) {
+      return json({ ok: false, reason: "prepare_date_out_of_range" }, 400);
+    }
   }
 
   try {
     const state = await loadState(password);
-    const input = buildRecommendationInput(state, date, nonce);
+    const revision = await recommendationCatalogRevision(state);
+    const key: BankKey = { stateTable: TABLE, room: ROOM, date };
+    const dailyNonce = `daily-${date}`;
+    // Generation still avoids actual adjacent menus. Durable validation does
+    // not reroll the bank when a user subsequently chooses one of its dishes.
+    const input = buildRecommendationInput(state, date, dailyNonce);
+    const catalogInput = buildRecommendationInput(
+      { ...state, menus: {} },
+      date,
+      dailyNonce,
+    );
+    const validStored = (row: StoredBank | null): RecommendationBank | null =>
+      row?.catalog_revision === revision
+        ? validateStoredRecommendationBank(row.response, catalogInput)
+        : null;
+    const stored = await storageOperation(() => readRecommendationBank(key));
+    const ready = validStored(stored);
+    if (ready) return json(cloneResponse(ready, true));
     const expectedTotal = Object.values(input.expectedCounts).reduce(
       (sum, count) => sum + count,
       0,
@@ -202,14 +235,26 @@ Deno.serve(async (request: Request) => {
         warnings: input.warnings,
       }, 503);
     }
-    const cacheKey = `${date}|${nonce}|${input.fingerprint}`;
-    const cached = cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      return json(cloneResponse(cached.value, true));
+    const leaseToken = crypto.randomUUID();
+    const acquired = await storageOperation(() =>
+      acquireRecommendationLease(
+        key,
+        revision,
+        leaseToken,
+        stored?.updated_at || null,
+      )
+    );
+    if (!acquired) {
+      const current = await storageOperation(() => readRecommendationBank(key));
+      const completed = validStored(current);
+      if (completed) return json(cloneResponse(completed, true));
+      return json(
+        { ok: false, reason: "bank_pending", retryAfterSeconds: 5 },
+        202,
+      );
     }
-    const joined = inflight.has(cacheKey);
-    if (!joined) {
-      const promise = runRecommendationModel(input, {
+    try {
+      const result = await runRecommendationModel(input, {
         apiKey: env("OPENCODE_API_KEY") || env("OPENCODE_GO_API_KEY"),
         baseUrl: env("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"),
         primaryModel: env(
@@ -228,30 +273,55 @@ Deno.serve(async (request: Request) => {
           ),
         ),
         maxTokens: Number(env("NMF_MENU_RECOMMEND_MAX_TOKENS", "8192")) || 8192,
-      }).then((result) => {
-        const response: ResponseBody = {
-          ok: true,
-          date,
-          source: result.source,
-          model: result.model,
-          fallbackUsed: result.fallbackUsed,
-          generatedAt: new Date().toISOString(),
-          slots: result.slots,
-          warnings: result.warnings,
-          aliases: dishAliases(),
-          excludedCount: result.excludedCount,
-          validatedCount: result.validatedCount,
-          cached: false,
-          attempts: result.attempts,
-        };
-        remember(cacheKey, response);
-        return response;
-      }).finally(() => inflight.delete(cacheKey));
-      inflight.set(cacheKey, promise);
+      });
+      const response: RecommendationBank = {
+        ok: true,
+        date,
+        source: result.source,
+        model: result.model,
+        fallbackUsed: result.fallbackUsed,
+        generatedAt: new Date().toISOString(),
+        slots: result.slots,
+        warnings: result.warnings,
+        aliases: dishAliases(),
+        excludedCount: result.excludedCount,
+        validatedCount: result.validatedCount,
+        cached: false,
+        attempts: result.attempts,
+        serverStored: true,
+        storage: "server",
+        expectedCounts: { ...input.expectedCounts },
+      };
+      // Never return a successful transient bank if durable save failed.
+      const saved = await storageOperation(() =>
+        saveRecommendationBank(
+          key,
+          revision,
+          leaseToken,
+          response,
+        )
+      );
+      if (!saved) {
+        throw new BankStorageError(
+          "추천 보관 시간이 만료되어 저장하지 못했습니다. 다시 확인해 주세요.",
+        );
+      }
+      return json(cloneResponse(response, false));
+    } catch (error) {
+      // Releasing only our token cannot clear a newer generation's lease.
+      try {
+        await releaseRecommendationLease(key, leaseToken);
+      } catch { /* expires after 150s */ }
+      throw error;
     }
-    const response = await inflight.get(cacheKey)!;
-    return json(cloneResponse(response, joined));
   } catch (error) {
+    if (error instanceof BankStorageError) {
+      return json({
+        ok: false,
+        reason: "bank_storage_unavailable",
+        error: error.message,
+      }, 503);
+    }
     const message = error instanceof Error ? error.message : String(error);
     const status = recommendationErrorStatus(error);
     const attempts = error && typeof error === "object" && "attempts" in error

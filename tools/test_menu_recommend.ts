@@ -8,9 +8,11 @@ import {
   type MenuRecommendState,
   parseRecommendationOpenCodeResponse,
   recipeFoodProfile,
+  recommendationCatalogRevision,
   type RecommendationModelOptions,
   runRecommendationModel,
   validateRecommendationAnswer,
+  validateStoredRecommendationBank,
 } from "../supabase/functions/nmf-menu-recommend/lib.ts";
 
 type Handler = (req: Request) => Promise<Response>;
@@ -31,6 +33,7 @@ const envKeys = [
   "NMF_MENU_RECOMMEND_MODEL",
   "NMF_MENU_RECOMMEND_FALLBACK_MODEL",
   "NMF_MENU_RECOMMEND_TIMEOUT_MS",
+  "NMF_CRON_SECRET",
 ];
 const originalEnv = new Map(envKeys.map((key) => [key, Deno.env.get(key)]));
 const nativeFetch = globalThis.fetch;
@@ -39,6 +42,114 @@ let readCalls = 0;
 let fetchCalls = 0;
 let writes = 0;
 let providerSuccessSlots: Record<string, unknown>;
+type FakeBankRow = {
+  catalog_revision: string;
+  response: unknown;
+  updated_at: string;
+  lease_expires_at: string | null;
+  lease_token: string | null;
+  generated_at: string | null;
+};
+const bankRows = new Map<string, FakeBankRow>();
+const bankKey = (table: string, room: string, date: string) =>
+  JSON.stringify([table, room, date]);
+let storageCalls = 0;
+let failBankRead = false;
+let failBankSave = false;
+let storeClock = Date.now();
+const nextVersion = () => new Date(++storeClock).toISOString();
+const sqlTexts: string[] = [];
+async function fakeSql(strings: TemplateStringsArray, ...values: unknown[]) {
+  storageCalls++;
+  const text = strings.join("?").replace(/\s+/g, " ").trim();
+  sqlTexts.push(text);
+  if (text.startsWith("select pg_advisory_xact_lock")) return [];
+  if (text.startsWith("select count(*)")) {
+    const [table, room] = values as string[];
+    return [{
+      count: [...bankRows].filter(([key, row]) => {
+        const [rowTable, rowRoom] = JSON.parse(key);
+        return rowTable === table && rowRoom === room && row.lease_expires_at &&
+          Date.parse(row.lease_expires_at) > Date.now();
+      }).length,
+    }];
+  }
+  if (text.startsWith("select catalog_revision")) {
+    if (failBankRead) throw new Error("private storage database credential");
+    const [table, room, date] = values as string[];
+    const row = bankRows.get(bankKey(table, room, date));
+    return row ? [structuredClone(row)] : [];
+  }
+  if (text.startsWith("insert into public.nmf_menu_recommend_banks")) {
+    const [table, room, date, revision, token, observed] = values as string[];
+    const key = bankKey(table, room, date), row = bankRows.get(key);
+    if (
+      row && (row.updated_at !== observed ||
+        (row.lease_expires_at && Date.parse(row.lease_expires_at) > Date.now()))
+    ) return [];
+    bankRows.set(key, {
+      catalog_revision: revision,
+      response: null,
+      generated_at: null,
+      updated_at: nextVersion(),
+      lease_token: token,
+      lease_expires_at: new Date(Date.now() + 150_000).toISOString(),
+    });
+    return [{ lease_token: token }];
+  }
+  if (text.startsWith("update public.nmf_menu_recommend_banks set response=")) {
+    if (failBankSave) throw new Error("private storage save credential");
+    const [response, generated, table, room, date, revision, token] =
+      values as [unknown, string, string, string, string, string, string];
+    const key = bankKey(table, room, date), row = bankRows.get(key);
+    if (
+      !row || row.catalog_revision !== revision || row.lease_token !== token ||
+      !row.lease_expires_at || Date.parse(row.lease_expires_at) <= Date.now()
+    ) return [];
+    bankRows.set(key, {
+      ...row,
+      response: structuredClone(response),
+      generated_at: generated,
+      lease_token: null,
+      lease_expires_at: null,
+      updated_at: nextVersion(),
+    });
+    return [{ target_date: date }];
+  }
+  if (
+    text.startsWith(
+      "update public.nmf_menu_recommend_banks set lease_token=null",
+    )
+  ) {
+    const [table, room, date, token] = values as string[];
+    const key = bankKey(table, room, date), row = bankRows.get(key);
+    if (row?.lease_token === token) {
+      bankRows.set(key, {
+        ...row,
+        lease_token: null,
+        lease_expires_at: null,
+        updated_at: nextVersion(),
+      });
+    }
+    return [];
+  }
+  throw new Error(`Unexpected actual storage query: ${text}`);
+}
+let claimQueue = Promise.resolve();
+const fakeSqlWithMethods = Object.assign(fakeSql, {
+  json: (value: unknown) => value,
+  async begin<T>(callback: (transaction: typeof fakeSql) => Promise<T>) {
+    let unlock!: () => void;
+    const previous = claimQueue;
+    claimQueue = new Promise<void>((resolve) => unlock = resolve);
+    await previous;
+    try {
+      return await callback(fakeSql);
+    } finally {
+      unlock();
+    }
+  },
+});
 
 function assert(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
@@ -313,6 +424,7 @@ try {
   Deno.env.set("NMF_MENU_RECOMMEND_MODEL", "primary-bad");
   Deno.env.set("NMF_MENU_RECOMMEND_FALLBACK_MODEL", "minimax-m3");
   Deno.env.set("NMF_MENU_RECOMMEND_TIMEOUT_MS", "5000");
+  Deno.env.set("NMF_CRON_SECRET", "offline-cron-secret");
 
   const state = fixtureState();
   const profileCases: Array<[
@@ -783,12 +895,12 @@ try {
     AbortSignal.timeout = nativeTimeout;
   }
 
-  const encrypted = await encryptText(APP_PASSWORD, JSON.stringify(state));
+  let encrypted = await encryptText(APP_PASSWORD, JSON.stringify(state));
   globals.__menuRecommendDb = {
     async readState(table: string, room: string) {
       readCalls++;
       equal(table, "namofood_state", "state table");
-      equal(room, "namofood", "state room");
+      assert(["namofood", "other-room"].includes(room), "state room");
       return [{ data: encrypted, updated_at: "2026-10-08T00:00:00.000Z" }];
     },
     writeState() {
@@ -803,6 +915,7 @@ try {
     },
   };
   globals.__menuRecommendCapture = (value: Handler) => handler = value;
+  globals.__menuRecommendSql = fakeSqlWithMethods;
   globalThis.fetch = async (url, init) => {
     fetchCalls++;
     const text = String(url);
@@ -833,12 +946,50 @@ try {
     return messagesResponse();
   };
 
+  let storageSource = await Deno.readTextFile(
+    new URL(
+      "../supabase/functions/nmf-menu-recommend/storage.ts",
+      import.meta.url,
+    ),
+  );
+  storageSource = storageSource.replace(
+    /import\s*\{\s*sql\s*\}\s*from "\.\.\/_shared\/database\.ts";/,
+    "const sql = (globalThis as any).__menuRecommendSql;",
+  ).replace(
+    'from "./lib.ts";',
+    `from ${
+      JSON.stringify(
+        new URL(
+          "../supabase/functions/nmf-menu-recommend/lib.ts",
+          import.meta.url,
+        ).href,
+      )
+    };`,
+  );
+  const storageUrl = `data:application/typescript,${
+    encodeURIComponent(storageSource)
+  }`;
+  const storageModule = await import(storageUrl);
   let source = await Deno.readTextFile(
     new URL(
       "../supabase/functions/nmf-menu-recommend/index.ts",
       import.meta.url,
     ),
   );
+  if (
+    Deno.env.get("NMF_SERVER_BANK_NEGATIVE_CONTROL") === "old-isolate-cache"
+  ) {
+    const baseline = await new Deno.Command("git", {
+      args: ["show", "HEAD:supabase/functions/nmf-menu-recommend/index.ts"],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assert(
+      baseline.success,
+      "negative control loads exact old committed handler",
+    );
+    source = new TextDecoder().decode(baseline.stdout);
+  }
   assert(
     !/writeState|snapshotState|nmf-menu-plan\/index/.test(source),
     "handler source stays read-only",
@@ -874,7 +1025,8 @@ try {
         ).href,
       )
     };`,
-  ).replace("Deno.serve(", "(globalThis as any).__menuRecommendCapture(");
+  ).replace('from "./storage.ts";', `from ${JSON.stringify(storageUrl)};`)
+    .replace("Deno.serve(", "(globalThis as any).__menuRecommendCapture(");
   await import(`data:application/typescript,${encodeURIComponent(source)}`);
   assert(handler, "actual handler loaded");
 
@@ -899,6 +1051,7 @@ try {
   assertCors(unauthorized, DOMAIN, "unauthorized CORS");
   equal(readCalls, 0, "auth/date failures do not read DB");
   equal(fetchCalls, 0, "auth/date failures do not call model");
+  equal(storageCalls, 0, "auth/date failures do not access server banks");
 
   const preflight = await handler(
     new Request(endpoint, { method: "OPTIONS", headers: { origin: DOMAIN } }),
@@ -938,9 +1091,111 @@ try {
   equal(
     (await responseBody(cached)).cached,
     true,
-    "second response served from in-memory cache",
+    "second response served from durable server bank",
   );
   equal(fetchCalls, 2, "cache avoids second model call");
+
+  async function freshHandler(label: string): Promise<Handler> {
+    let isolated!: Handler;
+    globals.__menuRecommendCapture = (value: Handler) => isolated = value;
+    await import(
+      `data:application/typescript,${
+        encodeURIComponent(`${source}\n// ${label}`)
+      }`
+    );
+    return isolated;
+  }
+  const isolatedHandler = await freshHandler("fresh isolate durable reuse");
+  const reused = await responseBody(
+    await isolatedHandler(
+      await signedRequest("2026-10-24", "other-device-nonce"),
+    ),
+  );
+  equal(
+    reused.cached,
+    true,
+    "fresh isolate and different nonce reuse server bank",
+  );
+  equal(
+    reused.generatedAt,
+    data.generatedAt,
+    "shared bank preserves original generation time",
+  );
+  equal(
+    JSON.stringify(reused.slots),
+    JSON.stringify(data.slots),
+    "shared bank preserves all18 candidate/reason pairs",
+  );
+  equal(fetchCalls, 2, "fresh isolate makes zero additional provider calls");
+  equal(
+    data.serverStored,
+    true,
+    "successful recommendation is durably server-stored",
+  );
+  const originalNowForReuse = Date.now;
+  try {
+    Date.now = () => originalNowForReuse() + 6 * 60_000;
+    const beyondTtl = await responseBody(
+      await isolatedHandler(await signedRequest()),
+    );
+    equal(
+      beyondTtl.generatedAt,
+      data.generatedAt,
+      "server bank survives former5minute cacheTTL",
+    );
+    equal(fetchCalls, 2, "durable reuse after5minutes costs no provider call");
+  } finally {
+    Date.now = originalNowForReuse;
+  }
+
+  const beforePrepareReadCalls = readCalls,
+    beforePrepareStorageCalls = storageCalls,
+    beforePrepareFetchCalls = fetchCalls;
+  const hmacPrepare = await signedRequest();
+  const prepareHeaders = Object.fromEntries(hmacPrepare.headers);
+  const unauthorizedPrepareCases = [
+    new Request(endpoint, {
+      method: "POST",
+      headers: prepareHeaders,
+      body: JSON.stringify({
+        action: "prepare",
+        date: "2026-10-24",
+        nonce: "nonce-1",
+      }),
+    }),
+    new Request(endpoint, {
+      method: "POST",
+      headers: { authorization: "Bearer wrong-cron-secret" },
+      body: JSON.stringify({ action: "prepare", date: "2026-10-24" }),
+    }),
+    new Request(endpoint, {
+      method: "POST",
+      headers: { authorization: "Bearer offline-cron-secret" },
+      body: JSON.stringify({ date: "2026-10-24", nonce: "nonce-1" }),
+    }),
+  ];
+  for (const request of unauthorizedPrepareCases) {
+    equal(
+      (await handler(request)).status,
+      401,
+      "HMAC and cron prepare auth boundaries remain distinct",
+    );
+  }
+  equal(
+    readCalls,
+    beforePrepareReadCalls,
+    "unauthorized prepare never reads state",
+  );
+  equal(
+    storageCalls,
+    beforePrepareStorageCalls,
+    "unauthorized prepare never reads or writes banks",
+  );
+  equal(
+    fetchCalls,
+    beforePrepareFetchCalls,
+    "unauthorized prepare never calls provider",
+  );
 
   const untrusted = await handler(
     await signedRequest("2026-10-24", "nonce-1", ATTACKER),
@@ -966,7 +1221,7 @@ try {
       );
   };
   const failed = await handler(
-    await signedRequest("2026-10-24", "failure-retry"),
+    await signedRequest("2026-10-25", "failure-retry"),
   );
   equal(failed.status, 502, "dual invalid model responses return 502");
   const failedBody = await responseBody(failed);
@@ -997,6 +1252,19 @@ try {
     failedAttempts.every((attempt) => !attempt.ok),
     "failed corrective reply is not recorded as success",
   );
+  const failedRow = bankRows.get(
+    bankKey("namofood_state", "namofood", "2026-10-25"),
+  );
+  equal(
+    failedRow?.response,
+    null,
+    "failed generation never saves a ready server bank",
+  );
+  equal(
+    failedRow?.lease_token,
+    null,
+    "failed generation releases its own lease",
+  );
 
   scenarioCalls = 0;
   globalThis.fetch = async (url) => {
@@ -1006,7 +1274,7 @@ try {
       : messagesResponse();
   };
   const recovered = await handler(
-    await signedRequest("2026-10-24", "failure-retry"),
+    await signedRequest("2026-10-25", "failure-retry"),
   );
   equal(
     recovered.status,
@@ -1034,28 +1302,48 @@ try {
       : messagesResponse();
   };
   const firstCoalesced = handler(
-    await signedRequest("2026-10-24", "coalesce-1"),
+    await signedRequest("2026-10-26", "coalesce-1"),
   );
   while (!started) await new Promise((resolve) => setTimeout(resolve, 0));
   const secondCoalesced = handler(
-    await signedRequest("2026-10-24", "coalesce-1"),
+    await signedRequest("2026-10-26", "coalesce-2"),
+  );
+  const pending = await secondCoalesced;
+  equal(
+    pending.status,
+    202,
+    "second device sees active server lease without duplicate model call",
+  );
+  const pendingBody = await responseBody(pending);
+  equal(
+    pendingBody.reason,
+    "bank_pending",
+    "active lease has explicit pending state",
+  );
+  equal(
+    pendingBody.retryAfterSeconds,
+    5,
+    "pending response provides bounded polling delay",
+  );
+  equal(
+    scenarioCalls,
+    1,
+    "active same-day lease prevents duplicate provider call",
   );
   release();
-  const coalescedResponses = await Promise.all([
-    firstCoalesced,
-    secondCoalesced,
-  ]);
-  equal(coalescedResponses[0].status, 200, "first coalesced request succeeds");
-  equal(coalescedResponses[1].status, 200, "second coalesced request succeeds");
+  const coalescedResponse = await firstCoalesced;
+  equal(coalescedResponse.status, 200, "first coalesced request succeeds");
   equal(
     scenarioCalls,
     2,
     "simultaneous same input shares one primary/fallback sequence",
   );
   equal(
-    (await responseBody(coalescedResponses[1])).cached,
+    (await responseBody(
+      await handler(await signedRequest("2026-10-26", "coalesce-2")),
+    )).cached,
     true,
-    "joined inflight response is marked cached",
+    "pending device later reads the same durably saved bank",
   );
 
   scenarioCalls = 0;
@@ -1069,7 +1357,7 @@ try {
     const filled = await handler(
       await signedRequest("2026-10-24", `cache-fill-${i}`),
     );
-    equal(filled.status, 200, `cache fill ${i} succeeds`);
+    equal(filled.status, 200, `different nonce ${i} reuses stable bank`);
   }
   const refetchedOld = await handler(await signedRequest());
   equal(
@@ -1079,8 +1367,453 @@ try {
   );
   equal(
     (await responseBody(refetchedOld)).cached,
+    true,
+    "server storage does not evict a daily bank under other nonce pressure",
+  );
+  equal(scenarioCalls, 0, "33 different nonces never reroll saved server bank");
+
+  const fullCatalogInput = buildRecommendationInput(
+    { ...state, menus: {} },
+    "2026-10-24",
+    "daily-2026-10-24",
+  );
+  assert(
+    validateStoredRecommendationBank(data, fullCatalogInput),
+    "actual saved bank passes full-catalog validation",
+  );
+  const invalidBanks: Array<[string, (bank: Record<string, any>) => void]> = [
+    ["nonAI source", (bank) => bank.source = "random"],
+    ["model missing", (bank) => bank.model = ""],
+    ["bad generation time", (bank) => bank.generatedAt = "not-a-date"],
+    ["wrong date", (bank) => bank.date = "2026-10-23"],
+    ["not server-stored", (bank) => bank.serverStored = false],
+    ["aliases changed", (bank) => bank.aliases = { "제육볶음": "다른요리" }],
+    ["missing original counts", (bank) => delete bank.expectedCounts],
+    ["invalid original count", (bank) => bank.expectedCounts["1"] = 4],
+    ["raw slot count missing", (bank) => bank.slots["1"].pop()],
+    [
+      "wrong ingredient group",
+      (bank) => bank.slots["2"][0].name = bank.slots["1"][0].name,
+    ],
+    ["unregistered name", (bank) => bank.slots["1"][0].name = "없는국"],
+    [
+      "duplicate canonical dish",
+      (bank) => bank.slots["4"][0] = { ...bank.slots["3"][0] },
+    ],
+    ["wrong validated count", (bank) => bank.validatedCount = 17],
+    ["no successful AI attempt", (bank) => bank.attempts.at(-1).ok = false],
+  ];
+  for (const [label, mutate] of invalidBanks) {
+    const invalid = structuredClone(data);
+    mutate(invalid);
+    equal(
+      validateStoredRecommendationBank(invalid, fullCatalogInput),
+      null,
+      `reject stored ${label}`,
+    );
+  }
+  const honestShortage = structuredClone(data) as Record<string, any>;
+  honestShortage.slots["1"] = honestShortage.slots["1"].slice(0, 1);
+  honestShortage.expectedCounts["1"] = 1;
+  honestShortage.validatedCount = 16;
+  assert(
+    validateStoredRecommendationBank(honestShortage, fullCatalogInput),
+    "original contextual shortage count remains exact and reusable after manual choices",
+  );
+
+  const initialRevision = await recommendationCatalogRevision(state);
+  const menuChanged = structuredClone(state);
+  menuChanged.menus = { "2026-10": { "24|breakfast|1": "직접 고른 국" } };
+  menuChanged.headcounts = { "2026-10": { "24|breakfast": 999 } };
+  menuChanged.recipeMeta = { metadataOnly: { reviewed: true } };
+  equal(
+    await recommendationCatalogRevision(menuChanged),
+    initialRevision,
+    "manual menus/headcounts/provenance do not reroll shared daily bank",
+  );
+  menuChanged.recipes = [...state.recipes!].reverse();
+  equal(
+    await recommendationCatalogRevision(menuChanged),
+    initialRevision,
+    "equivalent recipe row reordering keeps stable catalog revision",
+  );
+  const methodChanged = structuredClone(state);
+  methodChanged.methods = {
+    ...state.methods,
+    소불고기: "1. 대량 전판에서 볶는다. 2. 배식한다.",
+  };
+  assert(
+    await recommendationCatalogRevision(methodChanged) !== initialRevision,
+    "recipe cooking-method edit invalidates catalog revision",
+  );
+  const askChanged = {
+    ...state,
+    recipeAsk: { 소불고기: { reason: "pending" } },
+  };
+  assert(
+    await recommendationCatalogRevision(askChanged) !== initialRevision,
+    "incomplete recipe queue invalidates catalog revision",
+  );
+
+  scenarioCalls = 0;
+  globalThis.fetch = async (url) => {
+    scenarioCalls++;
+    return String(url).endsWith("/chat/completions")
+      ? chatResponse()
+      : messagesResponse();
+  };
+  Deno.env.set("NMF_ROOM", "other-room");
+  const otherRoomHandler = await freshHandler("other-room bank isolation");
+  Deno.env.set("NMF_ROOM", "namofood");
+  const roomBank = await responseBody(
+    await otherRoomHandler(await signedRequest()),
+  );
+  equal(roomBank.cached, false, "different room generates its own bank");
+  equal(scenarioCalls, 1, "different room does not reuse another room bank");
+  assert(
+    bankRows.has(bankKey("namofood_state", "other-room", "2026-10-24")),
+    "other room bank is separate row",
+  );
+
+  const initialRow = bankRows.get(
+    bankKey("namofood_state", "namofood", "2026-10-24"),
+  )!;
+  initialRow.response = { ...data, source: "random" };
+  const regeneratedInvalid = await responseBody(
+    await handler(await signedRequest()),
+  );
+  equal(
+    regeneratedInvalid.cached,
     false,
-    "bounded cache evicts oldest entry instead of growing unbounded",
+    "malformed stored bank regenerates instead of leaking row",
+  );
+  equal(
+    regeneratedInvalid.source,
+    "ai",
+    "malformed row never returned as recommendation",
+  );
+  equal(
+    scenarioCalls,
+    2,
+    "malformed bank costs exactly one validated generation",
+  );
+  encrypted = await encryptText(APP_PASSWORD, JSON.stringify(methodChanged));
+  const regeneratedStale = await responseBody(
+    await handler(await signedRequest()),
+  );
+  equal(
+    regeneratedStale.cached,
+    false,
+    "changed recipe catalog regenerates stale bank",
+  );
+  equal(scenarioCalls, 3, "catalog revision causes one generation");
+  equal(
+    bankRows.get(bankKey("namofood_state", "namofood", "2026-10-24"))
+      ?.catalog_revision,
+    await recommendationCatalogRevision(methodChanged),
+    "fresh catalog revision durably saved",
+  );
+  encrypted = await encryptText(APP_PASSWORD, JSON.stringify(state));
+
+  failBankSave = true;
+  const saveFailure = await handler(
+    await signedRequest("2026-11-01", "save-failure"),
+  );
+  failBankSave = false;
+  equal(
+    saveFailure.status,
+    503,
+    "durable save failure does not return transient success",
+  );
+  const saveFailureBody = await responseBody(saveFailure);
+  equal(
+    saveFailureBody.reason,
+    "bank_storage_unavailable",
+    "save failure has explicit durable storage error",
+  );
+  assert(
+    !("slots" in saveFailureBody) && !("serverStored" in saveFailureBody),
+    "save failure never claims ready AI bank",
+  );
+  assert(
+    !JSON.stringify(saveFailureBody).includes("private storage"),
+    "save failure hides database exception",
+  );
+  equal(
+    bankRows.get(bankKey("namofood_state", "namofood", "2026-11-01"))?.response,
+    null,
+    "failed save leaves no ready row",
+  );
+  equal(
+    bankRows.get(bankKey("namofood_state", "namofood", "2026-11-01"))
+      ?.lease_token,
+    null,
+    "failed save releases own lease",
+  );
+
+  const beforeFailedReadCalls = scenarioCalls;
+  failBankRead = true;
+  const storageReadFailure = await handler(
+    await signedRequest("2026-11-02", "read-failure"),
+  );
+  failBankRead = false;
+  equal(
+    storageReadFailure.status,
+    503,
+    "storage read failure is unavailable, never private cache fallback",
+  );
+  equal(
+    scenarioCalls,
+    beforeFailedReadCalls,
+    "storage read failure never calls provider",
+  );
+
+  const waiters: Array<() => void> = [];
+  scenarioCalls = 0;
+  globalThis.fetch = async () => {
+    scenarioCalls++;
+    await new Promise<void>((resolve) => waiters.push(resolve));
+    return chatResponse();
+  };
+  const firstGlobal = handler(await signedRequest("2026-11-03", "device-A"));
+  while (waiters.length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const secondGlobal = isolatedHandler(
+    await signedRequest("2026-11-04", "device-B"),
+  );
+  while (waiters.length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const thirdGlobal = await handler(
+    await signedRequest("2026-11-05", "device-C"),
+  );
+  equal(
+    thirdGlobal.status,
+    202,
+    "different dates/isolate cannot exceed server-wide2generation pool",
+  );
+  equal(scenarioCalls, 2, "global pool blocks third charged provider call");
+  const activeLeases = [...bankRows].filter(([key, row]) =>
+    JSON.parse(key)[1] === "namofood" && row.lease_token
+  );
+  equal(
+    activeLeases.length,
+    2,
+    "exactly2 active server leases across dates/isolate",
+  );
+  waiters.forEach((resolve) => resolve());
+  equal(
+    (await firstGlobal).status,
+    200,
+    "first global generation saves successfully",
+  );
+  equal(
+    (await secondGlobal).status,
+    200,
+    "second global generation saves successfully",
+  );
+  equal(
+    scenarioCalls,
+    2,
+    "global coalescing retains exactly2 actual provider calls",
+  );
+
+  const leaseKey = {
+    stateTable: "namofood_state",
+    room: "namofood",
+    date: "2026-11-06",
+  };
+  const leaseTokenA = crypto.randomUUID(), leaseTokenB = crypto.randomUUID();
+  assert(
+    await storageModule.acquireRecommendationLease(
+      leaseKey,
+      initialRevision,
+      leaseTokenA,
+      null,
+    ),
+    "initial isolated lease acquired",
+  );
+  const staleLeaseRow = bankRows.get(
+    bankKey(leaseKey.stateTable, leaseKey.room, leaseKey.date),
+  )!;
+  const staleVersion = staleLeaseRow.updated_at;
+  staleLeaseRow.lease_expires_at = new Date(Date.now() - 1).toISOString();
+  assert(
+    await storageModule.acquireRecommendationLease(
+      leaseKey,
+      initialRevision,
+      leaseTokenB,
+      staleVersion,
+    ),
+    "expired lease recovered atomically",
+  );
+  await storageModule.releaseRecommendationLease(leaseKey, leaseTokenA);
+  equal(
+    bankRows.get(bankKey(leaseKey.stateTable, leaseKey.room, leaseKey.date))
+      ?.lease_token,
+    leaseTokenB,
+    "old owner's release cannot clear replacement lease",
+  );
+  equal(
+    await storageModule.saveRecommendationBank(
+      leaseKey,
+      initialRevision,
+      leaseTokenA,
+      { ...data, date: leaseKey.date },
+    ),
+    false,
+    "old owner cannot save after lease replacement",
+  );
+  assert(
+    await storageModule.saveRecommendationBank(
+      leaseKey,
+      initialRevision,
+      leaseTokenB,
+      { ...data, date: leaseKey.date },
+    ),
+    "current owner can save bank",
+  );
+  equal(
+    await storageModule.acquireRecommendationLease(
+      leaseKey,
+      initialRevision,
+      crypto.randomUUID(),
+      staleVersion,
+    ),
+    false,
+    "stale observed row version cannot overwrite newly saved bank",
+  );
+  const expiredSaveKey = { ...leaseKey, date: "2026-11-07" };
+  const expiredToken = crypto.randomUUID();
+  assert(
+    await storageModule.acquireRecommendationLease(
+      expiredSaveKey,
+      initialRevision,
+      expiredToken,
+      null,
+    ),
+    "lease for expiry check acquired",
+  );
+  bankRows.get(
+    bankKey(
+      expiredSaveKey.stateTable,
+      expiredSaveKey.room,
+      expiredSaveKey.date,
+    ),
+  )!.lease_expires_at = new Date(Date.now() - 1).toISOString();
+  equal(
+    await storageModule.saveRecommendationBank(
+      expiredSaveKey,
+      initialRevision,
+      expiredToken,
+      { ...data, date: expiredSaveKey.date },
+    ),
+    false,
+    "expired lease cannot save even if token unchanged",
+  );
+  await storageModule.releaseRecommendationLease(expiredSaveKey, expiredToken);
+  assert(
+    sqlTexts.some((text) =>
+      text.includes("pg_advisory_xact_lock(hashtextextended")
+    ),
+    "actual storage claim contains short cross-isolate roomlock",
+  );
+  assert(
+    sqlTexts.some((text) =>
+      text.includes("interval '150 seconds'") &&
+      text.includes("nmf_menu_recommend_banks.updated_at=?::timestamptz")
+    ),
+    "actual UPSERT lease query enforces150seconds and observed-version CAS",
+  );
+  assert(
+    sqlTexts.some((text) =>
+      text.includes(
+        "catalog_revision=? and lease_token=?::uuid and lease_expires_at > now()",
+      )
+    ),
+    "actual save query enforces catalog/token/unexpired lease",
+  );
+  const storageMigration = await Deno.readTextFile(
+    new URL(
+      "../supabase/migrations/20261008171316_nmf_menu_recommend_server_store.sql",
+      import.meta.url,
+    ),
+  );
+  assert(
+    /primary key \(state_table, room, target_date\)/.test(storageMigration),
+    "migration scopes daily bank by state table/room/date",
+  );
+  assert(
+    /enable row level security/i.test(storageMigration),
+    "server bank table enables RLS",
+  );
+  assert(
+    /revoke all on table public\.nmf_menu_recommend_banks from public, anon, authenticated/i
+      .test(storageMigration),
+    "browser/public roles have no direct server bank privileges",
+  );
+  assert(
+    /grant select, insert, update on table public\.nmf_menu_recommend_banks to service_role/i
+      .test(storageMigration),
+    "only server service role receives required table grants",
+  );
+  assert(
+    !/security definer|create (?:or replace )?function|grant .* to (?:anon|authenticated)/i
+      .test(storageMigration),
+    "migration creates no public/definer API or browser grant",
+  );
+
+  const originalNowForCron = Date.now;
+  try {
+    Date.now = () => Date.parse("2026-10-08T15:30:00.000Z"); // October9 KST, not host date.
+    const cronRequest = (date: string) =>
+      new Request(endpoint, {
+        method: "POST",
+        headers: { authorization: "Bearer offline-cron-secret" },
+        body: JSON.stringify({ action: "prepare", date }),
+      });
+    const beforeRangeReads = readCalls, beforeRangeStorage = storageCalls;
+    equal(
+      (await handler(cronRequest("2026-10-08"))).status,
+      400,
+      "cron cannot prepare past KST date",
+    );
+    equal(
+      (await handler(cronRequest("2026-10-24"))).status,
+      400,
+      "cron cannot prepare beyond today+14",
+    );
+    equal(readCalls, beforeRangeReads, "cron range failures do not read state");
+    equal(
+      storageCalls,
+      beforeRangeStorage,
+      "cron range failures do not access banks",
+    );
+    globalThis.fetch = async () => chatResponse();
+    const cronToday = await responseBody(
+      await handler(cronRequest("2026-10-09")),
+    );
+    equal(
+      cronToday.serverStored,
+      true,
+      "cron prepares today at KST day boundary",
+    );
+    const cronLast = await responseBody(
+      await handler(cronRequest("2026-10-23")),
+    );
+    equal(
+      cronLast.serverStored,
+      true,
+      "cron prepares inclusive today+14 boundary",
+    );
+  } finally {
+    Date.now = originalNowForCron;
+  }
+  equal(
+    writes,
+    0,
+    "all durable/cron/concurrency tests preserve main state/snapshots exactly",
   );
 
   let failingHandler!: Handler;
@@ -1115,7 +1848,7 @@ try {
   );
 
   console.log(
-    "MENU_RECOMMEND_OK / PROMPT_EXAMPLE_COUNTS_11_CASES / BOUNDED_SEMANTIC_CORRECTION / MODEL_DEADLINE_110S / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / READ_ONLY / CACHE / FAILURE_RETRY / INFLIGHT_COALESCE / BOUNDED_CACHE",
+    "MENU_RECOMMEND_OK / PROMPT_EXAMPLE_COUNTS_11_CASES / BOUNDED_SEMANTIC_CORRECTION / MODEL_DEADLINE_110S / ACTUAL_HANDLER / HMAC_DATE_NONCE / FALLBACK_PROTOCOL / EXISTING_RECIPE_ONLY / MAIN_STATE_READ_ONLY / SERVER_BANK_FRESH_ISOLATE_NONCE_TTL_REUSE / STRICT_STORED_VALIDATION / ORIGINAL_EXPECTED_COUNTS / CATALOG_REVISION / ROOM_ISOLATION / FAILURE_NO_READY_ROW / DURABLE_SAVE_FAILURE / ATOMIC_LEASE_CAS_EXPIRY / GLOBAL2_GENERATIONS / CRON_AUTH_KST14DAYS",
   );
 } finally {
   globalThis.fetch = nativeFetch;
@@ -1124,4 +1857,5 @@ try {
   }
   delete globals.__menuRecommendDb;
   delete globals.__menuRecommendCapture;
+  delete globals.__menuRecommendSql;
 }

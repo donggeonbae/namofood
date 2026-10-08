@@ -1,22 +1,22 @@
-// Read-only live checks. Never submit drafts, generate AI recipes, or save state.
-// NMF_VERIFY_RECOMMEND=1 opts into the seven read-only weekly recommendation calls.
+// Live observation: never submit drafts, generate AI recipes, or save meal state.
+// NMF_VERIFY_RECOMMEND=1 permits the requested server bank preparation/retrieval only.
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-3-weekly-recommend';
+  const version=process.env.NMF_EXPECTED_VER||'1009-4-server-recommend';
   const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
     const page=await browser.newPage({viewport:{width:1280,height:900}});
-    const errors=[];let blockedWrites=0,blockedRecommendationRequests=0,documents=0,recommendRequests=0;
+    const errors=[],recommendRequestDates=[],recommendResponseTasks=[];let blockedWrites=0,blockedRecommendationRequests=0,documents=0,recommendRequests=0,recommendPendingResponses=0;
     page.on('pageerror',e=>errors.push(e.message));
-    page.on('response',async response=>{
+    page.on('response',response=>{
       if(!verifyRecommend||!response.url().endsWith('/functions/v1/nmf-menu-recommend'))return;
-      try{const body=response.request().postDataJSON(),data=await response.json();console.log(JSON.stringify({phase:'weekly-ai-response',date:body.date,status:response.status(),ok:data?.ok===true,model:data?.model||null}));}catch{}
+      recommendResponseTasks.push((async()=>{try{const body=response.request().postDataJSON(),data=await response.json();if(response.status()===202){assert.equal(data.reason,'bank_pending');recommendPendingResponses++;}console.log(JSON.stringify({phase:'weekly-ai-response',date:body.date,status:response.status(),ok:data?.ok===true,model:data?.model||null,cached:data?.cached||false,serverStored:data?.serverStored||false}));}catch(error){errors.push(error.message);}})());
     });
     await page.addInitScript(pw=>sessionStorage.setItem('nmf_session_pw',pw),password);
     await page.route('**/*',route=>{
@@ -31,7 +31,7 @@ const {chromium} = require('playwright');
         assert.deepEqual(Object.keys(body).sort(),['date','nonce']);
         assert.match(body.date,/^\d{4}-\d{2}-\d{2}$/);assert.match(body.nonce,/^[A-Za-z0-9_-]{1,64}$/);
         assert.match(headers['x-nmf-time'],/^\d{13}$/);assert.match(headers['x-nmf-signature'],/^[a-f0-9]{64}$/);
-        recommendRequests++;return route.continue();
+        recommendRequests++;recommendRequestDates.push(body.date);return route.continue();
       }
       blockedWrites++;return route.abort();
     });
@@ -120,29 +120,43 @@ const {chromium} = require('playwright');
         const days=menuRecommendWeekDates(date),banks=days.map(day=>{
           const data=menuRecommendCached(day);if(!data)throw Error(day+': '+(menuRecommendErrors.get(day)||'AI recommendation failed'));
           const slots=menuRecommendCandidates(data,day);
-          return {date:day,source:data.source,model:data.model,counts:Object.fromEntries(SLOT_ORDER.map(ci=>[ci,(slots[ci]||[]).length])),reasonCount:Object.values(slots).flat().filter(x=>x.reason).length,excludedCount:data.excludedCount,aliases:Object.keys(data.aliases||{}).length};
+          return {date:day,source:data.source,model:data.model,serverStored:data.serverStored,storage:data.storage,generatedAt:data.generatedAt,counts:Object.fromEntries(SLOT_ORDER.map(ci=>[ci,(slots[ci]||[]).length])),reasonCount:Object.values(slots).flat().filter(x=>x.reason).length,excludedCount:data.excludedCount,aliases:Object.keys(data.aliases||{}).length};
         });return {date,days,banks};
       });
       assert.equal(result.days.length,7);
-      for(const bank of result.banks){assert.equal(bank.source,'ai');assert(bank.model);assert.deepEqual(bank.counts,{'1':3,'2':3,'7':3,'8':3,'3':3,'4':3},bank.date+' has three compatible recommendations per slot');assert.equal(bank.reasonCount,18);assert(bank.aliases>0);}
+      for(const bank of result.banks){assert.equal(bank.source,'ai');assert(bank.model);assert.equal(bank.serverStored,true);assert.equal(bank.storage,'server');assert(bank.generatedAt);assert.deepEqual(bank.counts,{'1':3,'2':3,'7':3,'8':3,'3':3,'4':3},bank.date+' has three compatible recommendations per slot');assert.equal(bank.reasonCount,18);assert(bank.aliases>0);}
       assert.equal(await page.locator('#menu-recommend-load,#menu-recommend-date,#menu-recommend-refresh').count(),0,'no explicit recommendation-request panel remains');
       assert.match(await page.locator('#menu-recommend-week-status').innerText(),/7\/7/);
+      assert.equal(await page.locator('#menu-recommend-week-status').evaluate(el=>el.open),false,'live main recommendations default collapsed');
+      await page.locator('#menu-recommend-week-status > summary').click();
+      assert.equal(await page.locator('#menu-recommend-week-content').isVisible(),true);
       const afterWeek=recommendRequests;
       await page.evaluate(async()=>{await menuRecommendEnsureWeek(menuRecommend.date);});assert.equal(recommendRequests,afterWeek,'prepared week is reused without model calls');
-      assert.equal(recommendRequests,7,'only the seven weekly date banks are requested');
+      await Promise.all(recommendResponseTasks);
+      assert.equal(new Set(recommendRequestDates).size,7,'only the seven weekly date banks are requested');
+      assert.equal(recommendRequests,7+recommendPendingResponses,'additional calls must be exactly the bounded active-lease polls');
       assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'real AI week preparation cannot change stored menus, headcounts or other state');
       for(const ci of [1,2,7,8,3,4]){
         await page.evaluate(ci=>{recipeDraft.date=menuRecommend.date;openDraftPicker(ci);},ci);
+        assert.equal(await page.locator('#pk-recommendations').evaluate(el=>el.open),false,'fresh live picker defaults collapsed');
+        await page.locator('#pk-recommendations > summary').click();
         assert.equal(await page.locator('#pk-recommendations button[data-recommend-name]').count(),3,'live draft slot '+ci+' exposes three compatible candidates');
+        assert.equal(await page.locator('#pk-recommendations button[data-recommend-name]').first().isVisible(),true);
         await page.evaluate(()=>closePicker());
       }
       await page.evaluate(()=>openPicker(selDay,'중식',2));
+      assert.equal(await page.locator('#pk-recommendations').evaluate(el=>el.open),false);
+      await page.locator('#pk-recommendations > summary').click();
       assert.equal(await page.locator('#pk-recommendations button[data-recommend-name]').count(),3,'+choose immediately shows the prepared date/slot candidates');
       await page.locator('#pk-recommendations').screenshot({path:'/tmp/nmf-live-weekly-recommend-picker.png'});await page.evaluate(()=>closePicker());
       assert.equal(recommendRequests,afterWeek,'six draft pickers and the actual meal picker reuse the weekly bank');
       await page.emulateMedia({media:'print'});assert.equal(await page.locator('#menu-recommend-week-status').evaluate(el=>getComputedStyle(el).display),'none');await page.emulateMedia({media:'screen'});
       await page.locator('#menu-recommend-week-status').screenshot({path:'/tmp/nmf-live-weekly-recommend.png'});
-      recommendation={...result,requests:recommendRequests,stateUnchanged:true,printHidden:true};
+      const reloaded=await page.evaluate(async()=>{const date=menuRecommend.date;menuRecommendCache.clear();await menuRecommendEnsureWeek(date);return menuRecommendWeekDates(date).map(day=>{const data=menuRecommendCached(day);return {date:day,generatedAt:data.generatedAt,slots:JSON.stringify(data.slots),cached:data.cached,serverStored:data.serverStored};});});
+      assert.equal(recommendRequests,afterWeek+7,'cleared memory refetches exactly seven server banks');
+      for(const bank of reloaded){assert.equal(bank.serverStored,true);assert.equal(bank.cached,true);assert.equal(bank.generatedAt,result.banks.find(b=>b.date===bank.date).generatedAt,'server bank generation time remains identical');}
+      assert.equal(await page.evaluate(()=>JSON.stringify(S)),before);
+      recommendation={...result,requests:recommendRequests,pendingPolls:recommendPendingResponses,stateUnchanged:true,printHidden:true,serverReuse:true};
     }
     await page.evaluate(()=>{go('recipe');recipeSetIngredient('고기');});
     await page.screenshot({path:'/tmp/nmf-live-recipe-browse.png',fullPage:true});
@@ -151,6 +165,6 @@ const {chromium} = require('playwright');
     assert.equal(status.error,'');assert(status.ready);
     await page.waitForTimeout(9000);
     assert.equal(documents,1);assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({version,...evidence,meatMethods,meatClassification,widths,status,recommendation,ingredientFirst:true,meatSpeciesCollapsed:true,thirdMainPicker:true,draftPreservedState:true,productionWrites:0,blockedWrites,blockedRecommendationRequests,documents}));
+    console.log(JSON.stringify({version,...evidence,meatMethods,meatClassification,widths,status,recommendation,ingredientFirst:true,meatSpeciesCollapsed:true,thirdMainPicker:true,draftPreservedState:true,productionMealWrites:0,blockedWrites,blockedRecommendationRequests,documents}));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e.message);process.exit(1);});
