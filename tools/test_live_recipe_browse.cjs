@@ -5,7 +5,7 @@ const {chromium} = require('playwright');
 
 (async()=>{
   const password=process.env.NMF_PW;
-  const version=process.env.NMF_EXPECTED_VER||'1009-6-menu-staff';
+  const version=process.env.NMF_EXPECTED_VER||'1009-7-menu-staff';
   const verifyRecommend=process.env.NMF_VERIFY_RECOMMEND==='1';
   const minimum=Number(process.env.NMF_EXPECTED_RECIPE_MIN||827);
   if(!password)throw Error('NMF_PW required');
@@ -123,6 +123,9 @@ const {chromium} = require('playwright');
     assert.equal(await page.evaluate(()=>pk.ci),0,'the default rice display opens stable rice slot zero');
     assert.equal(await page.locator('#pk-recommendations').count(),0,'rice changes do not add a seventh AI recommendation category');
     assert(await page.evaluate(()=>{const rmap=recipeMap();return pickerFilter().list.length>0&&pickerFilter().list.every(entry=>recipeRiceChoice(entry.m,rmap[entry.m]));}),'production rice choices include only rice dishes by default');
+    const riceNames=await page.evaluate(()=>pickerFilter().list.map(entry=>entry.m));
+    assert(riceNames.some(name=>/카레/.test(name))&&riceNames.some(name=>/짜장/.test(name)),'real curry and jajang options are present');
+    assert(riceNames.every(name=>!/국수|우동|라면|라멘|버거|샌드위치|토스트|피자|핫도그/.test(name)),'misclassified noodle and bread meals cannot leak into default rice choices');
     await page.locator('#pickerbox').screenshot({path:'/tmp/nmf-live-rice-picker.png'});
     await page.evaluate(()=>closePicker());
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'whole-catalog and rice browsing never mutate production data');
