@@ -636,6 +636,91 @@ async function csvRows(page) {
       }
       assert.equal(f.dialogs.length, 0); assert.deepEqual(protectedState(await readState(f.a)), protectedState(f.base));
     });
+    await run('MONTHLY_SUMMARY_STAYS_MONTHLY_WITH_NULL_VAT_AND_ROLLED_BALANCE', async f => {
+      const rows = [
+        { id: 'sum-a', date: '2026-10-01', vendor: '누적업체', subtotal: 10000, tax: 1000, total: 11000, previousBalance: 50000, balanceTotal: 61000 },
+        { id: 'sum-b', date: '2026-10-02', vendor: '누적 업체', subtotal: 20000, tax: 2000, total: 22000, previousBalance: 61000, balanceTotal: 83000 },
+        { id: 'sum-c', date: '2026-10-03', vendor: '공란업체', subtotal: 15000, tax: null, total: 15000, previousBalance: 0, balanceTotal: 15000 },
+        { id: 'sum-d', date: '2026-10-04', vendor: '㈜누적업체', subtotal: -5000, tax: -500, total: -5500, previousBalance: 83000, balanceTotal: 77500 },
+      ];
+      await f.a.evaluate(rows => {
+        S.orders['2026-10'] = rows.map(row => ({ ...row, invoiceNo: row.id, note: '', ocrMeta: { autoRegistered: true },
+          items: [{ id: row.id + '-line', name: '검증품목', qty: 1, price: row.subtotal, supplyAmount: row.subtotal, tax: row.tax, amt: row.total }] }));
+        S.orders['2026-10'].push({ ...S.orders['2026-10'][0], id: 'sum-pending', total: 999999, ocrMeta: { duplicateReviewPending: true } });
+        S.cardTransactions = { '2026-10': [{ id: 'sum-card', date: '2026-10-02', merchant: '별도 카드', amount: 1000000, status: 'approved' }] };
+        S.month = '2026-10'; orderRange.mode = 'month'; invoiceSelectedDate = null; orderView = 'sheet'; render();
+      }, rows);
+      const before = await readState(f.a), summary = f.a.locator('#invoice-monthly-summary');
+      assert.equal(await summary.count(), 1, 'the month-wide summary is restored above the calendar and tabs');
+      const values = () => summary.evaluate(el => Object.fromEntries(['total', 'subtotal', 'tax', 'receivables', 'count', 'vendors'].map(key =>
+        [key, Number(el.querySelector(`[data-invoice-monthly="${key}"]`).textContent.replace(/[^\d.-]/g, ''))])));
+      const expected = { total: 42500, subtotal: 40000, tax: 2500, receivables: 92500, count: 4, vendors: 2 };
+      assert.deepEqual(await values(), expected, 'monthly deliveries exclude repeated balances, pending duplicates, other months and cards');
+      assert.match(await summary.locator('[data-invoice-monthly-tax-unknown]').innerText(), /1\s*건/);
+      assert.match(await summary.innerText(), /참고/);
+      assert.equal(await summary.evaluate(el => !!(el.compareDocumentPosition(document.querySelector('[data-order-view]')) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
+      assert.equal(await summary.evaluate(el => !!(el.compareDocumentPosition(document.querySelector('[data-invoice-date]')) & Node.DOCUMENT_POSITION_FOLLOWING)), true);
+      await f.a.locator('[data-invoice-date="2026-10-02"]').click();
+      assert.equal(await f.a.locator('[data-order-tab]').count(), 1);
+      assert.deepEqual(await values(), expected, 'selecting one date cannot shrink the month total');
+      await f.a.locator('[data-invoice-all-dates]').click();
+      assert.equal(await f.a.locator('[data-order-tab]').count(), 4);
+      await f.a.locator('[data-order-view="card"]').click();
+      assert.deepEqual(await values(), expected, 'the card tab never replaces or adds to the invoice month total');
+      await f.a.locator('[data-order-view="sheet"]').click();
+      await f.a.evaluate(() => { orderRange.mode = 'week'; selDay = 1; render(); });
+      await f.a.locator('[data-invoice-date="2026-09-30"]').click();
+      assert.deepEqual(await values(), expected, 'a cross-month weekly calendar still leaves the selected month summary intact');
+      await f.a.emulateMedia({ media: 'print' });
+      assert.equal(await summary.isVisible(), false, 'a month-wide reference must not be mistaken for the filtered print total');
+      await f.a.emulateMedia({ media: 'screen' });
+      assert.deepEqual(await readState(f.a), before, 'reading and filtering summaries never modifies invoices or null VAT');
+    });
+    await run('MONTHLY_SUMMARY_UNKNOWN_AMOUNTS_AND_AMBIGUOUS_BALANCES_ARE_NOT_ZERO', async f => {
+      await f.a.evaluate(() => {
+        const make = (id, vendor, date, balanceTotal, items = [{ id: id + '-line', name: '검증', amt: 100, supplyAmount: null, tax: null }]) =>
+          ({ id, vendor, date, balanceTotal, items, note: '', subtotal: null, tax: null, total: 100, ocrMeta: { autoRegistered: true } });
+        S.orders['2026-10'] = [make('old-a', '충돌업체', '2026-10-01', 900), make('new-a', '충돌업체', '2026-10-02', 1000),
+          make('same-day-a', '충돌업체', '2026-10-02', 1100), make('old-b', '미기재업체', '2026-10-01', 800),
+          make('new-b', '미기재업체', '2026-10-03', null), make('unnamed', '', '2026-10-04', 700)];
+        S.month = '2026-10'; orderRange.mode = 'month'; invoiceSelectedDate = null; orderView = 'sheet'; render();
+      });
+      const before = await readState(f.a), summary = f.a.locator('#invoice-monthly-summary');
+      for (const key of ['subtotal', 'tax', 'receivables']) assert.equal(await summary.locator(`[data-invoice-monthly="${key}"]`).innerText(), '—', key + ' cannot be presented as confirmed zero');
+      assert.match(await summary.locator('[data-invoice-monthly-tax-unknown]').innerText(), /6\s*건/);
+      assert.match(await summary.innerText(), /같은 날.*잔액|동일 날짜.*잔액/);
+      assert.match(await summary.innerText(), /업체 미입력/);
+      assert.deepEqual(await readState(f.a), before);
+      await f.a.evaluate(() => { S.month = '2026-11'; orderRange.mode = 'month'; render(); });
+      assert.equal(await summary.locator('[data-invoice-monthly="total"]').innerText(), '0원');
+      assert.equal(await summary.locator('[data-invoice-monthly="count"]').innerText(), '0건');
+      assert.equal(await summary.locator('[data-invoice-monthly="tax"]').innerText(), '0원');
+      assert.equal(await summary.locator('[data-invoice-monthly="receivables"]').innerText(), '—');
+    });
+    await run('MONTHLY_SUMMARY_VERIFIED_LINE_FALLBACK_AND_LONG_AMOUNTS_FIT', async f => {
+      await f.a.evaluate(() => {
+        S.orders['2026-10'] = [
+          { id: 'legacy-sum', date: '2026-10-01', vendor: '수동업체', tax: 20, items: [{ id: 'legacy-line', name: '직접 입력', amt: 200 }], note: '' },
+          { id: 'lines-sum', date: '2026-10-02', vendor: '품목업체', subtotal: null, tax: null, total: 330, ocrMeta: { autoRegistered: true }, items: [
+            { id: 'line-a', name: '품목1', supplyAmount: 100, tax: 10, amt: 110 }, { id: 'line-b', name: '품목2', supplyAmount: 200, tax: 20, amt: 220 }], note: '' },
+          { id: 'header-sum', date: '2026-10-03', vendor: '헤더업체', subtotal: 1000000000000, tax: 0, total: 1000000000000,
+            balanceTotal: 1000000000000, ocrMeta: { autoRegistered: true }, items: [{ id: 'header-line', name: '인식 불완전', supplyAmount: null, tax: null, amt: null }], note: '' },
+        ];
+        S.month = '2026-10'; orderRange.mode = 'month'; invoiceSelectedDate = null; orderView = 'sheet'; render();
+      });
+      const before = await readState(f.a), summary = f.a.locator('#invoice-monthly-summary');
+      assert.equal(await summary.locator('[data-invoice-monthly="total"]').innerText(), '1,000,000,000,550원');
+      assert.equal(await summary.locator('[data-invoice-monthly="subtotal"]').innerText(), '1,000,000,000,500원');
+      assert.equal(await summary.locator('[data-invoice-monthly="tax"]').innerText(), '50원');
+      assert.equal(await summary.locator('[data-invoice-monthly-tax-unknown]').count(), 0, 'explicit zero VAT remains known and headers take precedence');
+      for (const width of [1280, 600, 390, 320]) {
+        await f.a.setViewportSize({ width, height: 1000 });
+        const fit = await summary.evaluate(el => ({ width: el.clientWidth, scroll: el.scrollWidth, amounts: [...el.querySelectorAll('[data-invoice-monthly]')].map(n => ({ width: n.clientWidth, scroll: n.scrollWidth })) }));
+        assert(fit.scroll <= fit.width + 1 && fit.amounts.every(n => n.scroll <= n.width + 1), 'full amounts must fit the summary at ' + width + 'px: ' + JSON.stringify(fit));
+        if (process.env.NMF_INVOICE_UI_ARTIFACT_DIR) await summary.screenshot({ path: path.join(process.env.NMF_INVOICE_UI_ARTIFACT_DIR, 'monthly-summary-' + width + '.png') });
+      }
+      assert.deepEqual(await readState(f.a), before);
+    });
     await run('INVOICE_DATE_CALENDAR_MONTH_CLICK_FILTERS_TABS_AND_ALL_DATES_RESTORES', async f => {
       f.enqueue(documentFixture({ date: '2026-09-30', vendor: '달력 첫째', invoiceNo: 'CAL-1' }));
       f.enqueue(documentFixture({ date: '2026-09-29', vendor: '달력 둘째', invoiceNo: 'CAL-2' }));
