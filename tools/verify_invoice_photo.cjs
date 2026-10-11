@@ -55,10 +55,10 @@ const {chromium}=require('playwright');
       if(process.env.NMF_EXPECTED_OCR_MODEL)assert.equal(result.model,process.env.NMF_EXPECTED_OCR_MODEL,'photograph must be processed by the explicitly selected model');
       const document=result.document;
       if(photo.expected)for(const [key,value]of Object.entries(photo.expected))assert.equal(key==='rows'?document.items.length:document[key],value,'photograph '+(i+1)+' '+key);
-      console.log(JSON.stringify({photo:i+1,date:document.date,rows:document.items.length,total:document.total,subtotal:document.subtotal,tax:document.tax,previousBalance:document.previousBalance,balanceTotal:document.balanceTotal,model:result.model,itemGrossSum:document.items.reduce((s,x)=>s+(x.amt||0),0),itemSupplySum:document.items.reduce((s,x)=>s+(x.supplyAmount||0),0),itemTaxSum:document.items.reduce((s,x)=>s+(x.tax||0),0),warningCount:document.warnings?.length||0,autoRegistrationBypassed:true}));
+      console.log(JSON.stringify({photo:i+1,date:document.date,rows:document.items.length,total:document.total,subtotal:document.subtotal,tax:document.tax,previousBalance:document.previousBalance,balanceTotal:document.balanceTotal,model:result.model,labelReview:result.labelReview||null,itemGrossSum:document.items.reduce((s,x)=>s+(x.amt||0),0),itemSupplySum:document.items.reduce((s,x)=>s+(x.supplyAmount||0),0),itemTaxSum:document.items.reduce((s,x)=>s+(x.tax||0),0),warningCount:document.warnings?.length||0,autoRegistrationBypassed:true}));
     }
     assert.deepEqual(await page.evaluate(()=>({state:JSON.stringify(S),persisted:localStorage.getItem(KEY)})),before,'direct verification must not register orders or touch application/durable records');
     assert.equal(ocrCalls,photos.length+1,'one status and one extraction per photograph, without retry or paid fallback');
-    console.log(JSON.stringify({processed:photos.length,ocrCalls,blockedWrites,productionDatabaseWrites:0,registeredOrders:0}));
+    console.log(JSON.stringify({processed:photos.length,ocrCalls,maxProviderCallsPerPhoto:serverStatus.maxProviderCalls||1,blockedWrites,productionDatabaseWrites:0,registeredOrders:0}));
   }finally{await browser.close();}
 })().catch(error=>{console.error(error.message);process.exitCode=1;});

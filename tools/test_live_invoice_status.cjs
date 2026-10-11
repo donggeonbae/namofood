@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 (async()=>{
-  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-3-invoice-auto',model=process.env.NMF_EXPECTED_OCR_MODEL||'gpt-6-luna';
+  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-4-invoice-review',model=process.env.NMF_EXPECTED_OCR_MODEL||'gpt-6-luna';
   if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
@@ -27,6 +27,8 @@ const {chromium}=require('playwright');
     assert.equal(await page.locator('#invoice-files').count(),1);
     assert.equal(await page.locator('#invoice-files').evaluate(input=>input.multiple),true);
     assert.equal(await page.locator('#invoice-progress-bar').evaluate(el=>el.tagName),'PROGRESS');
+    assert.equal(await page.locator('#invoice-duplicate-review[role="dialog"]').count(),1);
+    assert.equal(await page.locator('[data-invoice-date]').count(),31);
     assert.equal(await page.locator('[data-invoice-confirm],[data-invoice-commit]').count(),0);
     const before=await page.evaluate(()=>JSON.stringify(S));
     await page.locator('#invoice-status-refresh').click();
@@ -34,6 +36,7 @@ const {chromium}=require('playwright');
     assert.equal(await page.evaluate(()=>invoiceOcr.error),'');
     assert(status&&status.http===200);assert.equal(status.origin,'https://d-bae.com');
     assert.equal(status.body.configured,true);assert.equal(status.body.model,model);assert.equal(status.body.plan,'go');assert.equal(status.body.provider,'OpenCode Go');assert.equal(status.body.imageStored,false);
+    assert.equal(status.body.labelReviewEnabled,true);assert.equal(status.body.maxProviderCalls,2);
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'status and navigation cannot mutate application records');
     await page.waitForTimeout(9000);
     assert.equal(documents,1,'the deployed build must not reload itself');assert.equal(await page.locator('#newver').count(),0);

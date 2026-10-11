@@ -2,10 +2,17 @@
 // Secrets: NMF_PW, NMF_INVOICE_API_KEY / OPENCODE_GO_API_KEY / OPENCODE_API_KEY.
 // User-selected Go plan, honestly identified invoice client. Never fall back to paid Zen.
 import {
+  applyLabelReview,
+  failedLabelReview,
   imageBytes,
   INVOICE_PROMPT,
+  type InvoiceDocument,
+  LABEL_REVIEW_PROMPT,
+  type LabelReview,
+  labelReviewInput,
   OcrError,
   parseResponsesDocument,
+  parseResponsesJson,
   providerFailure,
   sha256,
 } from "./lib.ts";
@@ -193,6 +200,8 @@ export function createHandler(dependencies: Dependencies = {}) {
           provider: "OpenCode Go",
           plan: "go",
           imageStored: false,
+          labelReviewEnabled: true,
+          maxProviderCalls: 2,
         });
       }
       if (!configured) {
@@ -220,7 +229,10 @@ export function createHandler(dependencies: Dependencies = {}) {
         );
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const operation = async () => {
+      let document: InvoiceDocument | undefined,
+        labelReview: LabelReview | undefined;
+      const callProvider = async (instructions: string, content: unknown[]) => {
+        if (controller.signal.aborted) throw new Error("aborted");
         const upstream = await fetchImpl(`${base}/responses`, {
           method: "POST",
           headers: {
@@ -238,21 +250,17 @@ export function createHandler(dependencies: Dependencies = {}) {
             store: false,
             stream: false,
             text: { format: { type: "json_object" } },
-            instructions: INVOICE_PROMPT,
+            instructions,
             input: [{
               role: "user",
-              content: [{
-                type: "input_text",
-                text:
-                  "첨부한 한국 거래명세서를 한국어로 정확히 읽고 지정한 JSON 객체만 반환하세요.",
-              }, {
-                type: "input_image",
-                image_url: `data:${image.mime};base64,${image.data}`,
-                detail: "high",
-              }],
+              content,
             }],
           }),
         });
+        if (controller.signal.aborted) {
+          await upstream.body?.cancel().catch(() => {});
+          throw new Error("aborted");
+        }
         if (!upstream.ok) {
           await upstream.body?.cancel().catch(() => {});
           throw providerFailure(upstream.status);
@@ -289,7 +297,50 @@ export function createHandler(dependencies: Dependencies = {}) {
             "OCR 응답을 읽지 못했습니다. 다시 시도해 주세요.",
           );
         }
-        return parseResponsesDocument(answer);
+        if (controller.signal.aborted) throw new Error("aborted");
+        return answer;
+      };
+      const operation = async () => {
+        document = parseResponsesDocument(
+          await callProvider(INVOICE_PROMPT, [{
+            type: "input_text",
+            text:
+              "첨부한 한국 거래명세서를 한국어로 정확히 읽고 지정한 JSON 객체만 반환하세요.",
+          }, {
+            type: "input_image",
+            image_url: `data:${image.mime};base64,${image.data}`,
+            detail: "high",
+          }]),
+        );
+        if (!document.items.length) {
+          labelReview = {
+            status: "not_needed",
+            model,
+            reviewedRows: 0,
+            changedRows: 0,
+          };
+          return;
+        }
+        // Only labels leave in this second text-only pass. The original transaction
+        // is valid even if label review fails; never re-read the image or retry.
+        try {
+          labelReview = applyLabelReview(
+            document,
+            parseResponsesJson(
+              await callProvider(LABEL_REVIEW_PROMPT, [{
+                type: "input_text",
+                text: labelReviewInput(document),
+              }]),
+            ),
+            model,
+          );
+        } catch {
+          labelReview = failedLabelReview(
+            document,
+            model,
+            controller.signal.aborted,
+          );
+        }
       };
       try {
         const timeout = new Promise<never>((_resolve, reject) => {
@@ -304,10 +355,20 @@ export function createHandler(dependencies: Dependencies = {}) {
             controller.abort();
           }, timeoutMs);
         });
-        const document = await Promise.race([operation(), timeout]);
+        try {
+          await Promise.race([operation(), timeout]);
+        } catch (error) {
+          if (!document) throw error;
+          labelReview = failedLabelReview(
+            document,
+            model,
+            error instanceof OcrError && error.code === "ocr_timeout",
+          );
+        }
         return json({
           ok: true,
           document,
+          labelReview,
           model,
           processedAt: new Date(now()).toISOString(),
           imageSha256,
