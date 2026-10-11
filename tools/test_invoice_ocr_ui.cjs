@@ -20,6 +20,32 @@ const clone = value => structuredClone(value);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const itemKeys = ['name', 'spec', 'qty', 'unit', 'price', 'amt', 'tax'];
 const existingId = '00000000-0000-4000-8000-000000000001';
+const orderCard = (page, id) => page.locator(`[data-order-id="${id}"]`);
+async function selectOrder(page, id) {
+  const tab = page.locator(`[data-order-tab="${id}"]`);
+  assert.equal(await tab.count(), 1, 'every saved invoice has its own selectable tab');
+  await tab.click();
+  assert.equal(await tab.getAttribute('aria-selected'), 'true');
+  assert.equal(await orderCard(page, id).isVisible(), true);
+  return orderCard(page, id);
+}
+const extractionHash = request => createHash('sha256').update(Buffer.from(request.body.image.data, 'base64')).digest('hex');
+async function progress(page) {
+  const bar = page.locator('#invoice-progress-bar');
+  assert.equal(await bar.count(), 1, 'photo processing exposes a real, accessible progress element');
+  assert.equal(await bar.evaluate(el => el.tagName), 'PROGRESS');
+  return bar.evaluate(el => ({ value: el.value, max: el.max, state: structuredClone(invoiceOcr.progress) }));
+}
+async function numberFit(input) {
+  return input.evaluate(el => {
+    const style = getComputedStyle(el), canvas = document.createElement('canvas'), context = canvas.getContext('2d');
+    context.font = [style.fontStyle, style.fontWeight, style.fontSize, style.fontFamily].join(' ');
+    return { text: context.measureText(el.value).width, available: el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), value: el.value,
+      field: el.dataset.orderField || el.dataset.orderKey, width: el.getBoundingClientRect().width, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth,
+      inlineFont: el.style.fontSize, computedFont: style.fontSize, measuredFont: context.font, padding: [style.paddingLeft, style.paddingRight],
+      inlineMinWidth: el.style.minWidth, computedMinWidth: style.minWidth };
+  });
+}
 
 function documentFixture(overrides = {}) {
   return { date: '2026-09-30', vendor: '검증유통', invoiceNo: 'T-100', subtotal: 30000, tax: 3000, total: 33000,
@@ -152,16 +178,9 @@ async function fixture(browser) {
       responses.push(planned); return { release };
     };
     const idle = async (page = a) => { await page.waitForFunction(() => !invoiceOcr.busy); check(); };
-    const drafts = (page = a) => page.evaluate(() => structuredClone(invoiceOcr.drafts));
-    const confirm = async (id, page = a) => {
-      const button = page.locator(`[data-invoice-commit="${id}"]`);
-      assert.equal(await button.isDisabled(), true, 'saving is disabled until original-photo verification is checked');
-      await page.locator(`[data-invoice-confirm="${id}"]`).check();
-      assert.equal(await button.isEnabled(), true); await button.click(); await quiesce(page); check();
-    };
     const save = async page => { await quiesce(page); await page.evaluate(() => cloudSave(true)); await quiesce(page); check(); };
     const peer = async () => { const b = await newPage(); assert.equal(await b.evaluate(() => cloudLoad(false)), true); await b.evaluate(() => go('order')); return b; };
-    return { a, base, requests, commits, dialogs, enqueue, idle, drafts, confirm, save, put, wrap, getRemote, peer, check,
+    return { a, base, requests, commits, dialogs, enqueue, idle, save, put, wrap, getRemote, peer, check,
       conflict: row => { conflictRow = row; }, rejected: () => rejected, close: async () => Promise.all(contexts.map(context => context.close())) };
   } catch (error) { await Promise.all(contexts.map(context => context.close())); throw error; }
 }
@@ -189,74 +208,86 @@ async function csvRows(page) {
   const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
   const passed = [], failures = [];
   async function run(name, scenario) {
+    if (process.env.NMF_INVOICE_UI_SCENARIO && !name.includes(process.env.NMF_INVOICE_UI_SCENARIO)) return;
     let f;
     try { f = await fixture(browser); await scenario(f); f.check(); passed.push(name); console.log('PASS ' + name); }
     catch (error) { failures.push({ name, error }); console.error('FAIL ' + name + ': ' + error.message); }
     finally { if (f) await f.close(); }
   }
   try {
-    await run('PHOTO_DRAFT_REQUIRES_CONFIRMATION_PRESERVES_ACTUAL_AMOUNTS', async f => {
+    await run('PHOTO_AUTO_REGISTERS_WITHOUT_CONFIRMATION_PRESERVES_ACTUAL_AMOUNTS', async f => {
       const before = await readState(f.a), persisted = await f.a.evaluate(() => localStorage.getItem(KEY));
       await f.a.locator('#invoice-status-refresh').click();
       await f.a.waitForFunction(() => invoiceOcr.status.includes('서버 연결 정상'));
       assert.equal(f.requests.filter(request => request.body.action === 'status').length, 1, 'real status button uses the same authenticated offline service');
       f.enqueue();
       await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'dummy-invoice.png', '#e61e50', 4000, 1200));
-      await f.idle(); const drafts = await f.drafts(); assert.equal(drafts.length, 1);
-      const draft = drafts[0], panel = f.a.locator('#invoice-draft-' + draft.id);
-      assert.equal(await panel.count(), 1); assert.equal(draft.fileName, 'dummy-invoice.png'); assert(draft.preview);
-      assert.deepEqual(draft.document, documentFixture());
+      await f.idle();
+      const registered = orderRecords(await readState(f.a)).find(order => order.id !== existingId);
+      assert(registered, 'successful recognition immediately registers an order, without any checkbox or commit button');
+      assert.equal(await f.a.locator('[data-invoice-confirm],[data-invoice-commit]').count(), 0);
+      const panel = orderCard(f.a, registered.id); assert.equal(await panel.count(), 1);
       assert.equal(f.requests.filter(request => request.body.action === 'extract').length, 1);
       assert.equal(Math.max(...Object.values(f.requests.find(request => request.body.action === 'extract').imageInfo).filter(value => typeof value === 'number')), 3200);
-      assert.deepEqual((await readState(f.a)).orders, before.orders, 'recognized drafts do not become orders automatically');
-      assert.equal(await f.a.evaluate(() => localStorage.getItem(KEY)), persisted, 'unconfirmed recognition does not alter durable application state');
-      assert.equal(f.commits.length, 0, 'drafts make no cloud-state write');
-      const price = panel.locator('[data-invoice-item="0"][data-invoice-key="price"]');
+      await f.a.waitForFunction(id => Object.values(JSON.parse(localStorage.getItem(KEY)).orders).flat().some(order => order.id === id), registered.id);
+      assert.notEqual(await f.a.evaluate(() => localStorage.getItem(KEY)), persisted, 'automatic registration changes durable local application state');
+      const price = panel.locator('[data-order-item]').first().locator('[data-order-key="price"]');
       await price.fill('17000'); await price.press('Tab');
-      assert.equal(Number((await panel.locator('[data-invoice-item="0"][data-invoice-key="amt"]').inputValue()).replace(/,/g, '')), 30000, 'correcting unit price never silently recalculates the printed amount');
-      assert.equal((await f.drafts())[0].document.items[0].amt, 30000, 'the draft preserves the actual numeric amount independently of display formatting');
-      await f.confirm(draft.id);
+      assert.equal(Number((await panel.locator('[data-order-item]').first().locator('[data-order-key="amt"]').inputValue()).replace(/,/g, '')), 30000, 'correcting unit price never silently recalculates the printed amount');
       const after = await readState(f.a), added = after.orders['2026-09'].find(order => order.id !== existingId);
-      assert(added); assert.equal(added.id, 'invoice-' + draft.imageSha256, 'OCR order identity is deterministic across clients for the exact photo bytes');
+      const hash = extractionHash(f.requests.find(request => request.body.action === 'extract'));
+      assert(added); assert.equal(added.id, 'invoice-' + hash, 'OCR order identity is deterministic across clients for the exact photo bytes');
       assert.deepEqual(pick(added, ['date', 'vendor', 'invoiceNo', 'subtotal', 'tax', 'total']), pick(documentFixture(), ['date', 'vendor', 'invoiceNo', 'subtotal', 'tax', 'total']));
       assert.deepEqual(pick(added.items[0], itemKeys), { name: '양파', spec: '10kg', qty: 2, unit: '망', price: 17000, amt: 30000, tax: 3000 });
-      assert.equal(added.ocrMeta.model, 'kimi-k2.6'); assert.equal(added.ocrMeta.imageSha256, draft.imageSha256);
+      assert.equal(added.ocrMeta.model, 'kimi-k2.6'); assert.equal(added.ocrMeta.imageSha256, hash);
+      assert.equal(added.ocrMeta.autoRegistered, true); assert(Number.isFinite(Date.parse(added.ocrMeta.registeredAt)));
+      assert.equal(Object.hasOwn(added.ocrMeta, 'confirmedAt'), false, 'automatic recognition must not imply the user verified the original');
       assert.equal(await f.a.evaluate(id => orderAmt(Object.values(S.orders).flat().find(order => order.id === id)), added.id), 33000, 'visible order amount uses the invoice header total including tax');
       assert.equal(after.month, '2026-09', 'recognized September date saves in September and switches the visible month');
       assert.deepEqual(after.orders['2026-09'].find(order => order.id === existingId), before.orders['2026-09'][0]);
-      assert.deepEqual(protectedState(after), protectedState(before), 'invoice confirmation cannot change staff, historical roster, meals, settings or recipes');
+      assert.deepEqual(protectedState(after), protectedState(before), 'automatic invoice registration cannot change staff, historical roster, meals, settings or recipes');
       assert.match(await f.a.locator('summary').filter({ hasText: '검증유통' }).innerText(), /33,000/);
+      const success = await progress(f.a); assert.equal(success.max, 3); assert.equal(success.value, 3);
+      assert.equal(success.state.total, 1); assert.equal(success.state.completed, 1); assert.equal(success.state.registered, 1);
       await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'same-image-again.png', '#e61e50', 4000, 1200));
       await f.idle();
       assert.equal(orderRecords(await readState(f.a)).length, 2, 're-uploading the exact same image cannot create a duplicate order');
-      assert.equal((await f.drafts()).length, 0, 'already committed image hashes cannot create another commit-ready draft');
+      assert.equal(f.requests.filter(request => request.body.action === 'extract').length, 1, 'exact duplicate photographs are rejected before another paid recognition');
+      assert.equal(f.dialogs.length, 0, 'automatic registration and duplicate-photo handling need no confirmation dialogs');
+      const finished = await progress(f.a); assert.equal(finished.state.registered, 0, 'the duplicate batch reports no new registration');
     });
     await run('EACH_PHOTO_HAS_ITS_OWN_DOCUMENT_AND_ORDER', async f => {
       f.enqueue(documentFixture()); f.enqueue(documentFixture({ date: '2026-10-02', vendor: '다른유통', invoiceNo: 'T-200', subtotal: 10000, tax: 1000, total: 11000 }));
       await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'first.png'), await photo(f.a, 'second.png', '#ee7831')]);
-      await f.idle(); const drafts = await f.drafts(); assert.equal(drafts.length, 2);
-      assert.notEqual(drafts[0].id, drafts[1].id); assert.notEqual(drafts[0].imageSha256, drafts[1].imageSha256);
-      assert.equal(orderRecords(await readState(f.a)).length, 1);
-      for (const draft of drafts) await f.confirm(draft.id);
+      await f.idle();
       const orders = orderRecords(await readState(f.a)); assert.equal(orders.length, 3);
       assert.equal(orders.filter(order => order.invoiceNo === 'T-100').length, 1); assert.equal(orders.filter(order => order.invoiceNo === 'T-200').length, 1);
       assert.equal(orders.find(order => order.invoiceNo === 'T-100').vendor, '검증유통');
       assert.equal(orders.find(order => order.invoiceNo === 'T-200').vendor, '다른유통');
+      assert.notEqual(orders.find(order => order.invoiceNo === 'T-100').ocrMeta.imageSha256, orders.find(order => order.invoiceNo === 'T-200').ocrMeta.imageSha256);
+      const finished = await progress(f.a);
+      assert.equal(finished.max, 6); assert.equal(finished.value, 6); assert.equal(finished.state.total, 2);
+      assert.equal(finished.state.completed, 2); assert.equal(finished.state.registered, 2);
     });
-    await run('SECOND_PHOTO_RESULT_PRESERVES_AN_UNBLURRED_DRAFT_CORRECTION', async f => {
+    await run('FIRST_PHOTO_REGISTERS_WHILE_SECOND_PENDING_AND_PRESERVES_UNBLURRED_NOTE', async f => {
       f.enqueue(); const second = f.enqueue(documentFixture({ vendor: '두 번째 공급자', invoiceNo: 'T-200' }), { hold: true });
       await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'first-review.png'), await photo(f.a, 'second-pending.png', '#ed7028')]);
-      await f.a.waitForFunction(() => invoiceOcr.drafts.length === 1 && invoiceOcr.busy);
-      const [first] = await f.drafts(), vendor = f.a.locator(`#invoice-draft-${first.id} [data-invoice-field="vendor"]`);
-      await vendor.fill('직접 교정한 공급자');
-      assert.equal(await vendor.evaluate(input => document.activeElement === input), true, 'the first draft field is still focused and has not blurred');
+      await f.a.waitForFunction(() => Object.values(S.orders).flat().some(order => order.invoiceNo === 'T-100') && invoiceOcr.busy);
+      await f.a.waitForFunction(() => invoiceOcr.progress?.completed === 1 && invoiceOcr.progress?.step === 1);
+      const first = orderRecords(await readState(f.a)).find(order => order.invoiceNo === 'T-100');
+      assert.equal(orderRecords(await readState(f.a)).length, 2, 'first photograph is registered before the second server response arrives');
+      const pending = await progress(f.a); assert.equal(pending.max, 6); assert.equal(pending.value, 4); assert.equal(pending.state.registered, 1);
+      const note = orderCard(f.a, first.id).locator('[data-order-field="note"]');
+      await note.fill('인식 중 직접 입력한 특이사항\n배송 확인');
+      const node = await note.elementHandle();
+      assert.equal(orderRecords(await readState(f.a)).find(order => order.id === first.id).note, '인식 중 직접 입력한 특이사항\n배송 확인', 'note input saves immediately without waiting for blur');
+      assert.equal(await note.evaluate(input => document.activeElement === input), true);
       second.release(); await f.idle();
-      assert.equal((await f.drafts()).length, 2);
-      assert.equal(await vendor.inputValue(), '직접 교정한 공급자', 'a second OCR response cannot replace the still-focused raw correction');
-      await vendor.press('Tab');
-      assert.equal((await f.drafts()).find(draft => draft.id === first.id).document.vendor, '직접 교정한 공급자');
-      await f.confirm(first.id);
-      assert.equal(orderRecords(await readState(f.a)).find(order => order.invoiceNo === 'T-100').vendor, '직접 교정한 공급자', 'confirmation saves the preserved correction');
+      assert.equal(orderRecords(await readState(f.a)).length, 3);
+      assert.equal(await node.evaluate(input => input.isConnected && document.activeElement === input), true, 'second OCR result does not replace a focused note node');
+      assert.equal(await note.inputValue(), '인식 중 직접 입력한 특이사항\n배송 확인');
+      assert.equal(orderRecords(await readState(f.a)).find(order => order.id === first.id).note, '인식 중 직접 입력한 특이사항\n배송 확인');
+      const finished = await progress(f.a); assert.equal(finished.value, 6); assert.equal(finished.state.registered, 2);
     });
     await run('GROSS_NET_TAX_AND_PREVIOUS_BALANCE_REMAIN_DISTINCT', async f => {
       const before = await readState(f.a);
@@ -266,15 +297,15 @@ async function csvRows(page) {
       ];
       for (const layout of layouts) f.enqueue(documentFixture({ ...layout, items: [{ name: '합계 검증 식자재', spec: '혼합 납품', qty: 1, unit: '건', price: layout.subtotal, supplyAmount: layout.subtotal, amt: layout.total, tax: layout.tax, confidence: .95, warnings: [] }] }));
       await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'gross-a.png'), await photo(f.a, 'gross-b.png', '#ed6a31')]);
-      await f.idle(); const drafts = await f.drafts(); assert.equal(drafts.length, 2);
-      for (let i = 0; i < drafts.length; i++) {
-        const draft = drafts[i], layout = layouts[i], panel = f.a.locator('#invoice-draft-' + draft.id);
+      await f.idle();
+      const registered = orderRecords(await readState(f.a)).filter(order => order.id !== existingId); assert.equal(registered.length, 2);
+      for (const layout of layouts) {
+        const order = registered.find(order => order.invoiceNo === layout.invoiceNo), panel = await selectOrder(f.a, order.id);
         for (const field of ['subtotal', 'tax', 'total', 'previousBalance', 'balanceTotal']) {
-          assert.equal(Number((await panel.locator(`[data-invoice-field="${field}"]`).inputValue()).replace(/,/g, '')), layout[field], 'review field preserves ' + field);
+          assert.equal(Number((await panel.locator(`[data-order-field="${field}"]`).inputValue()).replace(/,/g, '')), layout[field], 'saved field preserves ' + field);
         }
-        assert.equal(Number((await panel.locator('[data-invoice-item="0"][data-invoice-key="supplyAmount"]').inputValue()).replace(/,/g, '')), layout.subtotal);
-        assert.equal(draft.document.items[0].amt, layout.total, 'row amount retains the gross printed amount');
-        await f.confirm(draft.id);
+        assert.equal(Number((await panel.locator('[data-order-item]').first().locator('[data-order-key="supplyAmount"]').inputValue()).replace(/,/g, '')), layout.subtotal);
+        assert.equal(order.items[0].amt, layout.total, 'row amount retains the gross printed amount');
       }
       const after = await readState(f.a);
       for (const layout of layouts) {
@@ -305,7 +336,7 @@ async function csvRows(page) {
         items: [{ name: '과세 식자재', spec: '1상자', qty: 1, unit: '상자', price: 50000, supplyAmount: 50000, tax: 5000, amt: 55000, confidence: .95, warnings: [] }],
       }));
       await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'vat-fallback.png')); await f.idle();
-      const [draft] = await f.drafts(); await f.confirm(draft.id); await f.save(f.a);
+      await f.save(f.a);
       const saved = orderRecords(await f.getRemote()).find(order => order.invoiceNo === 'VAT-FALLBACK');
       assert(saved?.ocrMeta); assert.equal(saved.total, 55000); assert.equal(saved.items[0].supplyAmount, 50000); assert.equal(saved.items[0].amt, 55000);
       const card = f.a.locator('details.card').filter({ has: f.a.locator('summary', { hasText: '세금 중복 검증' }) });
@@ -332,22 +363,179 @@ async function csvRows(page) {
       await f.a.waitForFunction(() => invoiceOcr.busy);
       await f.a.waitForTimeout(100);
       await f.a.evaluate(() => { S.month = '2026-11'; selDay = 3; render(); });
-      pending.release(); await f.idle(); const [draft] = await f.drafts();
-      assert.equal(draft.dateFallback, fallback);
-      assert.equal(await f.a.locator(`#invoice-draft-${draft.id} [data-invoice-field="date"]`).inputValue(), fallback, 'missing OCR date uses the captured start date, not the currently selected month');
-      await f.confirm(draft.id);
+      pending.release(); await f.idle();
       const added = orderRecords(await readState(f.a)).find(order => order.invoiceNo === 'T-100');
       assert.equal(added.date, fallback); assert.equal((await readState(f.a)).month, '2026-10');
+      assert.equal(await orderCard(f.a, added.id).locator('[data-order-field="date"]').inputValue(), fallback, 'missing OCR date uses the captured start date, not the currently selected month');
+      assert.match(added.note, /날짜|거래일/); assert(added.warnings.some(warning => /날짜|거래일/.test(warning)), 'missing-date uncertainty remains visible and saved');
     });
-    await run('FAILED_OCR_PRESERVES_EXISTING_DRAFTS_AND_ALL_RECORDS', async f => {
+    await run('FAILED_OCR_PRESERVES_REGISTERED_ORDERS_AND_SHOWS_INCOMPLETE_PROGRESS', async f => {
       f.enqueue(); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'good.png')); await f.idle();
-      const beforeDrafts = await f.drafts(), before = await readState(f.a);
+      await quiesce(f.a); const before = await readState(f.a), commits = f.commits.length;
       f.enqueue(undefined, { status: 503, error: '검증 인식 서비스 일시 실패' });
       await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'failed.png', '#e45628')); await f.idle();
-      assert.deepEqual(await f.drafts(), beforeDrafts, 'a failed second request cannot clear the prior review draft');
-      assert.deepEqual((await readState(f.a)).orders, before.orders); assert.equal(f.commits.length, 0);
+      assert.deepEqual((await readState(f.a)).orders, before.orders); assert.equal(f.commits.length, commits, 'failed recognition never writes another invoice');
       assert.match(await f.a.locator('#invoice-progress').innerText(), /실패|오류|다시/);
       assert.deepEqual(protectedState(await readState(f.a)), protectedState(before));
+      const failed = await progress(f.a); assert.equal(failed.max, 3); assert(failed.value < 3); assert.equal(failed.state.registered, 0);
+    });
+    await run('PENDING_RECOGNITION_PROGRESS_AND_EXISTING_NOTE_EDIT_SURVIVE', async f => {
+      await f.a.evaluate(() => { S.month = '2026-09'; go('order'); });
+      const pending = f.enqueue(documentFixture({ invoiceNo: 'PENDING-1' }), { hold: true });
+      await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'pending.png'));
+      await f.a.waitForFunction(() => invoiceOcr.busy && invoiceOcr.progress?.step === 1);
+      const inFlight = await progress(f.a); assert.equal(inFlight.max, 3); assert.equal(inFlight.value, 1);
+      assert.equal(inFlight.state.registered, 0); assert.equal(inFlight.state.completed, 0);
+      assert.equal(orderRecords(await readState(f.a)).length, 1, 'pending provider request never creates a placeholder order');
+      const note = orderCard(f.a, existingId).locator('[data-order-field="note"]'), original = await note.elementHandle();
+      await note.fill('다른 명세서를 수정 중\n결제는 다음 주');
+      assert.equal(orderRecords(await readState(f.a))[0].note, '다른 명세서를 수정 중\n결제는 다음 주');
+      assert.equal(await original.evaluate(el => el.isConnected && document.activeElement === el), true, 'note input does not rerender its own focused DOM');
+      pending.release(); await f.idle();
+      assert.equal(await original.evaluate(el => el.isConnected && document.activeElement === el), true, 'registration of another photo does not replace the focused existing record');
+      assert.equal(await note.inputValue(), '다른 명세서를 수정 중\n결제는 다음 주');
+      assert.equal(orderRecords(await readState(f.a)).find(order => order.id === existingId).note, '다른 명세서를 수정 중\n결제는 다음 주');
+      const done = await progress(f.a); assert.equal(done.value, 3); assert.equal(done.state.registered, 1);
+    });
+    await run('LOCAL_STORAGE_FAILURE_RETAINS_MEMORY_RECORD_WITHOUT_CLAIMING_REGISTERED', async f => {
+      const before = await readState(f.a), persisted = await f.a.evaluate(() => localStorage.getItem(KEY));
+      await f.a.evaluate(() => {
+        window.__invoiceOriginalSetItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function(key, value) {
+          if (key === KEY) throw new DOMException('offline fixture quota exceeded', 'QuotaExceededError');
+          return window.__invoiceOriginalSetItem.call(this, key, value);
+        };
+      });
+      try {
+        f.enqueue(); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'storage-failure.png')); await f.idle(); await quiesce(f.a);
+        const after = await readState(f.a), added = orderRecords(after).find(order => order.id !== existingId);
+        assert(added, 'recognized fields remain in memory so the user can copy or recover them');
+        assert.deepEqual(after.orders['2026-09'].find(order => order.id === existingId), before.orders['2026-09'][0]);
+        assert.deepEqual(pick(added, ['date', 'vendor', 'subtotal', 'tax', 'total']), pick(documentFixture(), ['date', 'vendor', 'subtotal', 'tax', 'total']));
+        assert.deepEqual(pick(added.items[0], itemKeys), pick(documentFixture().items[0], itemKeys));
+        assert.equal(await f.a.evaluate(() => localStorage.getItem(KEY)), persisted, 'failed storage does not replace any durable records');
+        const failed = await progress(f.a); assert.equal(failed.value, 2); assert.equal(failed.max, 3);
+        assert.equal(failed.state.registered, 0); assert.equal(failed.state.failed, 1);
+        assert.match(await f.a.locator('#invoice-progress').innerText(), /저장.*실패|실패.*저장/);
+        assert.deepEqual(protectedState(after), protectedState(before));
+      } finally { await f.a.evaluate(() => { Storage.prototype.setItem = window.__invoiceOriginalSetItem; }); }
+    });
+    await run('UNCERTAIN_NULL_AND_MISMATCHED_VALUES_REGISTER_WITH_EDITABLE_WARNINGS', async f => {
+      const warnings = ['품목명 일부가 흐림', '수량·단가와 합계가 일치하지 않음', '품목 합계와 이번 납품액 불일치'];
+      const document = documentFixture({ vendor: '', subtotal: null, tax: null, total: 77, warnings,
+        items: [{ name: '', spec: '', qty: null, unit: '', price: 20, supplyAmount: null, tax: null, amt: 12, confidence: .2, warnings: ['품목과 수량 확인 필요'] }] });
+      f.enqueue(document); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'uncertain.png')); await f.idle();
+      const order = orderRecords(await readState(f.a)).find(order => order.id !== existingId); assert(order);
+      assert.deepEqual(pick(order, ['date', 'vendor', 'subtotal', 'tax', 'total']), pick(document, ['date', 'vendor', 'subtotal', 'tax', 'total']));
+      assert.deepEqual(pick(order.items[0], ['name', 'spec', 'qty', 'unit', 'price', 'supplyAmount', 'tax', 'amt', 'confidence', 'warnings']), document.items[0]);
+      for (const warning of warnings) { assert(order.warnings.includes(warning)); assert(order.note.includes(warning)); }
+      assert.equal(f.dialogs.length, 0, 'uncertain recognition is stored for correction without blocking auto registration');
+      const note = orderCard(f.a, order.id).locator('[data-order-field="note"]');
+      assert.equal(await note.evaluate(el => el.tagName), 'TEXTAREA');
+      await note.fill('확인 후 직접 고친 특이사항');
+      assert.equal(orderRecords(await readState(f.a)).find(row => row.id === order.id).note, '확인 후 직접 고친 특이사항');
+      assert.equal(await note.evaluate(el => document.activeElement === el), true);
+    });
+    await run('SAME_VENDOR_AND_NUMBER_DIFFERENT_PHOTOS_WARN_WITHOUT_CONFIRM_DIALOG', async f => {
+      f.enqueue(); f.enqueue();
+      await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'same-number-a.png'), await photo(f.a, 'same-number-b.png', '#ed7032')]); await f.idle();
+      const duplicates = orderRecords(await readState(f.a)).filter(order => order.invoiceNo === 'T-100');
+      assert.equal(duplicates.length, 2, 'same printed invoice number does not discard a distinct photograph');
+      assert.notEqual(duplicates[0].id, duplicates[1].id);
+      assert.equal(f.dialogs.length, 0, 'duplicate number is a warning rather than a confirmation gate');
+      assert(duplicates.some(order => /같은|동일|중복/.test(order.note)), 'potential duplicate invoice number appears in saved special notes');
+    });
+    await run('NUMERIC_FIELDS_PRESERVE_FULL_LARGE_AND_DECIMAL_VALUES_DESKTOP_AND_MOBILE', async f => {
+      f.enqueue(documentFixture({ total: 1000000000000, subtotal: 1000000000000, tax: null,
+        items: [{ name: '큰 숫자 검증', spec: '소수 검증', qty: .125, unit: 'kg', price: 1000000000000, supplyAmount: 1000000000000, tax: null, amt: 1000000000000, confidence: .95, warnings: [] }] }));
+      await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'large-number.png')); await f.idle();
+      const order = orderRecords(await readState(f.a)).find(order => order.id !== existingId);
+      for (const width of [1280, 390]) {
+        await f.a.setViewportSize({ width, height: 1000 }); await f.a.waitForTimeout(60);
+        const card = await selectOrder(f.a, order.id);
+        await f.a.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+        const values = [card.locator('[data-order-field="total"]'), card.locator('[data-order-item]').first().locator('[data-order-key="price"]'), card.locator('[data-order-item]').first().locator('[data-order-key="qty"]')];
+        for (const input of values) {
+          assert.equal(await input.getAttribute('type'), 'text'); assert.equal(await input.getAttribute('inputmode'), 'decimal');
+          assert((await input.getAttribute('class')).includes('invoice-number')); assert.equal(await input.getAttribute('maxlength'), null);
+          assert.equal(await input.isVisible(), true);
+          const fit = await numberFit(input);
+          if (fit.text > fit.available + 1 && process.env.NMF_INVOICE_UI_ARTIFACT_DIR) {
+            await f.a.screenshot({ path: path.join(process.env.NMF_INVOICE_UI_ARTIFACT_DIR, 'numeric-' + width + '-' + fit.field + '.png'), fullPage: true });
+          }
+          assert(fit.text <= fit.available + 1, 'all digits must fit in the visible field at viewport ' + width + ': ' + JSON.stringify(fit));
+        }
+        assert.equal(Number((await values[0].inputValue()).replace(/,/g, '')), 1000000000000);
+        const price = values[1]; await price.fill('123456789.123456'); assert.equal(await price.inputValue(), '123456789.123456');
+        await price.press('Tab');
+        assert.equal(orderRecords(await readState(f.a)).find(row => row.id === order.id).items[0].price, 123456789.123456, 'decimal edit remains exact in state');
+        assert.equal(Number((await price.inputValue()).replace(/,/g, '')), 123456789.123456, 'decimal is not shortened when the input rerenders');
+        assert.equal(orderRecords(await readState(f.a)).find(row => row.id === order.id).items[0].amt, 1000000000000, 'unit price editing never recalculates the printed amount');
+        if (process.env.NMF_INVOICE_UI_ARTIFACT_DIR) await f.a.screenshot({ path: path.join(process.env.NMF_INVOICE_UI_ARTIFACT_DIR, 'numeric-success-' + width + '.png'), fullPage: true });
+      }
+    });
+    await run('INVOICE_TABS_SELECT_EXPAND_KEEP_DOM_AND_SUPPORT_KEYBOARD_MOBILE', async f => {
+      f.enqueue(documentFixture({ date: '2026-09-30', vendor: '탭 첫째', invoiceNo: 'TAB-1' }));
+      f.enqueue(documentFixture({ date: '2026-09-29', vendor: '탭 둘째', invoiceNo: 'TAB-2' }));
+      await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'tab-first.png'), await photo(f.a, 'tab-second.png', '#eb6127')]); await f.idle();
+      const tabs = f.a.getByRole('tablist').getByRole('tab'); assert.equal(await tabs.count(), 3);
+      const orders = orderRecords(await readState(f.a));
+      for (const width of [1280, 390]) {
+        await f.a.setViewportSize({ width, height: 1000 });
+        for (const order of orders) {
+          const card = await selectOrder(f.a, order.id);
+          assert.equal(await card.evaluate(el => el.open), true, 'selecting an invoice expands its detail view');
+          assert.equal(await f.a.getByRole('tabpanel').count(), 1, 'only the selected invoice panel is accessible');
+          assert.equal(await f.a.locator('[role="tabpanel"][hidden]').count(), 2);
+          assert.equal(await f.a.locator('[data-order-id]').count(), 3, 'hidden invoice DOM stays present for stable-ID edit callbacks');
+        }
+        const first = tabs.first(), last = tabs.last(); await first.click(); await first.press('End');
+        assert.equal(await last.getAttribute('aria-selected'), 'true'); assert.equal(await last.evaluate(el => el === document.activeElement), true);
+        await last.press('Home'); assert.equal(await first.getAttribute('aria-selected'), 'true');
+        await first.press('ArrowRight'); assert.equal(await tabs.nth(1).getAttribute('aria-selected'), 'true');
+        await tabs.nth(1).press('ArrowLeft'); assert.equal(await first.getAttribute('aria-selected'), 'true');
+      }
+      assert.equal(f.dialogs.length, 0); assert.deepEqual(protectedState(await readState(f.a)), protectedState(f.base));
+    });
+    await run('INVOICE_PRINT_TEMPORARILY_EXPANDS_ALL_FILTERED_TABS_AND_RESTORES_SELECTION', async f => {
+      f.enqueue(documentFixture({ vendor: '인쇄 첫째', invoiceNo: 'PRINT-1', subtotal: 1000000000000, tax: null, total: 1000000000000,
+        items: [{ name: '긴 숫자 인쇄 검증', spec: '', qty: 1, unit: '건', price: 1000000000000, supplyAmount: 1000000000000, tax: null, amt: 1000000000000, confidence: .95, warnings: [] }] }));
+      f.enqueue(documentFixture({ vendor: '인쇄 둘째', invoiceNo: 'PRINT-2' }));
+      await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'print-a.png'), await photo(f.a, 'print-b.png', '#ec652a')]); await f.idle();
+      await selectOrder(f.a, existingId);
+      const before = await f.a.locator('[role="tabpanel"]').evaluateAll(panels => panels.map(panel => ({ id: panel.id, hidden: panel.hidden, open: panel.querySelector('details').open })));
+      const records = await readState(f.a);
+      await f.a.emulateMedia({ media: 'print' });
+      await f.a.evaluate(() => dispatchEvent(new Event('beforeprint')));
+      assert.equal(await f.a.locator('[role="tabpanel"][hidden]').count(), 0, 'printing includes all invoices in the selected date range, not only the active tab');
+      for (const panel of await f.a.locator('[role="tabpanel"]').all()) assert.equal(await panel.isVisible(), true);
+      assert.equal(await f.a.locator('[data-order-id]').evaluateAll(cards => cards.every(card => card.open)), true);
+      await f.a.evaluate(() => dispatchEvent(new Event('afterprint'))); await f.a.emulateMedia({ media: 'screen' });
+      assert.deepEqual(await f.a.locator('[role="tabpanel"]').evaluateAll(panels => panels.map(panel => ({ id: panel.id, hidden: panel.hidden, open: panel.querySelector('details').open }))), before);
+      assert.equal(await f.a.locator(`[data-order-tab="${existingId}"]`).getAttribute('aria-selected'), 'true');
+      assert.deepEqual((await readState(f.a)).orders, records.orders, 'printing never changes invoice records');
+      await f.a.setViewportSize({ width: 320, height: 1000 });
+      const large = orderRecords(records).find(order => order.invoiceNo === 'PRINT-1'); await selectOrder(f.a, large.id);
+      await f.a.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      await f.a.emulateMedia({ media: 'print' }); await f.a.evaluate(() => dispatchEvent(new Event('beforeprint')));
+      await f.a.emulateMedia({ media: 'screen' }); await f.a.evaluate(() => dispatchEvent(new Event('afterprint')));
+      await f.a.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+      const total = orderCard(f.a, large.id).locator('[data-order-field="total"]'), fit = await numberFit(total);
+      assert.equal(Number(fit.value.replace(/,/g, '')), 1000000000000);
+      assert(fit.text <= fit.available + 1, 'returning from print must refit the full large number at 320px: ' + JSON.stringify(fit));
+      assert.deepEqual((await readState(f.a)).orders, records.orders);
+    });
+    await run('DIRECT_PREPROCESS_AND_API_VERIFICATION_BYPASS_AUTO_REGISTRATION', async f => {
+      const before = await readState(f.a), persisted = await f.a.evaluate(() => localStorage.getItem(KEY));
+      const upload = await photo(f.a, 'read-only.png'); f.enqueue();
+      const result = await f.a.evaluate(async data => {
+        const file = new File([Uint8Array.from(atob(data), ch => ch.charCodeAt(0))], 'verification-photo', { type: 'image/png' });
+        const image = await prepInvoiceImage(file); return invoiceOcrApi('extract', image);
+      }, upload.buffer.toString('base64'));
+      assert.equal(result.ok, true); assert.deepEqual(result.document, documentFixture());
+      assert.equal(f.requests.filter(request => request.body.action === 'extract').length, 1);
+      assert.deepEqual(await readState(f.a), before); assert.equal(await f.a.evaluate(() => localStorage.getItem(KEY)), persisted);
+      assert.equal(f.commits.length, 0, 'the real verification path can read a photograph without writing an invoice');
     });
     await run('UPLOAD_BOUNDARIES_REJECT_UNSUPPORTED_OVERSIZE_AND_NINE_PHOTOS', async f => {
       const before = await readState(f.a);
@@ -363,18 +551,17 @@ async function csvRows(page) {
       const tiny = await photo(f.a, 'tiny.png');
       await f.a.locator('#invoice-files').setInputFiles(Array.from({ length: 9 }, (_, i) => ({ ...tiny, name: 'batch-' + i + '.png' }))); await f.idle();
       assert.equal(f.requests.filter(request => request.body.action === 'extract').length, 0, 'a batch exceeding eight photos is rejected before processing');
-      assert.equal((await f.drafts()).length, 0); assert.deepEqual((await readState(f.a)).orders, before.orders);
+      assert.deepEqual((await readState(f.a)).orders, before.orders);
     });
     await run('OCR_TEXT_IS_ESCAPED_AND_ORDER_CSV_NEUTRALIZES_FORMULAS', async f => {
       const malicious = documentFixture({ vendor: '<img src=x onerror="window.__invoiceXss=1">', rawText: '</textarea><img src=x onerror="window.__invoiceXss=2">' });
       malicious.items[0].name = '<img src=x onerror="window.__invoiceXss=3">';
       f.enqueue(malicious); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'escaping.png')); await f.idle();
-      const [draft] = await f.drafts();
+      const added = orderRecords(await readState(f.a)).find(order => order.id !== existingId);
       assert.equal(await f.a.locator('img[src="x"]').count(), 0); assert.equal(await f.a.evaluate(() => window.__invoiceXss), undefined);
-      const panel = f.a.locator('#invoice-draft-' + draft.id);
-      await panel.locator('[data-invoice-field="vendor"]').fill('=2+2'); await panel.locator('[data-invoice-field="vendor"]').press('Tab');
-      await panel.locator('[data-invoice-item="0"][data-invoice-key="name"]').fill('@SUM(1+1)'); await panel.locator('[data-invoice-item="0"][data-invoice-key="name"]').press('Tab');
-      await f.confirm(draft.id);
+      const panel = orderCard(f.a, added.id);
+      await panel.locator('[data-order-field="vendor"]').fill('=2+2'); await panel.locator('[data-order-field="vendor"]').press('Tab');
+      await panel.locator('[data-order-item]').first().locator('[data-order-key="name"]').fill('@SUM(1+1)'); await panel.locator('[data-order-item]').first().locator('[data-order-key="name"]').press('Tab');
       assert.equal(await f.a.locator('img[src="x"]').count(), 0); assert.equal(await f.a.evaluate(() => window.__invoiceXss), undefined);
       const cells = (await csvRows(f.a)).flat();
       assert(cells.includes("'=2+2"), 'actual order CSV prefixes a supplier formula with an apostrophe');
@@ -399,16 +586,16 @@ async function csvRows(page) {
       assert.equal(deleted.orderEdits[existingId].deleted, true); assert.equal(orderRecords(deleted).length, 2);
       assert.deepEqual(deleted.staff, f.base.staff); assert.deepEqual(deleted.roster, f.base.roster);
     });
-    await run('TWO_PCS_CONFIRMING_SAME_PHOTO_SAVE_ONE_INVOICE_AND_HONOR_DELETE', async f => {
+    await run('TWO_PCS_AUTO_REGISTERING_SAME_PHOTO_SAVE_ONE_INVOICE_AND_HONOR_DELETE', async f => {
       assert.equal(await f.a.evaluate(() => cloudLoad(false)), true); const b = await f.peer();
-      f.enqueue(); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'pc-a.png')); await f.idle();
-      f.enqueue(); await b.locator('#invoice-files').setInputFiles(await photo(b, 'pc-b.png')); await f.idle(b);
-      const [aDraft] = await f.drafts(), [bDraft] = await f.drafts(b);
-      assert.equal(aDraft.imageSha256, bDraft.imageSha256, 'both stale PCs received the exact same processed photo bytes');
-      await f.confirm(aDraft.id); await f.confirm(bDraft.id, b);
+      f.enqueue(); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'pc-a.png')); await f.idle(); await quiesce(f.a);
+      f.enqueue(); await b.locator('#invoice-files').setInputFiles(await photo(b, 'pc-b.png')); await f.idle(b); await quiesce(b);
+      const aOrder = orderRecords(await readState(f.a)).find(order => order.id !== existingId), bOrder = orderRecords(await readState(b)).find(order => order.id !== existingId);
+      assert(aOrder && bOrder, 'both stale PCs independently registered the photograph');
+      assert.equal(aOrder.ocrMeta.imageSha256, bOrder.ocrMeta.imageSha256, 'both stale PCs received the exact same processed photo bytes');
       await f.save(f.a); await f.save(b);
-      const merged = await f.getRemote(), invoices = orderRecords(merged).filter(order => order.ocrMeta?.imageSha256 === aDraft.imageSha256);
-      assert.equal(invoices.length, 1, 'two independent photo confirmations create one shared invoice, never two random-ID copies');
+      const merged = await f.getRemote(), invoices = orderRecords(merged).filter(order => order.ocrMeta?.imageSha256 === aOrder.ocrMeta.imageSha256);
+      assert.equal(invoices.length, 1, 'two independent automatic registrations create one shared invoice, never two random-ID copies');
       assert.equal(orderRecords(merged).length, 2); assert.equal(invoices[0].total, 33000);
       assert.equal(await f.a.evaluate(order => orderAmt(order), invoices[0]), 33000, 'deduplication cannot double the invoice total');
       const id = invoices[0].id;
@@ -416,7 +603,7 @@ async function csvRows(page) {
       await f.save(b);
       await f.a.evaluate(() => { S.settings.target = .12; save(); }); await f.save(f.a);
       const deleted = await f.getRemote();
-      assert.equal(orderRecords(deleted).filter(order => order.ocrMeta?.imageSha256 === aDraft.imageSha256).length, 0, 'a stale unchanged copy cannot resurrect the deleted photo invoice');
+      assert.equal(orderRecords(deleted).filter(order => order.ocrMeta?.imageSha256 === aOrder.ocrMeta.imageSha256).length, 0, 'a stale unchanged copy cannot resurrect the deleted photo invoice');
       assert.equal(deleted.orderEdits[id].deleted, true);
       assert.deepEqual(orderRecords(deleted), orderRecords(f.base));
     });
@@ -505,6 +692,7 @@ async function csvRows(page) {
       assert.deepEqual(orderRecords(await f.getRemote()), orderRecords(later), 'completed replacement intent is consumed and subsequent unrelated saves retain new peer orders');
     });
     console.log('INVOICE_UI_RESULTS ' + JSON.stringify({ passed, failed: failures.map(failure => failure.name) }));
+    assert(passed.length + failures.length > 0, 'the selected scenario must actually execute');
     if (failures.length) throw new AggregateError(failures.map(failure => failure.error), 'Invoice UI regressions: ' + failures.length);
   } finally {
     console.log('APP_SOURCE_SHA256 ' + createHash('sha256').update(source).digest('hex'));

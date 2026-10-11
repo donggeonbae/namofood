@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 (async()=>{
-  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-2-invoice-ocr',model=process.env.NMF_EXPECTED_OCR_MODEL||'gpt-6-luna';
+  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-3-invoice-auto',model=process.env.NMF_EXPECTED_OCR_MODEL||'gpt-6-luna';
   if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
@@ -26,6 +26,8 @@ const {chromium}=require('playwright');
     await page.evaluate(()=>{cloudApplying=true;clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);go('order');});
     assert.equal(await page.locator('#invoice-files').count(),1);
     assert.equal(await page.locator('#invoice-files').evaluate(input=>input.multiple),true);
+    assert.equal(await page.locator('#invoice-progress-bar').evaluate(el=>el.tagName),'PROGRESS');
+    assert.equal(await page.locator('[data-invoice-confirm],[data-invoice-commit]').count(),0);
     const before=await page.evaluate(()=>JSON.stringify(S));
     await page.locator('#invoice-status-refresh').click();
     await page.waitForFunction(()=>invoiceOcr.status.includes('정상')||!!invoiceOcr.error,null,{timeout:20000});
