@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 (async()=>{
-  const expected=process.env.NMF_EXPECTED_VER||'1009-8-archive-delete';
+  const expected=process.env.NMF_EXPECTED_VER||'1011-1-config-sync';
   const password=process.env.NMF_PW;if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{
