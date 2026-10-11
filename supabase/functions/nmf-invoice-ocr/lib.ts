@@ -12,18 +12,18 @@ export class OcrError extends Error {
 // Return only the numeric upstream status, never upstream bodies/headers/credentials.
 export function providerFailure(status: number): OcrError {
   const message = status === 401 || status === 403
-    ? "OCR API 키 인증·권한이 거부됐습니다. 일반 Zen 키와 모델 접근 권한을 확인해 주세요."
+    ? "OpenCode Go API 키 인증·권한이 거부됐습니다. Go 키·구독·모델 접근 권한과 이 앱의 사용 허용 여부를 확인해 주세요."
     : status === 402
-    ? "일반 Zen OCR 이용 잔액 또는 결제 설정을 확인해 주세요. 충전·구매는 관리자가 직접 확인해야 합니다."
+    ? "OpenCode Go 구독 상태·포함 사용량·모델 권한을 확인해 주세요. 일반 Zen 결제로 자동 전환하지 않습니다."
     : status === 400 || status === 422
-    ? "OCR 이미지 요청·모델 설정을 서비스가 거부했습니다. 서버의 모델과 입력 형식을 확인해 주세요."
+    ? "OpenCode Go가 OCR 이미지 요청·모델 설정을 거부했습니다. 서버의 모델과 입력 형식을 확인해 주세요."
     : status === 404
-    ? "설정된 OCR 모델 또는 API 주소를 찾지 못했습니다. 서버 설정을 확인해 주세요."
+    ? "설정된 OpenCode Go OCR 모델 또는 API 주소를 찾지 못했습니다. 서버 설정을 확인해 주세요."
     : status === 429
-    ? "OCR 이용 한도에 도달했습니다. 잠시 후 다시 요청해 주세요."
+    ? "OpenCode Go 이용 한도에 도달했습니다. 사용량과 초기화 시점을 확인한 후 다시 요청해 주세요."
     : status >= 500
-    ? "OCR 서비스에 일시적인 오류가 발생했습니다. 잠시 후 다시 요청해 주세요."
-    : "OCR 서비스 연결에 실패했습니다. 서버 설정을 확인해 주세요.";
+    ? "OpenCode Go OCR 서비스에 일시적인 오류가 발생했습니다. 잠시 후 다시 요청해 주세요."
+    : "OpenCode Go OCR 서비스 연결에 실패했습니다. 서버 설정을 확인해 주세요.";
   return new OcrError(
     "ocr_provider_error",
     502,

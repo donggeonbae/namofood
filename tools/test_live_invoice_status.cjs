@@ -31,7 +31,7 @@ const {chromium}=require('playwright');
     await page.waitForFunction(()=>invoiceOcr.status.includes('정상')||!!invoiceOcr.error,null,{timeout:20000});
     assert.equal(await page.evaluate(()=>invoiceOcr.error),'');
     assert(status&&status.http===200);assert.equal(status.origin,'https://d-bae.com');
-    assert.equal(status.body.configured,true);assert.equal(status.body.model,model);assert.equal(status.body.imageStored,false);
+    assert.equal(status.body.configured,true);assert.equal(status.body.model,model);assert.equal(status.body.plan,'go');assert.equal(status.body.provider,'OpenCode Go');assert.equal(status.body.imageStored,false);
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'status and navigation cannot mutate application records');
     await page.waitForTimeout(9000);
     assert.equal(documents,1,'the deployed build must not reload itself');assert.equal(await page.locator('#newver').count(),0);

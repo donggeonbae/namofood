@@ -1,6 +1,6 @@
 // One-shot, review-only invoice OCR. No database/storage writes or invoice logging.
-// Secrets: NMF_PW, NMF_INVOICE_API_KEY or normal-Zen OPENCODE_API_KEY.
-// OpenCode GO is coding-only, so its key/base are deliberately not reused.
+// Secrets: NMF_PW, NMF_INVOICE_API_KEY / OPENCODE_GO_API_KEY / OPENCODE_API_KEY.
+// User-selected Go plan, honestly identified invoice client. Never fall back to paid Zen.
 import {
   imageBytes,
   INVOICE_PROMPT,
@@ -173,13 +173,16 @@ export function createHandler(dependencies: Dependencies = {}) {
         );
       }
       seen.set(nonce, now() + 120000);
-      const apiKey = (env("NMF_INVOICE_API_KEY") || env("OPENCODE_API_KEY"))
-        .trim();
-      const base = (env("NMF_INVOICE_BASE_URL") || "https://opencode.ai/zen/v1")
-        .trim().replace(/\/$/, "");
+      const apiKey =
+        (env("NMF_INVOICE_API_KEY") || env("OPENCODE_GO_API_KEY") ||
+          env("OPENCODE_API_KEY"))
+          .trim();
+      const base =
+        (env("NMF_INVOICE_BASE_URL") || "https://opencode.ai/zen/go/v1")
+          .trim().replace(/\/$/, "");
       const model = (env("NMF_INVOICE_MODEL") || "gpt-6-luna").trim();
       const configured = Boolean(
-        apiKey && base === "https://opencode.ai/zen/v1" &&
+        apiKey && base === "https://opencode.ai/zen/go/v1" &&
           model === "gpt-6-luna",
       );
       if (body.action === "status") {
@@ -187,7 +190,8 @@ export function createHandler(dependencies: Dependencies = {}) {
           ok: true,
           configured,
           model: /^[a-zA-Z0-9._-]{1,100}$/.test(model) ? model : "",
-          provider: "OpenCode",
+          provider: "OpenCode Go",
+          plan: "go",
           imageStored: false,
         });
       }
@@ -195,7 +199,7 @@ export function createHandler(dependencies: Dependencies = {}) {
         throw new OcrError(
           "ocr_not_configured",
           503,
-          "명세서 OCR 서버의 일반 Zen API 키·모델 설정이 필요합니다.",
+          "명세서 OCR 서버의 OpenCode Go API 키·GPT-6 Luna 모델 설정이 필요합니다.",
         );
       }
       if (active >= 2) {
@@ -222,7 +226,10 @@ export function createHandler(dependencies: Dependencies = {}) {
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${apiKey}`,
+            "User-Agent": "namofood-invoice-ocr/1.0",
+            "x-opencode-session": `nmf-invoice-${body.app}-${body.nonce}`,
           },
+          redirect: "error",
           signal: controller.signal,
           body: JSON.stringify({
             model,

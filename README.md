@@ -74,15 +74,19 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 사라집니다. 확인한 텍스트·금액만 암호화 저장합니다. 제공업체의 데이터 처리 정책은
 별도로 적용됩니다. 실제 거래 자료의 인식값은 반드시 원본과 대조해야 합니다.
 
-서버 비밀값은 기존 `NMF_PW`와 **일반 Zen** `OPENCODE_API_KEY` 또는 OCR 전용
-`NMF_INVOICE_API_KEY`입니다. 기본 모델은 사용자가 선택한 이미지 입력 지원 모델
+서버 비밀값은 기존 `NMF_PW`와 OCR 전용 `NMF_INVOICE_API_KEY`,
+`OPENCODE_GO_API_KEY`, 기존 `OPENCODE_API_KEY` 순서로 확인합니다.
+사용자가 선택한 **Go 플랜**으로만 요청합니다. 기본 모델은 이미지 입력 지원 모델
 **GPT-6 Luna (`gpt-6-luna`)**이며, 엔드포인트는
-`https://opencode.ai/zen/v1/responses`입니다. 사진은 고해상도 입력으로 보내고,
+`https://opencode.ai/zen/go/v1/responses`입니다. 사진은 고해상도 입력으로 보내고,
 추론 없이 JSON을 추출하며 완료·거절·출력 중단 상태를 구분합니다. `store:false`로
 Responses 보관을 요청하지 않습니다. 제공업체의 별도 처리 정책은 그대로 적용됩니다.
-`NMF_INVOICE_MODEL`, `NMF_INVOICE_TIMEOUT_MS`(기본 100초, 최대 120초)로 조정합니다.
-`NMF_INVOICE_BASE_URL`은 일반 Zen 주소만 허용합니다. 코딩 트래픽용 OpenCode Go
-키·주소를 OCR로 자동 재사용하지 않으며, 키·잔액 오류는 사용자에게 표시합니다.
+`NMF_INVOICE_MODEL`을 명시한다면 `gpt-6-luna`여야 하며,
+`NMF_INVOICE_TIMEOUT_MS`는 기본 100초, 최대 120초입니다.
+`NMF_INVOICE_BASE_URL`은 Go 주소만 허용합니다. 앱은 실제 이름의 User-Agent와
+사진 한 장의 대화에 해당하는 서명된 요청 기반 세션 ID를 전달합니다.
+Go의 공식 사용 안내는 코딩 에이전트용이므로 일반 웹앱 OCR 지원은 보장되지 않습니다.
+키·구독·한도 오류는 그대로 표시하며, 용도를 위장하거나 일반 Zen 유료 호출로 전환하지 않습니다.
 **서버 연결 확인**은 서버 설정 유무 검사이고, 제공업체 인증·정확도는 실제 사진 처리로
 확인해야 합니다. 본문 전체 SHA-256을 포함하는 60초 유효 HMAC으로 인증하고,
 허용 홈페이지 출처·실제 파일 형식·8MB 이미지 한도·재사용 요청·동시 호출을 검사합니다.
@@ -93,7 +97,8 @@ Responses 보관을 요청하지 않습니다. 제공업체의 별도 처리 정
 `tools/verify_invoice_photo.cjs`는 운영자가 명시한 원본 사진만 실제 서버에서 처리하는
 확인 도구입니다. `NMF_INVOICE_PHOTOS`에 명시 경로를 전달하고 `NMF_PW`를 환경에
 안전하게 입력합니다. 품목 수·합계를 대조하지만 발주 등록이나 데이터베이스 저장은 하지 않습니다.
-`NMF_EXPECTED_OCR_MODEL=gpt-6-luna`로 지정하면 사진을 보내기 전에 서버 모델도 확인합니다.
+`NMF_EXPECTED_OCR_MODEL=gpt-6-luna`, `NMF_EXPECTED_OCR_PLAN=go`로 지정하면
+사진을 보내기 전에 서버 모델과 Go 플랜도 확인합니다.
 배포 후 `node tools/test_live_invoice_status.cjs`는 실제 암호화 페이지와 서명된 상태 조회만
 확인합니다. 사진을 보내거나 인식 서비스를 호출하지 않고 운영 데이터 쓰기를 차단합니다.
 

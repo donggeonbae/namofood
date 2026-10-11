@@ -156,8 +156,8 @@ function completedResponse(text: string) {
 const provider = (input: string | URL | Request, init?: RequestInit) => {
   calls++;
   assert(
-    String(input) === "https://opencode.ai/zen/v1/responses",
-    "only normal Zen endpoint",
+    String(input) === "https://opencode.ai/zen/go/v1/responses",
+    "only the user-selected Go endpoint, never paid Zen fallback",
   );
   const sent = JSON.parse(String(init?.body));
   assert(
@@ -191,6 +191,14 @@ const provider = (input: string | URL | Request, init?: RequestInit) => {
         "Bearer offline-zen-key",
     "server provider credential",
   );
+  const providerHeaders = new Headers(init?.headers);
+  assert(
+    providerHeaders.get("user-agent") === "namofood-invoice-ocr/1.0" &&
+      /^nmf-invoice-food-[a-f0-9-]{36}$/.test(
+        providerHeaders.get("x-opencode-session") || "",
+      ) && init?.redirect === "error",
+    "honest app identity, per-conversation session and no redirects to other billing paths",
+  );
   return Promise.resolve(
     new Response(
       JSON.stringify(completedResponse(JSON.stringify(fixture))),
@@ -204,6 +212,10 @@ assert(
   response.status === 200 && result.configured === true &&
     result.imageStored === false && calls === 0,
   "status does not call provider/store images",
+);
+assert(
+  result.provider === "OpenCode Go" && result.plan === "go",
+  "status identifies the user's selected Go plan without exposing its key/base",
 );
 assert(
   result.model === "gpt-6-luna",
@@ -307,12 +319,7 @@ assert(
   "replay cannot cause another billed extraction",
 );
 const unavailable = createHandler({
-  env: (k) =>
-    k === "NMF_PW"
-      ? PASSWORD
-      : k === "OPENCODE_GO_API_KEY"
-      ? "go-only-key"
-      : "",
+  env: (k) => k === "NMF_PW" ? PASSWORD : "",
   fetchImpl: provider,
   now: () => NOW,
 });
@@ -320,24 +327,80 @@ response = await unavailable(await request("status"));
 result = await response.json();
 assert(
   result.configured === false,
-  "GO-only key does not enable noncoding OCR",
+  "missing Go credentials are reported unavailable",
 );
 response = await unavailable(await request());
 assert(
   response.status === 503,
-  "missing Zen key extraction is explicit unavailable",
+  "missing Go key extraction is explicit unavailable",
 );
 const badBase = createHandler({
   env: (k) =>
-    k === "NMF_INVOICE_BASE_URL" ? "https://opencode.ai/zen/go/v1" : env(k),
+    k === "NMF_INVOICE_BASE_URL" ? "https://opencode.ai/zen/v1" : env(k),
   fetchImpl: provider,
   now: () => NOW,
 });
 response = await badBase(await request("status"));
 assert(
   (await response.json()).configured === false,
-  "coding-only GO base is not reused",
+  "normal Zen override is rejected instead of creating additional paid usage",
 );
+for (
+  const [keys, expectedKey] of [
+    [{ OPENCODE_GO_API_KEY: "go-only-key" }, "go-only-key"],
+    [{
+      OPENCODE_GO_API_KEY: "go-preferred-key",
+      OPENCODE_API_KEY: "generic-key",
+    }, "go-preferred-key"],
+    [{
+      NMF_INVOICE_API_KEY: "invoice-override-key",
+      OPENCODE_GO_API_KEY: "go-key",
+      OPENCODE_API_KEY: "generic-key",
+    }, "invoice-override-key"],
+  ] as const
+) {
+  const nonce = crypto.randomUUID();
+  let selectedKeyCalls = 0;
+  const keyHandler = createHandler({
+    env: (key) =>
+      key === "NMF_PW" ? PASSWORD : (keys as Record<string, string>)[key] || "",
+    now: () => NOW,
+    fetchImpl: (input, init) => {
+      selectedKeyCalls++;
+      const headers = new Headers(init?.headers);
+      assert(
+        String(input) === "https://opencode.ai/zen/go/v1/responses" &&
+          headers.get("authorization") === `Bearer ${expectedKey}` &&
+          headers.get("x-opencode-session") === `nmf-invoice-cafe-${nonce}`,
+        "Go credential precedence and signed app/nonce session binding",
+      );
+      return Promise.resolve(
+        new Response(
+          JSON.stringify(completedResponse(JSON.stringify(fixture))),
+        ),
+      );
+    },
+  });
+  assert(
+    (await (await keyHandler(await request("status"))).json()).configured ===
+      true,
+    "Go-only or dedicated credentials configure the selected plan",
+  );
+  const keyResult = await (await keyHandler(
+    await request("extract", {
+      body: {
+        action: "extract",
+        app: "cafe",
+        nonce,
+        image: { mime: "image/png", data: PNG },
+      },
+    }),
+  )).json();
+  assert(
+    keyResult.ok === true && selectedKeyCalls === 1,
+    "one extraction uses only the selected Go credential with no retry",
+  );
+}
 for (
   const modelReply of [
     "not json",
@@ -542,7 +605,7 @@ assert(
 );
 for (
   const [upstreamStatus, hint] of [
-    [402, "잔액"],
+    [402, "구독"],
     [400, "요청"],
     [403, "권한"],
     [404, "모델"],
