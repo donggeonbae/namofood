@@ -8,3 +8,7 @@ verify_jwt = false
 
 [functions.nmf-menu-recommend]
 verify_jwt = false
+
+# 이미지 본문 전체를 비밀번호 기반 HMAC으로 인증한다. 공개 OCR 엔드포인트가 아니다.
+[functions.nmf-invoice-ocr]
+verify_jwt = false
