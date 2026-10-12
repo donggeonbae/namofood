@@ -2,7 +2,7 @@
 
 ## Source of truth
 
-- Status: Active for staff directory, weekly roster, menu generation and recipe discovery/planning; other screens retain their existing design.
+- Status: Active for the management app, including finance and compact screen density. Preserve print typography and stored calculations.
 - Last refreshed: 2026-10-13. Also active for invoice/card linking and direct daily meal entry.
 - Primary product surfaces: staff directory, stored staff, weekly roster, monthly labor summary, recipe library and temporary menu builder.
 - Evidence reviewed: `README.md`, `나모푸드_관리앱.html` (existing tokens, staff and roster components), `tools/test_staff_history.cjs`, `tools/test_staff_layout.cjs`, browser checks at 320–1440px. No earlier design document or approved mockup was found.
@@ -42,6 +42,7 @@
 
 ## Visual language
 
+- PC-first revision: quieter white surfaces, slate/navy hierarchy, restrained 4–6px corners, and thin single boundaries instead of layered rounded outlines. Desktop controls stay compact; mobile field text/touch targets remain legible. Tables retain grid lines while their wrappers do not add a competing outer line. Reference: shadcn dashboard layout density and Linear's typographic hierarchy; reuse only principles, not assets. Rounded print templates remain unchanged.
 - Color: reuse navy `--navy`, muted text, yellow editable cells and gray computed cells.
 - Typography: existing Korean system font stack; directory may shrink to 11px on constrained desktop layouts, mobile employee cards use 13px.
 - Spacing/layout: existing cards and wrapping rows; compact scoped directory padding.
@@ -51,6 +52,12 @@
 
 ## Components
 
+- Period navigation: roster and sales share the existing day/week/month vocabulary. Place the selector and previous/today/next/date controls above records. Keep monthly totals clearly labeled and unchanged by the filter. Month-boundary weeks show the selected month's dates explicitly; navigation to the adjacent month is available. A selected day's sales card uses that date, not the wall-clock date. Period switching cancels transient roster bulk selection, never stored shifts.
+- Recipe monitor: a native collapsed details tab, with a concise visible status. Refresh only its body/badge so polling does not collapse an open panel; preserve the user's open state across renders. All existing actions/status/error text remain available and excluded from print.
+- Final density review: after functional verification, reduce desktop base text from 18 to 16px, navigation from 19 to 16px, regular controls to 15–16px, headings to 24/18px, and excess card gaps by roughly 15–20%. Use screen-only rules; preserve print, payroll-specific sizing, mobile input legibility and coarse-pointer touch targets. Inspect all core routes at desktop/mobile sizes and rerun affected behavior tests.
+- Finance: show entered-to-date and average-based full-month profit separately. Revenue averages use explicitly entered sales days (zero is a valid entry); future records are excluded. Purchase averages use elapsed calendar days, not purchase-day counts. Show both denominators, the configured operating days, and missing records. Target food cost is for comparison only; actual purchase totals exclude carried balances, cards, and unreviewed duplicates. Payroll allocation remains explicitly labeled and never changes stored shifts. Compact wrapping key/value cards avoid new horizontal scrolling.
+- Fixed-cost documents: a collapsed, encrypted database collection with separate metadata and payload rows. Fetch metadata only on demand, and one payload on view/download. Uploading documents never creates a cost/payment record. Only inert PDF/image/DOCX files are accepted; HTML is rejected. Show progress, partial failures and identical-file detection; preserve concurrent additions.
+- Tax estimates: collapsed voluntary inputs for Namofood general VAT and individual annual income tax. Confirm deductible input VAT manually; blank VAT is never invented. The existing management tax reserve is separate from statutory estimates. Show calculation assumptions, official sources, and no filing/issuance automation.
 - Invoice/card extension: a compact status followed by collapsed explicit card selection; never auto-confirm a match or change invoice totals/balances. One invoice links to one approved card record. Missing/deleted/cancelled cards and conflicts show review states, not payment completion. Both screens expose the link.
 - Price comparison: a small hint in the existing unit-price cell, comparing earlier invoices with identical vendor/item/spec/unit and known matching tax-presence basis. Ambiguous same-day prices are not compared. No new dashboard or AI calls.
 - Daily meal editor: place the existing editor above print preview; the collapsed AI weekly recommendation remains immediately above the four meal cards. Each minimum slot has a labeled direct text field plus the existing picker; optional/rice pickers remain available. All editing remains screen-only, with original print layout intact.
@@ -103,6 +110,7 @@
 - Recipe compatibility: retain existing recipes, manual edits, quantities, bulk-cooking validation, search, monitor and recipe AI request authentication. No schemas/authentication changes are needed for ephemeral filters or draft selection.
 - Temporary drafts: recipe choices and optional extras can be added/removed/replaced without saving any scheduled meal. Applying requires all six minimum slots, a non-alcohol soup in slot 1, distinct dish names, explicit date/meal and confirmation if existing dishes will change; preserve headcounts and unrelated meals. Classify chosen dishes as manual, while retaining institutional AI markings only on automatically generated meals.
 - Tests: synthetic local browser actions with outgoing writes blocked; deployment observation is read-only. Capture desktop and mobile screenshots.
+- Final review evidence (2026-10-13): 11 routes across 1440/1280/900/768/390/320px, zero root overflow or sibling-box overlap in 66 combinations. Actual cloud data also checked read-only on six routes at PC/mobile widths; document originals read back and hash-verified. Preserve original print font measurements (weekly meals 11px, title 18px). Monthly totals, payroll histories and manual recipes are covered by deterministic regressions. Inspect mobile sales as labeled cards and keep the time popover clamped to actual measured height.
 
 ## Open questions
 

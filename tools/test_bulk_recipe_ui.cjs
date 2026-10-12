@@ -79,6 +79,8 @@ const upgradedMethod = "1. 300명 기준 전처리한다. 2. 대형 솥에 배�
       { by: "user", profile: null, method: "사용자가 장비에 맞춰 직접 고친 조리 순서" });
     assert.equal(await page.locator("#rdetail .chip").filter({ hasText: /^대량 조리 기준$/ }).count(), 0, "manual method edits must repaint the confirmed badge immediately");
     await page.evaluate(async () => { await refreshRecipeMonitor(true); });
+    assert.equal(await page.locator('#recipe-monitor').evaluate(el => el.open), false, 'automation status starts collapsed');
+    await page.locator('#recipe-monitor > summary').click();
     const monitorText = await page.locator("#recipe-monitor").innerText();
     assert.match(monitorText, /기존 AI 조리법 17개를 대량 조리 기준으로 순차 전환 중/);
     assert.match(monitorText, /대량 조리 조리법 전환 3개 완료/);
