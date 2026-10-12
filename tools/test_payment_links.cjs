@@ -12,7 +12,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
  S=normalize(defaultState());S.month='2026-10';selDay=13;S.recipes=[];S.menus={};
  const item=(price,spec='1kg')=>({id:'item',name:'돼지고기',spec,unit:'kg',qty:1,price,amt:price});
  S.orders={'2026-09':[{id:'old',date:'2026-09-30',vendor:'한마음',items:[item(1000)],total:1000}], '2026-10':[{id:'invoice',date:'2026-10-13',vendor:'한마음',items:[item(1200)],total:1200},{id:'other',date:'2026-10-13',vendor:'한마음',items:[item(1500)],total:1500}]};
- S.cardTransactions={'2026-10':[{id:'pay',date:'2026-10-13',merchant:'한마음',amount:1200,status:'approved',note:''},{id:'cancel',date:'2026-10-13',merchant:'한마음',amount:1200,status:'cancelled',note:''}]};S.cardEdits={};S.orderEdits={};go('order');
+ S.cardTransactions={'2026-10':[{id:'pay',date:'2026-10-13',merchant:'한마음',amount:1200,status:'approved',note:''},{id:'cancel',date:'2026-10-13',merchant:'한마음',amount:1200,status:'cancelled',note:''}]};S.cardEdits={};S.orderEdits={};cloudOrderBase=captureCloudOrderBase(S);go('order');
  });
  assert.equal(await page.evaluate(()=>typeof invoiceLinkCard),'function','payment linking exists');
  const result=await page.evaluate(()=>{
@@ -22,7 +22,8 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
  const linked=invoiceLinkCard('invoice','pay');
  const duplicate=invoiceLinkCard('other','pay');
  const cancelled=invoiceLinkCard('other','cancel');
- const persisted=normalize(JSON.parse(JSON.stringify(S))).orders['2026-10'][0].paymentCardId;
+ mergeRemoteOrders(structuredClone(cloudOrderBase));
+ const persisted=normalize(JSON.parse(JSON.stringify(S))).orders['2026-10'].find(order=>order.id==='invoice').paymentCardId;
  return {change,candidates,linked,duplicate,cancelled,persisted,unchanged:before===JSON.stringify(o.items)&&total===orderAmt(o)};
  });
  assert.equal(result.change.percent,20);assert.deepEqual(result.candidates,['pay']);
