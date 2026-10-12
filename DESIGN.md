@@ -54,7 +54,7 @@
 - Invoice/card extension: a compact status followed by collapsed explicit card selection; never auto-confirm a match or change invoice totals/balances. One invoice links to one approved card record. Missing/deleted/cancelled cards and conflicts show review states, not payment completion. Both screens expose the link.
 - Price comparison: a small hint in the existing unit-price cell, comparing earlier invoices with identical vendor/item/spec/unit and known matching tax-presence basis. Ambiguous same-day prices are not compared. No new dashboard or AI calls.
 - Daily meal editor: place the existing editor above print preview; the collapsed AI weekly recommendation remains immediately above the four meal cards. Each minimum slot has a labeled direct text field plus the existing picker; optional/rice pickers remain available. All editing remains screen-only, with original print layout intact.
-- Employee payroll: scoped fixed-column table with smaller aligned headers/numbers and full-width adjustment inputs. Narrow screens scroll inside this table only; payroll calculations and stored shifts do not change. Header/body boundaries are checked at 390–1440px.
+- Employee payroll: no horizontal scrolling. Desktop uses aligned fixed columns with smaller text and full-width adjustment inputs; at 760px and below, each employee becomes a two-column labeled card showing all ten fields and totals. Amounts may wrap but are never clipped or hidden. Payroll calculations and stored shifts do not change. Test widths are 320–1440px.
 
 - Reuse: cards, native checkboxes, buttons, 24-hour time selectors, hints and confirmation dialogs.
 - Changed: fixed-width directory table, labeled mobile employee cards, local weekly bulk-entry panel.
