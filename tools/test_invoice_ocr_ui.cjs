@@ -605,7 +605,7 @@ async function csvRows(page) {
           assert(fit.text <= fit.available + 1, 'all digits must fit in the visible field at viewport ' + width + ': ' + JSON.stringify(fit));
         }
         assert.equal(Number((await values[0].inputValue()).replace(/,/g, '')), 1000000000000);
-        const price = values[1]; await price.fill('123456789.123456'); assert.equal(await price.inputValue(), '123456789.123456');
+        const price = values[1]; await price.fill('123456789.123456'); assert.equal(await price.inputValue(), '123,456,789.123456');
         await price.press('Tab');
         assert.equal(orderRecords(await readState(f.a)).find(row => row.id === order.id).items[0].price, 123456789.123456, 'decimal edit remains exact in state');
         assert.equal(Number((await price.inputValue()).replace(/,/g, '')), 123456789.123456, 'decimal is not shortened when the input rerenders');

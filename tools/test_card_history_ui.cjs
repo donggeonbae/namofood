@@ -111,6 +111,27 @@ async function concurrentDuplicate(f) {
   const passed = [], failed = [];
   async function run(name, test) { if (process.env.NMF_CARD_UI_SCENARIO && !name.includes(process.env.NMF_CARD_UI_SCENARIO)) return; let f; try { f = await fixture(browser); await test(f); f.check(); passed.push(name); console.log('PASS ' + name); } catch (error) { failed.push({ name, error }); console.error('FAIL ' + name + ': ' + error.message); } finally { if (f) await f.close(); } }
   try {
+    await run('CARD_CALENDAR_TOTALS_UPLOAD_ORDER_MATCHES_INVOICE_AND_DISCLOSURE_WORKS', async f => {
+      const layout = await f.a.evaluate(() => {
+        const calendar = document.querySelector('[data-card-date]').closest('.card');
+        const totals = document.querySelector('[data-card-net]').closest('.grid3');
+        const upload = document.getElementById('card-files').closest('.card');
+        const before = (a, b) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        return { calendarBeforeTotals: before(calendar, totals), totalsBeforeUpload: before(totals, upload), calendarOpen: calendar.open };
+      });
+      assert.equal(layout.calendarBeforeTotals, true, 'card history shows date calendar before its selected-period totals');
+      assert.equal(layout.totalsBeforeUpload, true, 'card history shows totals before photo upload, matching invoices');
+      assert.equal(layout.calendarOpen, true, 'date calendar starts expanded and remains foldable');
+      const calendar = f.a.locator('details').filter({ has: f.a.locator('[data-card-date]') });
+      await calendar.locator('summary').click(); assert.equal(await calendar.evaluate(el => el.open), false);
+      assert.equal(await f.a.locator('#card-files').evaluate(el => el.closest('label').getBoundingClientRect().height > 0), true, 'folding dates does not hide the upload action');
+      await calendar.locator('summary').click(); await f.a.locator('[data-card-date="2026-09-25"]').click();
+      assert.equal(await f.a.locator('[data-card-id]').count(), 1); assert.equal(await f.a.locator('[data-card-net]').textContent(), '500원');
+      await f.a.locator('[data-card-all-dates]').click(); await f.upload();
+      assert.equal(await f.a.locator('#card-ocr-preview [data-card-preview-row]').count(), 1);
+      assert.equal(await f.a.evaluate(() => !!(document.getElementById('card-files').compareDocumentPosition(document.getElementById('card-ocr-preview')) & Node.DOCUMENT_POSITION_FOLLOWING)), true, 'editable OCR preview follows its upload action');
+      assert.deepEqual(protectedState(await readState(f.a)), protectedState(f.base), 'layout/date/photo review cannot change invoice or payroll data');
+    });
     await run('CARD_PHOTO_SIGNED_PREVIEW_DOES_NOT_AUTO_REGISTER_OR_STORE_PHOTO_PAN', async f => {
       const before = await readState(f.a); assert.equal(await f.a.locator('[data-order-view="card"]').count(), 1);
       await f.upload(); assert.equal(await f.a.locator('#card-ocr-preview [data-card-preview-row]').count(), 1);
