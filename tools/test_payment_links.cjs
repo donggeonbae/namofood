@@ -41,10 +41,10 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
  await page.evaluate(()=>{S.orders['2026-09'].push({...S.orders['2026-09'][0],id:'ambiguous',items:[{...S.orders['2026-09'][0].items[0],price:900}]});});
  assert.equal(await page.evaluate(()=>invoicePriceChange(orderRef('invoice').order,orderRef('invoice').order.items[0])),null,'conflicting same-day baselines not guessed');
  await page.evaluate(()=>{S.view={range:'week',mode:'public',ing:false};go('menu');});
- assert.equal(await page.locator('[data-menu-direct]').count(),24,'six direct fields for each of four meals');
+ assert.equal(await page.locator('[data-menu-cell]').count(),24,'six single-click cells for each of four meals');
  const positions=await page.evaluate(()=>({editor:document.querySelector('.editor').getBoundingClientRect().top,print:document.querySelector('#menu-print-sheet').getBoundingClientRect().top,rec:document.querySelector('#menu-recommend-week-status').getBoundingClientRect().bottom,meal:document.querySelector('.mealbox').getBoundingClientRect().top}));
  assert(positions.editor<positions.print);assert(positions.rec<=positions.meal);
- await page.locator('[data-menu-direct="중식|2"]').fill('직접 쓴 제육');await page.locator('[data-menu-direct="중식|2"]').press('Tab');
+ await page.locator('[data-menu-cell="중식|2"]').click();await page.evaluate(()=>{window.prompt=()=> '직접 쓴 제육';pickDirect();});
  assert.equal(await page.evaluate(()=>menuGet(13,'중식',2)),'직접 쓴 제육');assert.equal(await page.evaluate(()=>menuGet(13,'석식',2)),'');
  for(const width of [390,1280]){await page.setViewportSize({width,height:1000});await page.screenshot({path:`/tmp/nmf-direct-${width}.png`,fullPage:true});}
  assert.deepEqual(errors,[]);console.log('PAYMENT_LINKS_PRICE_AND_DIRECT_MENU_OK');

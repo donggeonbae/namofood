@@ -51,6 +51,8 @@ const {chromium}=require('playwright');
       await page.evaluate(mode=>{S.view={range:'day',mode,ing:false};render();},mode);
       assert.equal((await page.locator('#menu-print-sheet').innerText()).includes('🤖'),false,'menu print shows no AI badge in either mode');
     }
+    assert.equal(await page.locator('#recipe-monitor').evaluate(el=>el.open),false,'recipe monitor starts collapsed');
+    await page.locator('#recipe-monitor > summary').click();
     const monitorText=await page.locator('#recipe-monitor').innerText();
     assert.doesNotMatch(monitorText,/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     assert.match(monitorText,/새 메뉴 레시피는.*즉시|새 메뉴 레시피는 저장 직후/,'the separate immediate recipe workflow remains documented');
