@@ -72,7 +72,20 @@ eq(nightlyWindow(now - 1), false, "before schedule blocked");
 eq(nightlyWindow(now + 30 * 60000), false, "next day blocked");
 eq(nextNight(now), "2026-10-14T14:30:00.000Z", "next nightly run");
 let calls = 0;
-const fake = (() => {
+const fake = ((_url: unknown, options: RequestInit) => {
+  const request = JSON.parse(String(options.body));
+  eq(
+    /json/i.test(request.input[0].content[0].text),
+    true,
+    "JSON mode instruction in input, not only system instructions",
+  );
+  const headers = new Headers(options.headers);
+  eq(headers.get("User-Agent"), "namofood-tax/1.0", "provider agent metadata");
+  eq(
+    headers.get("x-opencode-session")?.startsWith("nmf-tax-"),
+    true,
+    "Go session metadata",
+  );
   calls++;
   return Promise.resolve(
     new Response(

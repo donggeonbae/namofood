@@ -20,3 +20,7 @@ verify_jwt = false
 # Process: server-only secret + queue lease. Status: password HMAC.
 [functions.nmf-tax-auto]
 verify_jwt = false
+
+# Full request HMAC; private per-batch claims prevent duplicate provider calls.
+[functions.nmf-payment-match]
+verify_jwt = false
