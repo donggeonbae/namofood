@@ -1,6 +1,6 @@
 const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 (async()=>{const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
- const live=process.env.NMF_LIVE==='1',version='1013-7-roster-profit';if(live&&!process.env.NMF_PW)throw Error('NMF_PW required');
+ const live=process.env.NMF_LIVE==='1',version=process.env.NMF_VERSION||'1013-7-roster-profit';if(live&&!process.env.NMF_PW)throw Error('NMF_PW required');
  const p=await browser.newPage({timezoneId:'Asia/Seoul'});const errors=[];p.on('pageerror',e=>errors.push(e.message));
  if(live)await p.addInitScript(pw=>{localStorage.setItem('nmf_app','food');sessionStorage.setItem('nmf_session_pw',pw);},process.env.NMF_PW);
  await p.route('**/*',r=>{const req=r.request(),url=new URL(req.url());if(!live)return req.isNavigationRequest()?r.fulfill({contentType:'text/html',body:fs.readFileSync('나모푸드_관리앱.html','utf8')}):r.abort();if(url.pathname==='/rest/v1/namofood_state'&&req.method()==='GET')return r.fulfill({json:[]});return ['GET','HEAD','OPTIONS'].includes(req.method())?r.continue():r.abort();});
