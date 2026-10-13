@@ -98,7 +98,7 @@ async function csvText(page) {
     const csvHistory = csv.split(/\r?\n/).find(line => line.includes("보관 직원"));
     assert(csvHistory, "actual CSV contains archived employee");
     const csvHeaders = csv.split(/\r?\n/)[0].split(","), csvFields = csvHistory.split(",");
-    assert.deepEqual(["출근일", "실근로h", "야간h", "지급총액", "총인건비"].map(column => csvFields[csvHeaders.indexOf(column)]), ["3", "19.0", "11.0", "300000", "345000"], "CSV retains exact payroll and hours");
+    assert.deepEqual(["출근일", "실근로h", "야간h", "총급여(공제 전)", "사업자 부담 금액(급여 포함)"].map(column => csvFields[csvHeaders.indexOf(column)]), ["3", "19.0", "11.0", "300000", "345000"], "CSV separates gross employee pay and employer cost while retaining exact payroll and hours");
     assert.equal(csvFields[csvHeaders.indexOf("직원상태")], "보관", "CSV distinguishes archived employees");
     const print = await printedText(page);
     assert(print.includes("보관 직원") && print.includes("345,000원") && print.includes("472,650원"), "actual PDF includes archived employee's payroll and the unchanged monthly total");

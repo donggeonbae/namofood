@@ -102,7 +102,7 @@ function assertFits(layout, label, print = false) {
     assert.deepEqual(row.timeHours, [25, 25], label + ": both 24-hour selectors retain every hour and label");
     assert(row.timeMinutes.every(count => count >= 3), label + ": minute choices remain");
     assert.equal(row.checkboxes, 7, label + ": every weekday remains editable");
-    assert.deepEqual(row.actions, ["삭제/보관"], label + ": delete/archive action remains");
+    assert.deepEqual(row.actions, ["↑", "↓", "삭제/보관"], label + ": ordering and delete/archive actions are at the right edge");
     if(!print){assert.equal(row.moves,2,label+': both order controls exist');assert.equal(row.contacts,1,label+': existing contact control remains');}
   }
   for (const control of layout.controls) {
