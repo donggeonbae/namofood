@@ -76,6 +76,10 @@ function labor(state: TaxState, month: string, cutoff: number) {
   const st = state.settings || {},
     cells = state.roster?.[month] || {},
     staff = [...(state.staff || []), ...(state.staffArchive || [])];
+  const days = new Date(
+      Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0),
+    ).getUTCDate(),
+    share = Math.max(0, Math.min(days, cutoff)) / days;
   let unknown = 0, total = 0;
   const ids = new Set<string>();
   for (const e of staff) {
@@ -88,13 +92,19 @@ function labor(state: TaxState, month: string, cutoff: number) {
       h += v.h;
       night += v.night;
     }
-    if (!h) continue;
-    if (e.historyUnknown) unknown++;
     const wages = object(st.roleWages),
       wage = e.historyUnknown ? 0 : money(e.wage) ?? money(e.archivedWage) ??
         money(wages[String(e.role)]) ?? money(st.wage) ?? 0;
+    const bonus = money(e.bonus) || 0,
+      fixedSalary = !e.historyUnknown && wage === 0 && bonus > 0;
+    const scheduledFixed = fixedSalary &&
+      Array.from({ length: days }, (_, i) => hours(cells[id + "|" + (i + 1)]).h)
+        .some((h) => h > 0);
+    if (!h && !scheduledFixed) continue;
+    if (e.historyUnknown) unknown++;
     total += (h * wage + night * wage * (money(st.night) || 0) +
-      (money(e.bonus) || 0) + (money(cells[id + "|adj"]) || 0)) *
+      (fixedSalary ? bonus * share : bonus) +
+      (h ? (money(cells[id + "|adj"]) || 0) : 0)) *
       (1 + (money(st.burden) || 0) + (money(st.vacancy) || 0));
   }
   for (const [key, c] of Object.entries(cells)) {
@@ -317,6 +327,7 @@ export function buildCostReview(report: TaxReport) {
           : (laborRatio - benchmark.hiredLaborRatio) * 100,
         partialSales: m.salesDays < m.elapsed,
         cautions: [
+          "시급 0원·월 고정수당 직원의 월 고정급은 달력일 기준으로 현재일까지 안분하며, 시급 근무는 실제 기록일까지 반영합니다.",
           "식재비는 소모 원가가 아닌 등록 발주액이며 재고 선매입·비식재 품목이 포함될 수 있습니다.",
           "근무표 인건비는 야간가산·수당·사업주부담·결원충당을 포함해 조사 고용인 인건비와 범위가 다를 수 있습니다.",
           "1만원대 고품질 함바·급식, 조식·중식·석식·야식 운영은 조사 평균과 메뉴·근무구성이 다릅니다.",
