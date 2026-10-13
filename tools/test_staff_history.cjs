@@ -691,11 +691,16 @@ async function csvText(page) {
     assert.equal(unknownRenamed.employee.historyUnknown, true);
     assert.equal(await page.evaluate(() => staffWage(findStaff("archive-unknown"))), 0, "name-only confirmation does not invent an unknown employee's wage");
     assert.match(await archivePayrollButton("archive-unknown").locator("xpath=ancestor::tr").innerText(), /시급 확인 필요|확인 필요/, "unknown wage warnings remain in payroll after a name-only edit");
+    assert.equal(await archiveNameInput("archive-unknown").locator("xpath=ancestor::tr").getByRole("button", { name: "명단으로 복귀", exact: true }).count(), 1, "the user requested restoration even without confirming unknown employee details");
     await page.evaluate(() => staffRestore("archive-unknown"));
     const afterUnknownRestore = await readArchiveTarget("archive-unknown");
-    assert.deepEqual(afterUnknownRestore, unknownRenamed, "the existing unknown-history restore guard remains non-mutating after a name edit");
-    assert.equal(await archiveNameInput("archive-unknown").locator("xpath=ancestor::tr").getByRole("button", { name: "명단으로 복귀", exact: true }).count(), 0, "a name-only edit never makes the unknown-history archive entry silently restorable");
-    assert.deepEqual(await read(), archiveNamePay, "unknown name editing and blocked restore cannot change any payroll totals");
+    assert(afterUnknownRestore.active.includes("archive-unknown") && !afterUnknownRestore.archive.includes("archive-unknown"), "unknown-history employee is restored to the active list");
+    assert.equal(afterUnknownRestore.employee.historyUnknown, true, "restoration does not invent missing wage information");
+    assert.equal(await page.evaluate(() => staffWage(findStaff("archive-unknown"))), 0);
+    assert.deepEqual(afterUnknownRestore.roster, unknownRenamed.roster, "restoration retains every recorded shift");
+    // Return the synthetic employee to archive so subsequent independent name tests keep their original fixture/order.
+    await page.evaluate(() => staffDel(S.staff.findIndex(e => e.id === "archive-unknown")));
+    assert.deepEqual(await read(), archiveNamePay, "unknown employee restore/rearchive preserves exact payroll values");
 
     await archivePayrollButton(targetId).click();
     const hostileName = '<img src=x onerror="window.staffNameInjected=1">';

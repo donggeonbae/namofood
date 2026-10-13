@@ -15,7 +15,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
   const state=JSON.stringify(S),full=JSON.stringify(laborRows()),r=profitProgress('2026-10-13'),unchanged=state===JSON.stringify(S),defaultUnchanged=full===JSON.stringify(laborRows());
   salesSet(1,'other',0);const zeroSaleDay=profitProgress('2026-10-13'),past=profitProgress('2026-11-01');
   const cutoff=laborRows(13).map(x=>({id:x.e.id,h:x.h,nh:x.nh,wage:x.wage,pay:x.pay,total:x.total})),beforeWork=laborRows(0);
-  S.month='2026-11';const futureMonth=profitProgress('2026-10-13');S.month='2026-10';todayStr=()=> '2026-10-13';go('pl');
+  S.month='2026-11';const futureMonth=profitProgress('2026-10-13');S.month='2026-10';todayStr=()=> '2026-10-13';go('pl');document.querySelectorAll('#main>details.card').forEach(el=>el.open=true);
   return {r,zeroSaleDay,past,cutoff,beforeWork,futureMonth,unchanged,defaultUnchanged,fullTotal:JSON.parse(full).reduce((n,x)=>n+x.total,0),hint:document.querySelector('#profit-progress').innerText};
  });
  const close=(actual,expected,label)=>assert(Math.abs(actual-expected)<1e-6,`${label}: ${actual} != ${expected}`);

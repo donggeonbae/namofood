@@ -77,6 +77,8 @@ async function inspectLayout(page, allowLegacy = false) {
         timeMinutes: [2, 3].map(index => [...row.cells[index].querySelectorAll("select")][1].options.length),
         checkboxes: row.querySelectorAll('input[type="checkbox"]').length,
         actions: [...row.cells[9].querySelectorAll("button")].map(button => button.textContent.trim()),
+        moves: row.querySelectorAll('[data-staff-move]').length,
+        contacts: [...row.querySelectorAll('button')].filter(el=>el.textContent.trim()==='연락·계좌').length,
       })),
       headers: [...table.tHead.rows[0].cells].map(cell => cell.textContent.trim()), controls,
     };
@@ -101,6 +103,7 @@ function assertFits(layout, label, print = false) {
     assert(row.timeMinutes.every(count => count >= 3), label + ": minute choices remain");
     assert.equal(row.checkboxes, 7, label + ": every weekday remains editable");
     assert.deepEqual(row.actions, ["삭제/보관"], label + ": delete/archive action remains");
+    if(!print){assert.equal(row.moves,2,label+': both order controls exist');assert.equal(row.contacts,1,label+': existing contact control remains');}
   }
   for (const control of layout.controls) {
     const { rect, cell } = control;
@@ -109,7 +112,7 @@ function assertFits(layout, label, print = false) {
       `${label}: ${control.type} extends outside its own cell (${JSON.stringify({ rect, cell })})`);
   }
   // A scroll/overflow clamp cannot satisfy the contract by concealing controls.
-  assert.equal(layout.controls.length, fixture.staff.length * (print ? 16 : 17), label + ": every editable control remains visible");
+  assert.equal(layout.controls.length, fixture.staff.length * (print ? 16 : 20), label + ": every editable and order/contact control remains visible");
 }
 
 async function verifyEditing(page, width) {
@@ -117,6 +120,7 @@ async function verifyEditing(page, width) {
   const before = await snapshot(page), expected = structuredClone(before);
   const row = () => page.locator("#staff-directory-table tbody tr").first();
   const setInput = async (cell, value) => { const input = row().locator("td").nth(cell).locator("input").first(); await input.fill(value); await input.blur(); };
+  expected.staff[0].historyNames=[...new Set([...(expected.staff[0].historyNames||[]),expected.staff[0].name])];
   expected.staff[0].name = "수정된 긴 이름 직원"; await setInput(0, expected.staff[0].name);
   expected.staff[0].role = "이송"; await row().locator("td").nth(1).locator("select").selectOption("이송");
   expected.staff[0].def.s = "22:30"; await page.locator("#staff_0_s_h").selectOption("22"); await page.locator("#staff_0_s_m").selectOption("30");

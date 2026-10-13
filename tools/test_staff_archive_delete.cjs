@@ -192,11 +192,15 @@ async function printedText(page) {
     await page.locator('button[data-staff-archive-open="unknown"]').click();
     assert((await page.locator('tr[data-staff-archive-id="unknown"]').innerText()).includes('기록만 보관'));
     const priorAlert = dialogs.length;
+    const unknownFixture = await page.evaluate(()=>structuredClone(S));
     await page.evaluate(() => staffRestore('unknown'));
-    assert.equal(dialogs.length, priorAlert + 1); assert.equal(dialogs.at(-1).type, 'alert');
-    assert.equal(await page.evaluate(() => S.staff.some(e => e.id === 'unknown')), false, 'unknown history cannot silently become an active employee');
-    assert.deepEqual(await page.evaluate(() => S.staffEdits.unknown), unknownMarker);
-    assert.deepEqual(await page.evaluate(() => findStaff('unknown')), unknownRecord);
+    assert.equal(dialogs.length, priorAlert, 'restoration no longer requires confirming employee info');
+    assert.equal(await page.evaluate(() => S.staff.some(e => e.id === 'unknown')), true, 'user-requested unknown-history restoration succeeds');
+    assert.equal(await page.evaluate(() => findStaff('unknown').historyUnknown), true, 'missing wage information remains unknown');
+    assert.equal(await page.evaluate(() => staffWage(findStaff('unknown'))),0);
+    assert.deepEqual(await page.evaluate(()=>structuredClone(S.roster)),unknownFixture.roster,'restore preserves shifts');
+    // Restore this independent deletion/paging fixture after testing the explicitly changed restore policy.
+    await page.evaluate(fixture=>{S=normalize(fixture);cloudStaffBase=null;staffArchiveRecordId='unknown';staffArchiveOpen=true;render();},unknownFixture);
     assert.deepEqual(await read(), beforePay);
     await page.locator('#staffArchiveRecordClose').click();
     console.log('Verified work-month filtering/default copy exclusion and unknown-history deletion.');

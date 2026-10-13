@@ -2,6 +2,7 @@ import { readState, sql } from "../_shared/database.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import {
   buildTaxReport,
+  buildCostReview,
   kstDay,
   reviewTax,
   type TaxState,
@@ -132,6 +133,7 @@ Deno.serve(async (request) => {
       password,
       JSON.stringify({
         ...report,
+        costReview: buildCostReview(report),
         ai,
         generatedAt: new Date().toISOString(),
         sourceUpdatedAt: String(stored.updated_at),
