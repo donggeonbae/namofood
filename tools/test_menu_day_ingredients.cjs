@@ -18,7 +18,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
     const ingredients=page.locator('#menu-day-ingredients'),methods=page.locator('#menu-day-methods');
     assert(!(await ingredients.innerText()).includes('대형 솥'),'cooking method is not mixed into ingredients');
     assert(!(await ingredients.innerText()).includes('당근'),'only selected day ingredients');
-    assert((await ingredients.innerText()).includes('이 날 쌀 필요량(생쌀) · 14.7kg'),'rice is counted in dry kg across selected day meals');
+    assert((await ingredients.innerText()).includes('이 날 쌀 필요량(생쌀) · 25.2kg'),'rice includes explicit lunch/dinner counts and the default for the blank night forecast');
     assert((await ingredients.innerText()).includes('레시피 없음'),'missing recipes remain actionable');
     assert.equal(await methods.evaluate(e=>e.open),false,'methods initially collapsed');
     assert(await methods.evaluate(e=>e===document.getElementById('main').lastElementChild),'method panel at bottom of meal page');
