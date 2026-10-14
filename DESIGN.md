@@ -37,7 +37,7 @@
 
 - Place an action next to the records it changes; bulk editing has one active week.
 - Make selection separate from saving; starting, switching or canceling bulk entry never changes roster data.
-- Recipe discovery is non-mutating. Draft menu choices never overwrite the live menu until date, meal and an explicit confirmation are supplied. Applied drafts are manual and cannot be overwritten by later AI regeneration.
+- Recipe discovery is non-mutating. Temporary meal controls are removed; scheduled choices remain exclusively in the meal page. Corrections to recipe names explicitly update matching food cells with manual-edit protection.
 - Tradeoffs: compact directory fields on desktop; labeled two-column employee cards below 620px. Weekly roster retains its existing table scrolling.
 
 ## Visual language
@@ -103,7 +103,7 @@
 - Directory: fixed proportional desktop columns; employee cards below 620px without clipping or horizontal overflow.
 - Weekly bulk controls: wrap within the week card; apply remains close to the count and time inputs.
 - Touch: visible checkboxes and buttons; no drag-only selection.
-- Recipe filters and draft actions wrap at 320/390px; no new full-page horizontal overflow. Categories with no results are omitted or clearly disabled; unfamiliar dishes stay available under 기타/미분류 and global search.
+- Recipe filters and inline ingredient controls wrap at 320/390px; no new full-page horizontal overflow. Categories with no results are omitted or clearly disabled; unfamiliar dishes stay available under 기타/미분류 and global search.
 
 ## Interaction states
 
@@ -118,7 +118,7 @@
 
 - Tone: concise, direct Korean.
 - Terminology: staff action `삭제/보관`; collapsed collection `보관된 명단`; this removes staff only from the current directory, not history.
-- Recipe terminology: `조리방식`, `주재료`, `임시 식단`, `식단표에 적용`. Catalog/recipe additions never imply actual scheduled meal changes.
+- Recipe terminology: `조리방식`, `주재료`. The temporary meal builder and its add-to-draft controls are retired from the recipe screen. Catalog/recipe additions never imply actual scheduled meal changes.
 - Microcopy: show the active week, date range, count and overwrite consequence. Time labels use 24-hour format and existing midnight/noon hints.
 
 ## Implementation constraints
@@ -128,7 +128,9 @@
 - Performance: selection state is ephemeral; no extra polling or external libraries.
 - Compatibility: preserve archive/restore, tombstones, payroll, print, previous-day snapshot semantics and unselected cells.
 - Recipe compatibility: retain existing recipes, manual edits, quantities, bulk-cooking validation, search, monitor and recipe AI request authentication. No schemas/authentication changes are needed for ephemeral filters or draft selection.
-- Temporary drafts: recipe choices and optional extras can be added/removed/replaced without saving any scheduled meal. Applying requires all six minimum slots, a non-alcohol soup in slot 1, distinct dish names, explicit date/meal and confirmation if existing dishes will change; preserve headcounts and unrelated meals. Classify chosen dishes as manual, while retaining institutional AI markings only on automatically generated meals.
+- Selected-day ingredients and cooking methods are separate: show meal/dish/material quantities without methods, and place methods in an initially collapsed panel at the bottom of the meal page. Preserve expansion locally per date, never as shared configuration. Edit per-person quantities inline with explicit unit labels and a shared-recipe scope notice; validate finite nonnegative amounts, retain losses and units, mark manual edits through the existing recipe save path, and recalculate all occurrences and purchasing totals. Never edit headcounts or unrelated recipes. Keep both screen-only and retain external meal-print layout. At narrow widths, ingredient rows become labeled cards with no horizontal overflow.
+- The same selected-day table supports named material additions (initial quantity zero), inline material-name/unit edits and confirmed deletions across every occurrence of that recipe. Show the day's dry-rice total in kg. Preserve existing rice recipes; for an uninitialized library without rice, add a one-time editable 105g-per-person dry-rice fallback, not an ongoing overwrite. Existing loss factors remain unchanged. Actual unit changes are explicit user edits, not automatic conversions.
+- Recipe corrections: persist resolution timestamps and the exact acknowledged request; rename aliases retire the old recipe so stale AI recipe preservation cannot reintroduce it. Update scheduled food names through the existing manual-menu stamp path, preserving counts and unrelated fields. A differently worded new question may still appear after a prior dismissal. If renaming into an existing recipe, require confirmation and preserve the destination recipe instead of combining ingredients. Keep confirmation state across shared saves, stale devices and refresh. Refresh question lists after direct edits.
 - Tests: synthetic local browser actions with outgoing writes blocked; deployment observation is read-only. Capture desktop and mobile screenshots.
 - Final review evidence (2026-10-13): 11 routes across 1440/1280/900/768/390/320px, zero root overflow or sibling-box overlap in 66 combinations. Actual cloud data also checked read-only on six routes at PC/mobile widths; document originals read back and hash-verified. Preserve original print font measurements (weekly meals 11px, title 18px). Monthly totals, payroll histories and manual recipes are covered by deterministic regressions. Inspect mobile sales as labeled cards and keep the time popover clamped to actual measured height.
 
