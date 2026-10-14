@@ -102,11 +102,11 @@ const {chromium} = require('playwright');
       const fit=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));
       assert(fit.scroll<=fit.width,'recipe page fits '+width);widths.push(fit);
     }
+    assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available in recipes');
+    assert.doesNotMatch(await page.locator('#recipe-monitor').innerText(),/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     await page.evaluate(()=>go('menu'));
     assert.equal(await page.locator('#main .ai-menu').count(),0,'meal editing contains no AI menu badges');
     assert.equal(await page.locator('#main').getByText(/AI기반|AI 기반|AI 식단/).count(),0,'meal editing contains no AI menu update controls');
-    assert.equal(await page.locator('#recipe-monitor').count(),1,'the separate recipe automation monitor remains available');
-    assert.doesNotMatch(await page.locator('#recipe-monitor').innerText(),/14일 뒤 식단 작성|누락 식단은 15분마다/,'recipe monitoring cannot advertise retired menu schedules');
     assert.equal(await page.evaluate(()=>JSON.stringify(S)),before,'visiting meal editing does not migrate legacy food values or headcounts');
     await page.evaluate(()=>openPicker(selDay,'중식',2));
     await page.getByRole('button',{name:'전체 메뉴에서 선택',exact:true}).click();
