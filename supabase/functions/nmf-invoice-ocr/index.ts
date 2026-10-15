@@ -345,7 +345,9 @@ export function createHandler(dependencies: Dependencies = {}) {
           };
           return;
         }
-        // Only labels leave in this second text-only pass. The original transaction
+        // Labels and literal handwritten quantity notes leave in this text-only pass.
+        // Numeric transaction fields and the image are never sent a second time.
+        // The original transaction
         // is valid even if label review fails; never re-read the image or retry.
         try {
           labelReview = applyLabelReview(

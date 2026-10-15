@@ -1,0 +1,27 @@
+// Synthetic app state only; block every external request and financial write.
+const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
+(async()=>{const b=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+ const p=await b.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));
+ await p.route('**/*',r=>r.request().isNavigationRequest()?r.fulfill({contentType:'text/html',body:fs.readFileSync('나모푸드_관리앱.html','utf8')}):r.abort());
+ await p.goto('https://offline.namofood.test');
+ await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudApplying=true;S=normalize(defaultState());S.month='2026-10';S.orders={'2026-10':[{id:'handwriting',date:'2026-10-03',vendor:'음료테스트',note:'직접 쓴 메모',total:419400,previousBalance:900000,balanceTotal:1319400,ocrMeta:{labelReview:{status:'failed'}},warnings:['품목명 불확실'],items:[{id:'water',name:'',qty:'생수×3',price:3800,supplyAmount:null,amt:11400,tax:null},{id:'rest',name:'다른 음료',qty:21,price:null,supplyAmount:null,amt:408000,tax:null}]}]};orderRange.mode='month';orderView='sheet';oSelected='handwriting';go('order');});
+ const status=p.locator('[data-invoice-amount-check]'),qty=()=>p.locator('[data-order-item="water"] [data-order-key="qty"]');
+ assert.equal(await qty().inputValue(),'생수×3');assert.equal(await qty().getAttribute('inputmode'),'text','quantity allows Korean keyboard');
+ assert.equal(await status.getAttribute('data-invoice-amount-check'),'match');assert.match(await status.innerText(),/419,400.*419,400.*일치/);
+ assert.equal(await p.locator('[data-invoice-diagnostics]').getAttribute('open'),null,'detailed warnings remain collapsed');
+ assert(!(await p.locator('[data-order-id="handwriting"]').innerText()).includes('품목명 불확실'),'only sum status is visible, not all OCR warnings');
+ await qty().fill('파워에이드 × 3');await qty().press('Tab');assert.equal(await p.evaluate(()=>orderRef('handwriting').order.items[0].qty),'파워에이드 × 3');
+ assert.equal(await p.evaluate(()=>orderAmt(orderRef('handwriting').order)),419400,'quantity notes cannot change recorded totals');
+ await qty().fill('1,234.5');await qty().press('Tab');assert.equal(await p.evaluate(()=>orderRef('handwriting').order.items[0].qty),1234.5);assert.equal(await qty().inputValue(),'1,234.5');
+ await qty().fill('');await qty().press('Tab');assert.equal(await p.evaluate(()=>orderRef('handwriting').order.items[0].qty),null);await qty().fill('생水×3 <script>');await qty().press('Tab');assert.equal(await qty().inputValue(),'生水×3 <script>'.replace('生','생'));assert.equal(await p.locator('[data-order-item="water"] script').count(),0,'quantity text is escaped');
+ await p.evaluate(()=>{orderRef('handwriting').order.items[1].amt=396600;render();});assert.equal(await status.getAttribute('data-invoice-amount-check'),'mismatch');assert.match(await status.innerText(),/408,000.*419,400.*11,400/);
+ await p.evaluate(()=>{orderRef('handwriting').order.items[1].amt=null;render();});assert.equal(await status.getAttribute('data-invoice-amount-check'),'unknown');assert.match(await status.innerText(),/확인 필요/);
+ await p.evaluate(()=>{const o=orderRef('handwriting').order;o.items[1].amt=408000;o.total=null;render();});assert.equal(await status.getAttribute('data-invoice-amount-check'),'unknown','missing printed total never means match');
+ await p.evaluate(()=>{const o=orderRef('handwriting').order;o.total=0;o.items.forEach(r=>r.amt=0);render();});assert.equal(await status.getAttribute('data-invoice-amount-check'),'match','explicit zero is known');
+ await p.evaluate(()=>{const o=orderRef('handwriting').order;o.total=-10;o.items[0].amt=-10;render();});assert.equal(await status.getAttribute('data-invoice-amount-check'),'match','returns remain signed');
+ await p.evaluate(()=>{const o=orderRef('handwriting').order;o.total=419400;o.items[0].amt=11400;o.items[1].amt=408000;localStorage.setItem(KEY,JSON.stringify(S));render();});
+ for(const width of [1440,390,320]){await p.setViewportSize({width,height:1000});assert(await p.evaluate(()=>document.getElementById('main').scrollWidth<=document.getElementById('main').clientWidth+1),'no page overflow '+width);if(width!==320)await p.screenshot({path:'/tmp/nmf-handwriting-'+width+'.png',fullPage:true});}
+ await p.reload();await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudApplying=true;orderView='sheet';go('order');});assert.equal(await qty().inputValue(),'생水×3 <script>','quantity text survives reload');
+ const csv=await p.evaluate(async()=>{const create=URL.createObjectURL,click=HTMLAnchorElement.prototype.click;URL.createObjectURL=b=>{window.__handwritingCsv=b;return 'blob:fixture';};HTMLAnchorElement.prototype.click=function(){};try{orderCsv();return await window.__handwritingCsv.text();}finally{URL.createObjectURL=create;HTMLAnchorElement.prototype.click=click;}});assert(csv.includes('생水×3 <script>'),'CSV retains literal quantity notes');
+ assert.deepEqual(errors,[]);console.log('HANDWRITING_QUANTITY_EDIT_CLEAR_NUMERIC_RELOAD_CSV_ESCAPE_ONE_SUM_MESSAGE_MATCH_MISMATCH_UNKNOWN_ZERO_NEGATIVE_MOBILE_OK');
+}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

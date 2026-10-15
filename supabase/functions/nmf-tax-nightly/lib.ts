@@ -163,9 +163,12 @@ export function buildTaxReport(state: TaxState, asOf: string) {
       let revenue = 0, salesDays = 0;
       for (let d = 1; d <= elapsed; d++) {
         const values = MEALS.map((me) => money(cells[d + "|" + me])),
-          additional = ["cash", "card", "other"].map((key) =>
-            money(cells[d + "|" + key])
-          );
+          additional = [
+            "cash",
+            "card",
+            "other",
+            ...MEALS.flatMap((me) => ["cash|" + me, "card|" + me]),
+          ].map((key) => money(cells[d + "|" + key]));
         if (
           values.some((v) => v !== null) || additional.some((v) => v !== null)
         ) salesDays++;

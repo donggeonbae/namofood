@@ -295,7 +295,8 @@ const labelPass = createHandler({
     if (isReview) {
       const labels = JSON.parse(sent.input[0].content[0].text);
       assert(
-        Object.keys(labels).join() === "items" &&
+        Object.keys(labels).join() === "outputFormat,items" &&
+          labels.outputFormat === "JSON" &&
           Object.keys(labels.items[0]).join() === "rowIndex,name,spec,unit" &&
           !sent.input[0].content.some((part: Record<string, string>) =>
             part.type === "input_image"

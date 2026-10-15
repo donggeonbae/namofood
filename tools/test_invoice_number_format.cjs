@@ -303,7 +303,7 @@ async function csvRows(page) {
         const total = header(f.page, 'total'); await total.fill(value); await f.blur(total);
         assert.equal((await f.readOrder()).total, null, 'invalid header input cannot become an actual amount: ' + value);
         const quantity = item(f.page, 'qty'); await quantity.fill(value); await f.blur(quantity);
-        assert.equal((await f.readOrder()).items[0].qty, null, 'invalid quantity input cannot become a numeric amount: ' + value);
+        assert.equal((await f.readOrder()).items[0].qty, value.trim() || null, 'quantity-cell text is retained literally, never coerced to zero or hexadecimal: ' + value);
       }
       assert.equal(await f.page.evaluate(() => invoiceNumber('0')), 0, 'explicit zero is still a known numeric value');
       assert.equal(await f.page.evaluate(() => invoiceNumber('-1,234.50')), -1234.5, 'grouped signed decimals retain their numeric value');

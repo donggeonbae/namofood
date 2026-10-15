@@ -178,7 +178,7 @@ async function fixture(browser) {
       state.staff = [{ id: 'active-fixture', name: '검증 직원', role: '조리', wage: 15000, bonus: 1000, def: { s: '09:00', e: '18:00', b: 60 }, off: [] }];
       state.staffArchive = []; state.staffEdits = {}; state.staffFieldEdits = {}; state.rosterEdits = { '2026-09': {} };
       state.roster = { '2026-09': { 'active-fixture|2': { s: '22:00', e: '06:00', b: 60 } } };
-      state.recipes = []; state.methods = {}; state.sources = {}; state.recipeMeta = {}; state.recipeAsk = {};
+      state.recipes = []; state.methods = {}; state.sources = {}; state.recipeMeta = {}; state.recipeAsk = {}; state.recipeResolutions = {}; state.salesEdits = {};
       state.purch = []; state.purchEdit = {}; state.stock = []; state.stockLog = [];
       state.fixedMonthly = { '2026-10': [['보존할 고정비', 123456]] };
       S = normalize(state); go('order'); localStorage.setItem(KEY, JSON.stringify(S));
@@ -388,7 +388,7 @@ async function csvRows(page) {
       const added = orderRecords(await readState(f.a)).find(order => order.invoiceNo === 'T-100');
       assert.equal(added.date, fallback); assert.equal((await readState(f.a)).month, '2026-10');
       assert.equal(await orderCard(f.a, added.id).locator('[data-order-field="date"]').inputValue(), fallback, 'missing OCR date uses the captured start date, not the currently selected month');
-      assert.match(added.note, /날짜|거래일/); assert(added.warnings.some(warning => /날짜|거래일/.test(warning)), 'missing-date uncertainty remains visible and saved');
+      assert.equal(added.note, ''); assert(added.warnings.some(warning => /날짜|거래일/.test(warning)), 'missing-date uncertainty remains saved under collapsed diagnostics, not automatically inserted in the memo');
     });
     await run('FAILED_OCR_PRESERVES_REGISTERED_ORDERS_AND_SHOWS_INCOMPLETE_PROGRESS', async f => {
       f.enqueue(); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'good.png')); await f.idle();
@@ -449,7 +449,9 @@ async function csvRows(page) {
       const order = orderRecords(await readState(f.a)).find(order => order.id !== existingId); assert(order);
       assert.deepEqual(pick(order, ['date', 'vendor', 'subtotal', 'tax', 'total']), pick(document, ['date', 'vendor', 'subtotal', 'tax', 'total']));
       assert.deepEqual(pick(order.items[0], ['name', 'spec', 'qty', 'unit', 'price', 'supplyAmount', 'tax', 'amt', 'confidence', 'warnings']), document.items[0]);
-      for (const warning of warnings) { assert(order.warnings.includes(warning)); assert(order.note.includes(warning)); }
+      for (const warning of warnings) { assert(order.warnings.includes(warning)); assert.equal(order.note.includes(warning),false); }
+      assert.equal(await orderCard(f.a,order.id).locator('[data-invoice-amount-check]').getAttribute('data-invoice-amount-check'),'mismatch');
+      assert.equal(await orderCard(f.a,order.id).locator('[data-invoice-diagnostics]').getAttribute('open'),null);
       assert.equal(f.dialogs.length, 0, 'uncertain recognition is stored for correction without blocking auto registration');
       const note = orderCard(f.a, order.id).locator('[data-order-field="note"]');
       assert.equal(await note.evaluate(el => el.tagName), 'TEXTAREA');
@@ -470,8 +472,8 @@ async function csvRows(page) {
         assert.equal((await panel.locator('[role="status"]').innerText()).includes(removed), false);
       }
       for (const retained of ['거래금액도 불확실합니다.', '부가세 누락으로 합계가 다릅니다.', '부가세 미기재 및 수량 인식 불확실', '규격 표기가 불확실합니다.']) {
-        assert(order.note.includes(retained), 'blank-VAT filtering preserves actual financial/other-field uncertainty: ' + retained);
-        assert((await panel.locator('[role="status"]').innerText()).includes(retained));
+        assert((await panel.locator('[data-invoice-diagnostics]').textContent()).includes(retained), 'actual financial/other-field uncertainty remains available under diagnostics: ' + retained);
+        assert.equal((await panel.locator('[role="status"]').innerText()).includes(retained),false,'visible status is only the amount-sum check');
       }
       assert.equal(await panel.locator('[data-order-field="tax"]').inputValue(), '');
       assert.equal(await panel.locator('[data-order-item]').first().locator('[data-order-key="tax"]').inputValue(), '');
@@ -595,7 +597,7 @@ async function csvRows(page) {
         await f.a.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         const values = [card.locator('[data-order-field="total"]'), card.locator('[data-order-item]').first().locator('[data-order-key="price"]'), card.locator('[data-order-item]').first().locator('[data-order-key="qty"]')];
         for (const input of values) {
-          assert.equal(await input.getAttribute('type'), 'text'); assert.equal(await input.getAttribute('inputmode'), 'decimal');
+          assert.equal(await input.getAttribute('type'), 'text'); assert.equal(await input.getAttribute('inputmode'), await input.getAttribute('data-order-key') === 'qty' ? 'text' : 'decimal');
           assert((await input.getAttribute('class')).includes('invoice-number')); assert.equal(await input.getAttribute('maxlength'), null);
           assert.equal(await input.isVisible(), true);
           const fit = await numberFit(input);
