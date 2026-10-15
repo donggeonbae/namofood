@@ -1,0 +1,18 @@
+// Detached details events reproduce the iPhone error without external data/writes.
+const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+const live=process.env.NMF_LIVE==='1',version=process.env.NMF_VERSION||'1015-5-invoice-safari';
+(async()=>{const b=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+ const p=await b.newPage({viewport:{width:390,height:844}}),errors=[];p.on('pageerror',e=>errors.push(e.message));
+ if(live){assert(process.env.NMF_PW);await p.addInitScript(pw=>{localStorage.setItem('nmf_app','food');sessionStorage.setItem('nmf_session_pw',pw);},process.env.NMF_PW);}
+ await p.route('**/*',r=>{const req=r.request(),u=new URL(req.url());if(req.isNavigationRequest())return live?r.continue():r.fulfill({contentType:'text/html',body:fs.readFileSync('나모푸드_관리앱.html','utf8')});if(live&&u.origin==='https://d-bae.com'&&['GET','HEAD'].includes(req.method()))return r.continue();if(u.pathname==='/rest/v1/namofood_state'&&req.method()==='GET')return r.fulfill({json:[]});return r.abort();});
+ await p.goto(live?'https://d-bae.com/namofood/?v='+version:'https://offline.namofood.test');if(live)await p.waitForFunction(v=>document.getElementById('appver')?.textContent==='버전 '+v,version,{timeout:45000});await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudApplying=true;S=normalize(defaultState());S.month='2026-10';S.orders={'2026-10':[{id:'first',date:'2026-10-12',vendor:'테스트업체',note:'보존할 메모',total:99500,items:[{id:'row',name:'기존 품목',qty:3,price:12000,amt:36000}]},{id:'second',date:'2026-10-13',vendor:'두번째',total:10,items:[]}]};orderRange.mode='month';orderView='sheet';oSelected='first';go('order');});
+ const before=await p.evaluate(()=>JSON.stringify(S.orders));
+ await p.evaluate(()=>{const stale=document.querySelector('[data-order-id="first"]');render();stale.remove();stale.dispatchEvent(new Event('toggle'));});
+ await p.waitForTimeout(30);assert.deepEqual(errors,[],'detached late toggle must not dereference a missing parent');assert(!await p.locator('#main').innerText().then(t=>t.includes('화면을 그리지 못했습니다')),'late events never replace the page with the fatal screen');
+ assert(await p.evaluate(()=>{oOpen=-1;document.querySelector('[data-order-id="first"]').dispatchEvent(new Event('toggle'));return oOpen===0;}),'attached visible panels retain their open behavior');
+ assert(await p.evaluate(()=>{oOpen=-1;document.querySelector('[data-order-id="second"]').dispatchEvent(new Event('toggle'));return oOpen===-1;}),'hidden panels cannot change selection');
+ assert(await p.evaluate(()=>{const stale=document.querySelector('[data-order-id="first"]');render();oOpen=-1;stale.dispatchEvent(new Event('toggle'));return oOpen===-1;}),'a detached subtree with its old parent still present cannot reset the current selection');
+ await p.evaluate(()=>{for(let i=0;i<15;i++){const stale=document.querySelector('[data-order-id="first"]');orderSelect(i%2?'first':'second');stale.remove();stale.dispatchEvent(new Event('toggle'));render();}const stale=document.querySelector('[data-order-id="first"]');go('sales');stale.remove();stale.dispatchEvent(new Event('toggle'));go('order');});
+ await p.waitForTimeout(50);assert.deepEqual(errors,[]);assert.equal(await p.evaluate(()=>JSON.stringify(S.orders)),before,'screen changes and delayed events preserve every invoice field');assert.equal(await p.locator('[data-order-tab]').count(),2);
+ console.log('DETACHED_LATE_TOGGLE_IPHONE_FATAL_REPRO_VISIBLE_HIDDEN_RERENDER_TAB_NAVIGATION_RECORDS_PRESERVED_OK');
+}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
