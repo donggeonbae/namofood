@@ -1,7 +1,7 @@
 // Offline synthetic ledger (or read-only deployed UI), never save financial data remotely.
 const fs=require('fs'),assert=require('assert/strict'),{chromium}=require('playwright');
 (async()=>{const b=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
- const live=process.env.NMF_LIVE==='1',version='1015-3-meal-sales-invoice',p=await b.newPage({timezoneId:'Asia/Seoul'});let source=fs.readFileSync('나모푸드_관리앱.html','utf8');const errors=[];p.on('pageerror',e=>errors.push(e.message));
+ const live=process.env.NMF_LIVE==='1',version=process.env.NMF_VERSION||'1015-4-invoice-photo',p=await b.newPage({timezoneId:'Asia/Seoul'});let source=fs.readFileSync('나모푸드_관리앱.html','utf8');const errors=[];p.on('pageerror',e=>errors.push(e.message));
  if(process.env.NMF_DISABLE_MEAL_SALES==='1')source=source.replace(/const SALES_REVENUE_KEYS=\[[^\n]+;/,"const SALES_REVENUE_KEYS=['cash','card','other'];");
  if(live){assert(process.env.NMF_PW);await p.addInitScript(pw=>{localStorage.setItem('nmf_app','food');sessionStorage.setItem('nmf_session_pw',pw);},process.env.NMF_PW);}
  await p.route('**/*',r=>{const q=r.request(),u=new URL(q.url());if(q.isNavigationRequest()&&!live)return r.fulfill({contentType:'text/html',body:source});if(u.pathname==='/rest/v1/namofood_state'&&q.method()==='GET')return r.fulfill({json:[]});return live&&['GET','HEAD','OPTIONS'].includes(q.method())?r.continue():r.abort();});

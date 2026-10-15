@@ -101,6 +101,7 @@ async function imageInfo(page, image) {
 async function fixture(browser) {
   const contexts = [], pages = [], errors = [], dialogs = [], requests = [], responses = [], commits = [];
   let remote = null, conflictRow = null, rejected = 0;
+  const photoRows = new Map();
   async function newPage() {
     const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1280, height: 1000 } }); contexts.push(context);
     await context.addInitScript(password => {
@@ -145,6 +146,18 @@ async function fixture(browser) {
         }
         if (url.pathname === '/functions/v1/nmf-recipe-fill') return route.fulfill({ json: { ok: true, running: null, runs: [], last: null } });
         if (url.origin === 'https://offline-cloud.namofood.test' && url.pathname === '/rest/v1/namofood_state') {
+          const photoId = url.searchParams.get('id')?.slice(3);
+          if (request.method() === 'GET' && photoId?.startsWith('namofood#invoice-photo#')) {
+            const row = photoRows.get(photoId);
+            return route.fulfill({ json: row ? [url.searchParams.get('select') === 'updated_at' ? { updated_at: row.updated_at } : row] : [] });
+          }
+          if (request.method() === 'POST' && request.postDataJSON().every(row => row.id.startsWith('namofood#invoice-photo#'))) {
+            assert.equal(url.searchParams.get('select'), 'id');
+            assert(request.headers().prefer.includes('ignore-duplicates'));
+            const inserted = [];
+            for (const row of request.postDataJSON()) if (!photoRows.has(row.id)) { photoRows.set(row.id, row); inserted.push({ id: row.id }); }
+            return route.fulfill({ json: inserted });
+          }
           if (request.method() === 'GET') return route.fulfill({ json: remote ? [remote] : [] });
           if (request.method() === 'PATCH') {
             assert.equal(url.searchParams.get('id'), 'eq.namofood');

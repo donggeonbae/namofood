@@ -6,6 +6,31 @@ import type { TaxState } from "../supabase/functions/nmf-tax-nightly/lib.ts";
 const assert = (ok: boolean, message: string) => {
   if (!ok) throw Error(message);
 };
+const orderPhotoBase = {
+  orders: {
+    "2026-10": [{
+      id: "photo-fixture",
+      date: "2026-10-03",
+      total: 11400,
+      items: [],
+    }],
+  },
+} as unknown as TaxState;
+const orderWithPhoto = {
+  orders: {
+    "2026-10": [{
+      id: "photo-fixture",
+      date: "2026-10-03",
+      total: 11400,
+      items: [],
+      invoicePhoto: { hash: "a".repeat(64), updatedAt: "2026-10-15T00:00:00Z" },
+    }],
+  },
+} as unknown as TaxState;
+assert(
+  await financeHash(orderPhotoBase) === await financeHash(orderWithPhoto),
+  "photo attachment is not a financial change or an extra AI tax call",
+);
 const hash = await financeHash(
   {
     sales: { "2026-10": { "12": { a: 3, b: 4 } } },

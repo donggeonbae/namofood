@@ -13,8 +13,15 @@ const source = {
   rawText: "테스트음료",
   warnings: [],
   items: [
-    { name: "인쇄된 미거래 품목", qty: null, price: null, amt: null },
+    {
+      name: "인쇄된 미거래 품목",
+      qty: null,
+      price: null,
+      amt: null,
+      hasEntry: false,
+    },
     { name: "인쇄된 보증금", qty: null, price: 3500, amt: null },
+    { name: "", qty: null, price: null, amt: null },
     { name: "환타오렌지", qty: "파워에이드×3", amt: 54000 },
     { name: "", qty: "생수×3", amt: 11400 },
     { name: "", qty: 3, amt: 60000 },
@@ -30,15 +37,17 @@ const eq = (actual: unknown, expected: unknown, label: string) => {
 const before = JSON.stringify(source), result = validateDocument(source);
 eq(
   result.items.length,
-  5,
-  "omit unused preprinted rows including price-only deposits",
+  7,
+  "retain named rows even without amounts, omitting only wholly empty rows",
 );
 eq(
   result.items.map((r) => r.qty),
-  ["파워에이드×3", "생수×3", 3, 3, 1234.5],
+  [null, null, "파워에이드×3", "생수×3", 3, 3, 1234.5],
   "retain quantity-cell words, never extract their embedded number",
 );
 eq(result.items.map((r) => r.name), [
+  "인쇄된 미거래 품목",
+  "인쇄된 보증금",
   "환타오렌지",
   "",
   "",
@@ -62,18 +71,18 @@ const review = applyLabelReview(result, {
   })),
 }, "fixture");
 eq(
-  result.items[1].name,
+  result.items[3].name,
   "",
   "label review must not invent missing handwritten names",
 );
-eq(result.items[2].name, "", "a second blank name stays blank");
+eq(result.items[4].name, "", "a second blank name stays blank");
 eq(
   review.status,
   "partial",
   "invented labels are rejected without rejecting the valid invoice",
 );
 eq(
-  result.items[0].qty,
+  result.items[2].qty,
   "파워에이드×3",
   "label review cannot interpret quantity notes",
 );
@@ -102,6 +111,14 @@ if (
 ) {
   throw Error(
     "prompt must describe marked rows and literal handwritten transcription",
+  );
+}
+if (
+  !INVOICE_PROMPT.includes("품목명과 단가만 미리 인쇄") ||
+  !INVOICE_PROMPT.includes("가장자리의 잘린 다른 영수증")
+) {
+  throw Error(
+    "prompt must describe price-only catalogue rows and neighboring receipts",
   );
 }
 console.log(

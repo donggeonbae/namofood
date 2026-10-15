@@ -54,6 +54,7 @@ const {chromium}=require('playwright');
       assert(result.ok&&result.document,'direct server extraction must return a document without registering it');
       if(process.env.NMF_EXPECTED_OCR_MODEL)assert.equal(result.model,process.env.NMF_EXPECTED_OCR_MODEL,'photograph must be processed by the explicitly selected model');
       const document=result.document;
+      if(process.env.NMF_SHOW_INVOICE_ITEMS==='1')console.log(JSON.stringify({photo:i+1,vendor:document.vendor,items:document.items}));
       if(photo.expected)for(const [key,value]of Object.entries(photo.expected))assert.equal(key==='rows'?document.items.length:document[key],value,'photograph '+(i+1)+' '+key);
       console.log(JSON.stringify({photo:i+1,date:document.date,rows:document.items.length,total:document.total,subtotal:document.subtotal,tax:document.tax,previousBalance:document.previousBalance,balanceTotal:document.balanceTotal,model:result.model,labelReview:result.labelReview||null,itemGrossSum:document.items.reduce((s,x)=>s+(x.amt||0),0),itemSupplySum:document.items.reduce((s,x)=>s+(x.supplyAmount||0),0),itemTaxSum:document.items.reduce((s,x)=>s+(x.tax||0),0),warningCount:document.warnings?.length||0,autoRegistrationBypassed:true}));
     }

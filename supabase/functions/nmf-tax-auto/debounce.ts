@@ -30,7 +30,20 @@ export async function financeHash(state: TaxState): Promise<string> {
     JSON.stringify(
       canonical({
         sales: state.sales || {},
-        orders: state.orders || {},
+        // Evidence attachments do not change any tax input. Preserve the existing
+        // fingerprint exactly for orders without this new nonfinancial field.
+        orders: Object.fromEntries(
+          Object.entries(state.orders || {}).map((
+            [month, rows],
+          ) => [
+            month,
+            rows.map((row) =>
+              Object.fromEntries(
+                Object.entries(row).filter(([key]) => key !== "invoicePhoto"),
+              )
+            ),
+          ]),
+        ),
         pricing,
       }),
     ),
