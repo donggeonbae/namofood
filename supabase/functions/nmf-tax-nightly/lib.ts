@@ -168,15 +168,30 @@ export function buildTaxReport(state: TaxState, asOf: string) {
             "card",
             "other",
             ...MEALS.flatMap((me) => ["cash|" + me, "card|" + me]),
-          ].map((key) => money(cells[d + "|" + key]));
+          ].map((key) => money(cells[d + "|" + key])),
+          countRevenue = MEALS.flatMap((me) =>
+            ["cashCount", "cardCount", "creditCount"].map((key) => {
+              const qty = money(cells[d + "|" + key + "|" + me]);
+              return qty === null || qty < 0 || !Number.isSafeInteger(qty)
+                ? null
+                : qty *
+                  (money(tickets[me]) ?? money(object(meals[me]).price) ?? 0);
+            })
+          );
         if (
-          values.some((v) => v !== null) || additional.some((v) => v !== null)
+          values.some((v) => v !== null) || additional.some((v) =>
+            v !== null
+          ) || countRevenue.some((v) => v !== null)
         ) salesDays++;
         revenue += values.reduce<number>((sum, v, i) =>
           sum +
           (v || 0) *
             (money(tickets[MEALS[i]]) ?? money(object(meals[MEALS[i]]).price) ??
-              0), 0) + additional.reduce<number>((sum, v) => sum + (v || 0), 0);
+              0), 0) +
+          [...additional, ...countRevenue].reduce<number>(
+            (sum, v) => sum + (v || 0),
+            0,
+          );
       }
       const rows = (state.orders?.[month] || []).filter((o) =>
           !object(o.ocrMeta).duplicateReviewPending

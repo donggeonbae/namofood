@@ -83,3 +83,60 @@ eq(
 console.log(
   "SERVER_MEAL_CHANNELS_LEGACY_TOTAL_VAT_ZERO_FUTURE_CUTOFF_SOURCE_IMMUTABLE_OK",
 );
+const counts = structuredClone(state);
+counts.settings = {
+  tickets: Object.fromEntries(
+    ["조식", "중식", "석식", "야식"].map((m, i) => [m, 10000 + i * 1000]),
+  ),
+  opdays: 31,
+};
+counts.sales = {
+  "2026-10": {
+    "15|중식": 10,
+    "15|cash": 500,
+    "15|cash|조식": 1234,
+    "15|card": 7000,
+    "15|card|석식": 2345,
+    "15|other": 1000,
+    "16|creditCount|야식": 0,
+    "17|creditCount|중식": 999,
+  },
+};
+for (const [i, m] of ["조식", "중식", "석식", "야식"].entries()) {
+  for (
+    const [k, n] of [["cashCount", 1], ["cardCount", 2], [
+      "creditCount",
+      3,
+    ]] as const
+  ) counts.sales["2026-10"][`15|${k}|${m}`] = (i + 1) * n;
+}
+const countsBefore = JSON.stringify(counts),
+  countsReport = buildTaxReport(counts, "2026-10-16").months["2026-10"];
+eq(
+  countsReport.revenue,
+  842079,
+  "all meal count × correct price; same-day credit is accrued revenue; legacy money included once",
+);
+eq(
+  countsReport.salesDays,
+  2,
+  "credit zero counts as entry, future credit excluded",
+);
+eq(countsReport.outputVat, 76553, "server VAT includes credit count revenue");
+eq(
+  JSON.stringify(counts),
+  countsBefore,
+  "never convert or rewrite legacy data",
+);
+for (const k of ["cashCount", "cardCount", "creditCount"]) {
+  const other = structuredClone(counts);
+  other.sales!["2026-10"][`15|${k}|중식`] = 77;
+  eq(
+    await financeHash(other) === await financeHash(counts),
+    false,
+    "count edits trigger tax quiet window " + k,
+  );
+}
+console.log(
+  "SERVER_MEAL_COUNT_PRICE_CREDIT_REVENUE_LEGACY_ZERO_CUTOFF_VAT_HASH_AND_SOURCE_IMMUTABILITY_OK",
+);
