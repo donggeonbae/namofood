@@ -97,6 +97,10 @@ function quantity(value: unknown): number | string | null {
   if (typeof value !== "string") return number(value, 1e9);
   const raw = text(value), numeric = raw.replace(/,/g, "");
   if (!raw) return null;
+  // A comma may separate handwritten quantities, not just thousands.
+  if (raw.includes(",") && !/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(raw)) {
+    return raw;
+  }
   return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(numeric)
     ? number(Number(numeric), 1e9)
     : raw;
