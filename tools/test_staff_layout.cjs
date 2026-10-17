@@ -75,7 +75,7 @@ async function inspectLayout(page, allowLegacy = false) {
         roles: [...row.cells[1].querySelector("select").options].map(option => option.value),
         timeHours: [2, 3].map(index => [...row.cells[index].querySelectorAll("select")][0].options.length),
         timeMinutes: [2, 3].map(index => [...row.cells[index].querySelectorAll("select")][1].options.length),
-        checkboxes: row.querySelectorAll('input[type="checkbox"]').length,
+        checkboxes: row.querySelectorAll('.offchk input[type="checkbox"]').length,
         actions: [...row.cells[9].querySelectorAll("button")].map(button => button.textContent.trim()),
         moves: row.querySelectorAll('[data-staff-move]').length,
         contacts: [...row.querySelectorAll('button')].filter(el=>el.textContent.trim()==='연락·계좌').length,
@@ -112,7 +112,7 @@ function assertFits(layout, label, print = false) {
       `${label}: ${control.type} extends outside its own cell (${JSON.stringify({ rect, cell })})`);
   }
   // A scroll/overflow clamp cannot satisfy the contract by concealing controls.
-  assert.equal(layout.controls.length, fixture.staff.length * (print ? 16 : 20), label + ": every editable and order/contact control remains visible");
+  assert.equal(layout.controls.length, fixture.staff.length * (print ? 16 : 21), label + ": every editable, insurance, and order/contact control remains visible");
 }
 
 async function verifyEditing(page, width) {
@@ -128,7 +128,7 @@ async function verifyEditing(page, width) {
   expected.staff[0].def.b = 45; await setInput(4, "45");
   expected.staff[0].wage = 21950; await setInput(6, "21950");
   expected.staff[0].bonus = 45670; await setInput(7, "45670");
-  expected.staff[0].off = [6, 3]; await row().locator('input[type="checkbox"]').nth(0).uncheck(); await row().locator('input[type="checkbox"]').nth(3).check();
+  expected.staff[0].off = [6, 3]; await row().locator('.offchk input[type="checkbox"]').nth(0).uncheck(); await row().locator('.offchk input[type="checkbox"]').nth(3).check();
   assert.deepEqual(await snapshot(page), expected, width + "px: real controls update exact fixture values and preserve every other staff/roster/settings value");
   assert.equal(await row().locator("td").nth(5).innerText(), "7.3h", width + "px: daily hours reflect edited times and break");
   expected.staff[0].wage = null; await setInput(6, "");
