@@ -41,7 +41,7 @@ function missingFormulaCaches(book, index) {
   }
   return missing;
 }
-function parseFile(name, buffer) {
+function parseFile(name, buffer, preview = false) {
   const bytes = new Uint8Array(buffer), ext = name.split('.').pop().toLowerCase(), textFile = ['csv', 'tsv'].includes(ext);
   if (!bytes.length || bytes.length > 8 * 1024 * 1024 || !['xlsx', 'xls', 'csv', 'tsv'].includes(ext)) throw Error('XLSX·XLS·CSV·TSV 파일은 각각 8MB 이하로 올려 주세요.');
   if (!textFile) {
@@ -78,12 +78,12 @@ function parseFile(name, buffer) {
       if (String(out.v ?? '').length > 2000 || (out.w?.length || 0) > 2000 || chars > 180000 || cells.length >= 6000) throw Error(sheetName + ': 내용이 너무 큽니다. 시트를 나누어 주세요. 일부만 가져오지는 않습니다.');
       cells.push(out);
     }
-    if (cells.length) sheets.push({ name: sheetName, fileName: name.slice(0, 200), cells });
+    if (cells.length) sheets.push({ name: sheetName, fileName: name.slice(0, 200), cells, ...(preview ? {range,merges:(ws['!merges']||[]).filter(m=>m.s.r>=0&&m.s.c>=0&&m.e.r<2000&&m.e.c<80&&m.e.r>=m.s.r&&m.e.c>=m.s.c).slice(0,1000)} : {}) });
   }
   if (!sheets.length) throw Error('읽을 수 있는 데이터가 없습니다. 그림만 있는 엑셀은 사진으로 올려 주세요.');
   return { sheets, warnings };
 }
 self.onmessage = event => {
-  try { self.postMessage({ ok: true, ...parseFile(event.data.name, event.data.buffer) }); }
+  try { self.postMessage({ ok: true, ...parseFile(event.data.name, event.data.buffer, event.data.preview === true) }); }
   catch (error) { self.postMessage({ ok: false, message: error.message || '엑셀을 읽지 못했습니다. 암호를 해제하고 다시 저장해 주세요.' }); }
 };

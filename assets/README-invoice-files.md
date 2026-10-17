@@ -17,6 +17,12 @@ small references, not file bytes. Files download on request only. Partial
 imports remain retryable; completed identical files bypass AI. Existing
 invoice duplicate review, arithmetic checks and manual edits still apply.
 
+Saved sources also open in a read-only, local sheet viewer beside the editable
+invoice (stacked on mobile). Sheet tabs, merged cells, dates and 50-row paging
+retain source context. Only verified source bytes are loaded on demand; tabs
+and downloads reuse that in-memory file without further transfer or AI calls.
+The viewer does not reproduce embedded charts, drawings or every Excel style.
+
 Vendored parser: SheetJS Community Edition 0.20.3, Apache-2.0.
 Source: https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
 License: `xlsx-LICENSE.txt`.
