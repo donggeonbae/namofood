@@ -17,7 +17,7 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
  await p.goto('https://d-bae.com/namofood/?v='+version);await p.waitForFunction(v=>document.getElementById('appver')?.textContent==='버전 '+v,version,{timeout:45000});
  await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudApplying=true;go('order');});
  await p.locator('#coupang-status').click();await p.waitForFunction(()=>coupangUi.worker!==null||!!coupangUi.error);
- const result=await p.evaluate(()=>({worker:coupangUi.worker,error:coupangUi.error}));assert.equal(result.error,'');assert.equal(result.worker.online,true);
+ const result=await p.evaluate(()=>({worker:coupangUi.worker,error:coupangUi.error,preview:{orders:coupangUi.orders.length,items:coupangUi.orders.reduce((n,o)=>n+o.items.length,0),missingTotals:coupangUi.orders.filter(o=>o.total==null).length,missingAmounts:coupangUi.orders.reduce((n,o)=>n+o.items.filter(x=>x.amt==null).length,0),missingQuantities:coupangUi.orders.reduce((n,o)=>n+o.items.filter(x=>x.qty==null).length,0)}}));assert.equal(result.error,'');assert.equal(result.worker.online,true);
  if(process.env.NMF_COUPANG_TEST_LOGIN==='1'){
   await p.locator('#coupang-login').click();await p.waitForFunction(()=>!coupangUi.busy,{},{timeout:90000});
   const login=await p.evaluate(()=>({error:coupangUi.error,status:coupangUi.status,orders:Object.values(S.orders).flat().length}));
@@ -32,5 +32,5 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
   const shared=await p.evaluate(async()=>{const data=await coupangApi('status');return {id:data.job?.id,status:data.job?.status,orders:data.job?.result?.orders?.length};});
   assert.equal(shared.id,preview.jobId);assert.equal(shared.status,'done');assert.equal(shared.orders,preview.orders);
  }
- assert.equal(writes,0);assert.deepEqual(errors,[]);console.log(JSON.stringify({version,signedConnectorStatus:true,worker:result.worker,loginWindowRequested:loginCalls===1,businessWrites:writes,purchasePreviewRequested:!!preview}));
+ assert.equal(writes,0);assert.deepEqual(errors,[]);console.log(JSON.stringify({version,signedConnectorStatus:true,worker:result.worker,recoveredPreview:result.preview,loginWindowRequested:loginCalls===1,businessWrites:writes,purchasePreviewRequested:!!preview}));
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -27,3 +27,10 @@ test('connector shutdown detaches without closing the logged-in Chrome',async()=
   client.child={unref:()=>{unreferenced++;}};client.context={};client.page={};
   await client.detach();assert.equal(disconnected,1);assert.equal(unreferenced,1);assert.equal(client.browser,null);assert.equal(client.context,null);
 });
+test('open chooses the order tab and preserves unrelated tabs',async()=>{
+  const client=new CoupangBrowser('/not-used-by-test');
+  const tab=url=>({url:()=>url,isClosed:()=>false,setDefaultTimeout:()=>{}});
+  const unrelated=tab('https://example.com/unfinished'),login=tab('https://login.coupang.com/login/login.pang'),orders=tab(ORDER_URL);
+  client.context={pages:()=>[unrelated,login,orders],newPage:async()=>{throw Error('existing order tab must be reused');}};client.page=unrelated;
+  assert.equal(await client.open(),orders);
+});

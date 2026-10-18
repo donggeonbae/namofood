@@ -39,7 +39,10 @@ export class CoupangBrowser {
       this.browser.on('disconnected',()=>{this.browser=null;this.context=null;this.page=null;});
       this.context.on('close',()=>{this.context=null;this.page=null;});
     }
-    if(!this.page||this.page.isClosed())this.page=this.context.pages()[0]||await this.context.newPage();
+    const tabs=this.context.pages(),isCoupang=page=>!page.isClosed()&&/^https:\/\/(?:[a-z0-9-]+\.)*coupang\.com\//i.test(page.url());
+    this.page=tabs.find(page=>isCoupang(page)&&/\/order\/list(?:[?#]|$)/.test(page.url()))
+      ||(this.page&&isCoupang(this.page)?this.page:null)
+      ||tabs.find(isCoupang)||await this.context.newPage();
     this.page.setDefaultTimeout(15000);return this.page;
   }
   async detach() {
