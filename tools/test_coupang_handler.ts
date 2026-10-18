@@ -195,6 +195,64 @@ assert(
   organized.truncated === true && organized.warnings.length > 0,
   "partial coverage disclosed",
 );
+const totalEvidence = evidence.replace(
+  "주문 ",
+  "주문 주문번호 ",
+);
+const missingTotalProvider = (async () =>
+  new Response(
+    JSON.stringify({
+      status: "completed",
+      output: [{
+        type: "message",
+        content: [{
+          type: "output_text",
+          text: JSON.stringify({
+            orders: [{ ...order, evidence: totalEvidence, total: null }],
+          }),
+        }],
+      }],
+    }),
+    { headers: { "content-type": "application/json" } },
+  )) as typeof fetch;
+const paidTotalPage = {
+  text: totalEvidence + "\n총 결제금액\n30,000 원",
+  links: [{
+    text: "주문 상세보기",
+    path: "/ssr/desktop/order/" + order.orderNo,
+    orderNo: order.orderNo,
+  }],
+};
+const recoveredTotal = await organize(
+  { pages: [paidTotalPage] },
+  { from: "2026-10-01", to: "2026-10-31" },
+  "fake-provider-key",
+  missingTotalProvider,
+);
+assert(
+  recoveredTotal.orders[0].total === 30000,
+  "the exact observed paid total is recovered even if AI evidence omitted the final total line",
+);
+for (
+  const page of [{
+    ...paidTotalPage,
+    text: paidTotalPage.text + "\n총 결제금액\n40,000 원",
+  }, {
+    ...paidTotalPage,
+    links: [{ ...paidTotalPage.links[0], orderNo: "99999999999999" }],
+  }]
+) {
+  const uncertain = await organize(
+    { pages: [page] },
+    { from: "2026-10-01", to: "2026-10-31" },
+    "fake-provider-key",
+    missingTotalProvider,
+  );
+  assert(
+    uncertain.orders[0].total === null,
+    "ambiguous or another order's total must remain unconfirmed",
+  );
+}
 let failed = false;
 try {
   await organize(

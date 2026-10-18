@@ -1,4 +1,18 @@
 import { cleanText, validateOrders } from "./protocol.mjs";
+type CompletedOrder = {
+  orderNo: string;
+  date: string;
+  status: string;
+  total: number | null;
+  items: {
+    name: string;
+    spec: string;
+    qty: number | null;
+    unit: string;
+    price: number | null;
+    amt: number | null;
+  }[];
+};
 export async function organize(
   snapshot: unknown,
   range: { from: string; to: string },
@@ -95,7 +109,25 @@ export async function organize(
     pages.map((p) => p.text).join("\n") + "\n" +
       JSON.stringify(pages.map((p) => p.links)),
     range,
-  );
+  ).map((order: CompletedOrder) => {
+    // The paid total is an observed receipt field, not an AI calculation. Bind
+    // it to exactly one detail URL and the same explicit order-number label.
+    const details = pages.filter((page) =>
+      page.links.length === 1 &&
+      page.links[0].orderNo === order.orderNo &&
+      page.links[0].path === "/ssr/desktop/order/" + order.orderNo &&
+      new RegExp("주문번호\\s*" + order.orderNo + "(?!\\d)").test(page.text)
+    );
+    if (details.length !== 1) return order;
+    const totals = [
+      ...details[0].text.matchAll(/(?:^|\n)총\s*결제금액\s+([\d,]+)\s*원/g),
+    ];
+    if (totals.length !== 1) return order;
+    const total = Number(totals[0][1].replaceAll(",", ""));
+    return Number.isSafeInteger(total) && total >= 0 && total <= 1e10
+      ? { ...order, total }
+      : order;
+  });
   return {
     orders,
     truncated: data.truncated === true,
