@@ -24,3 +24,7 @@ verify_jwt = false
 # Full request HMAC; private per-batch claims prevent duplicate provider calls.
 [functions.nmf-payment-match]
 verify_jwt = false
+
+# App: existing password HMAC; Mac mini: separate strong worker HMAC.
+[functions.nmf-coupang]
+verify_jwt = false

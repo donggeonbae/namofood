@@ -60,6 +60,70 @@ create policy "namofood anon delete old" on public.namofood_state for delete to 
 키가 노출되어도 내용은 읽을 수 없습니다. 단, 표를 지우거나 덮어쓰는 것은 막지
 못하니 백업 파일을 가끔 받아 두세요.
 
+## 쿠팡 완료 주문 가져오기 · 맥미니 연결
+
+**매점 → 발주 집계 → 쿠팡 주문 가져오기**에서 조회 기간(최대 93일)을 고르고
+버튼을 누릅니다. 맥미니의 전용 Chrome 프로필에서 완료 주문을 읽고,
+OpenCode Go GPT-6 Luna가 품목·규격·수량·실제 금액을 정리합니다. 확인 목록에서
+품목을 제외하거나 수정한 뒤 **선택한 품목 발주 등록**을 눌러야 발주·손익에 반영됩니다.
+쿠팡 구매·결제·취소는 자동화하지 않습니다. 비밀번호 입력·추가 인증은 맥미니의
+쿠팡 공식 창에서 직접 완료합니다. 로그인 만료와 접근 차단은 오류로 표시합니다.
+실제로 로그인되지 않은 상태를 연결 완료로 표시하지 않습니다.
+
+`connectors/coupang`은 외부 포트를 열지 않는 별도 연결 프로그램입니다. 맥미니가
+서명된 Supabase 작업 큐를 확인하며, 전용 Chrome 프로필은
+`~/Library/Application Support/Namofood/Coupang/chrome-profile`에만 있습니다.
+쿠키·비밀번호를 웹앱·Supabase·AI에 보내지 않습니다. 원래 Chrome 프로필은 읽거나
+변경하지 않습니다. 정리용 주문 텍스트에서 이메일·연락처와 표시된 배송지 필드를
+제외하며, 서버에는 정리 결과만 별도 강한 키로 AES-GCM 암호화해 최대 24시간 보관합니다.
+작업 ID는 해당 브라우저의 sessionStorage에만 남겨 상태 확인으로 이어갈 수 있습니다.
+
+설치(최초 `npm ci --ignore-scripts`, Node 24 이상·Google Chrome 필요):
+
+```sh
+cd connectors/coupang
+node install.mjs --provision
+launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.namofood.coupang.plist"
+```
+
+설치기는 저장소 밖 0600 설정 파일에 임의의 256비트 연결 키를 만들고, 표준입력으로
+Supabase의 `NMF_COUPANG_WORKER_TOKEN`에 등록합니다. 명령행·출력에 키를 넣지 않습니다.
+실행 파일은 Application Support로 복사하므로 문서 폴더 권한이나 이후 Git 편집에
+의존하지 않습니다. 사용자 로그인 시 자동 실행되며 전원 종료·로그아웃·절전·통신
+중단 시 웹앱에 오프라인으로 표시됩니다. 시작 상태는 쿠팡 로그인 여부와 별개입니다.
+
+중지·되돌리기:
+
+```sh
+launchctl bootout gui/$(id -u)/com.namofood.coupang
+```
+
+중지해도 기존 발주와 전용 Chrome 로그인은 삭제하지 않습니다. 로컬 파일을 지울 때는
+로그인 프로필과 연결 설정을 구분해서 직접 정리하세요. 연결 키 변경은 서버 비밀값과
+로컬 설정을 함께 갱신해야 합니다. 웹앱 비밀번호를 아는 사용자가 매점 주문 가져오기를
+요청할 수 있으므로 공유 비밀번호와 맥미니 사용자 계정을 안전하게 관리하세요.
+
+작업 표는 `namofood_private.coupang_jobs` / `coupang_connector`이며 RLS를 켜고
+`anon`·`authenticated`의 직접 권한을 차단합니다. 앱은 기존 비밀번호 HMAC, 맥미니는
+별도 연결 키 HMAC을 사용합니다. 원문 본문·호출 역할을 서명하고, 실행 임대 토큰과
+만료를 검사해 다른 작업의 완료 응답이나 중복 AI 실행을 막습니다. 반복 요청은 기존
+작업을 돌려주고, 진행 상태 조회는 전체 원장을 내려받지 않습니다.
+
+같은 주문번호는 하나의 고정 발주 ID로 저장합니다. 이미 등록·수정·삭제한 주문은
+새 가져오기로 덮어쓰거나 되살리지 않습니다. 주문 일부를 등록하면 확인된 품목 금액만
+합산하며 배송비·할인을 임의 배분하지 않습니다. 일부 등록한 주문의 추가 편집은 기존
+발주에서 합니다. 부가세·단가·수량 미확인은 빈칸으로 유지합니다. 한 번에 최대 10개
+목록 페이지를 읽고 한도에 걸리면 일부 조회 경고를 표시합니다. 쿠팡 양식이 달라지면
+실제 계정의 읽기 전용 결과로 재검증해야 합니다.
+
+검증: `node --test tools/test_coupang_protocol.mjs`,
+`deno run --deny-env --deny-net tools/test_coupang_handler.ts`,
+`node tools/test_coupang_ui.cjs`와 기존 매점·원장 병합 회귀 검사.
+배포 기준 `9404387`과 이번 변경 모두에서 기존 카드 이력 검사 5건은
+`recipeResolutions`·`salesEdits` 초기화 필드의 전체 상태 비교 불일치로 실패합니다.
+이번 작업에서 그 테스트의 판정 조건이나 카드 동작은 변경하지 않았습니다.
+첫 실제 쿠팡 주문 조회·AI 정리는 운영자가 전용 창에 로그인한 뒤 별도 검증해야 합니다.
+
 ## 카드내역 사진 정리 (발주집계)
 
 **발주 집계 → 카드내역**은 거래명세서와 분리된 결제 기록 공간입니다.

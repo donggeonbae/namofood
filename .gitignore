@@ -2,3 +2,4 @@
 .claude/
 .omc/
 supabase/.temp/
+connectors/coupang/node_modules/
