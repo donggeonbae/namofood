@@ -1,14 +1,28 @@
 import { chromium } from 'playwright-core';
 import { mkdir } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { cleanText } from '../../supabase/functions/nmf-coupang/protocol.mjs';
 
 export const ORDER_URL='https://mc.coupang.com/ssr/desktop/order/list';
 export class CoupangBrowser {
-  constructor(profile) { this.profile=profile;this.context=null;this.page=null; }
+  constructor(profile) { this.profile=profile;this.context=null;this.page=null;this.browser=null;this.child=null; }
   async open() {
     if(!this.context){
       await mkdir(this.profile,{recursive:true,mode:0o700});
-      this.context=await chromium.launchPersistentContext(this.profile,{executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:false,viewport:null,acceptDownloads:false,args:['--no-first-run','--no-default-browser-check']});
+      // Start ordinary Chrome, not a test-runner browser. CDP stays on loopback only.
+      const port=await new Promise((resolve,reject)=>{const server=createServer();server.on('error',reject);server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(error=>error?reject(error):resolve(port));});});
+      this.child=spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--user-data-dir='+this.profile,'--remote-debugging-address=127.0.0.1','--remote-debugging-port='+port,'--no-first-run','--no-default-browser-check','about:blank'],{stdio:'ignore'});
+      let endpoint=null,launchFailed=false;this.child.once('error',()=>{launchFailed=true;});
+      for(let i=0;i<60;i++){
+        if(launchFailed||this.child.exitCode!==null)throw Error('browser_read_failed');
+        try{const response=await fetch('http://127.0.0.1:'+port+'/json/version',{signal:AbortSignal.timeout(500)});if(response.ok){const data=await response.json(),url=new URL(data.webSocketDebuggerUrl);if(url.hostname!=='127.0.0.1'||Number(url.port)!==port)throw Error('invalid_local_browser');endpoint=url.href;break;}}catch{}
+        await delay(250);
+      }
+      if(!endpoint)throw Error('browser_read_failed');
+      this.browser=await chromium.connectOverCDP(endpoint);this.context=this.browser.contexts()[0];
+      this.browser.on('disconnected',()=>{this.browser=null;this.context=null;this.page=null;});
       this.context.on('close',()=>{this.context=null;this.page=null;});
     }
     if(!this.page||this.page.isClosed())this.page=this.context.pages()[0]||await this.context.newPage();
@@ -23,7 +37,15 @@ export class CoupangBrowser {
     return /order\/list|mycoupang\/list\/orders/.test(value.url)&&/주문목록|주문 목록|주문내역|주문내역이 없|주문한 상품/.test(value.text)?'ready':'login_required';
   }
   async login() {
-    const page=await this.open();await page.goto(ORDER_URL,{waitUntil:'domcontentloaded',timeout:45000});await page.bringToFront();return this.state();
+    const page=await this.open();await page.goto(ORDER_URL,{waitUntil:'domcontentloaded',timeout:45000});
+    await page.waitForFunction(()=>document.querySelector('input[type="password"]')||/access\s*denied|주문목록|주문 목록|주문내역/i.test(document.title+' '+(document.body?.innerText||'')),null,{timeout:20000}).catch(()=>{});
+    let state=await this.state();
+    if(state==='login_required'&&!await page.locator('input[type="password"]').count()){
+      await page.goto('https://login.coupang.com/login/login.pang',{waitUntil:'domcontentloaded',timeout:45000});
+      await page.waitForSelector('input[type="password"]',{state:'attached',timeout:20000}).catch(()=>{});state=await this.state();
+    }
+    if(state==='login_required'&&!await page.locator('input[type="password"]').count())throw Error('browser_read_failed');
+    await page.bringToFront();return state;
   }
   async read(progress=async()=>{}) {
     const page=await this.open();await page.goto(ORDER_URL,{waitUntil:'domcontentloaded',timeout:45000});
@@ -54,5 +76,9 @@ export class CoupangBrowser {
     if(!pages.length)throw Error('no_order_evidence');
     return {pages,truncated};
   }
-  async close() { if(this.context)await this.context.close(); }
+  async close() {
+    if(this.browser){try{const session=await this.browser.newBrowserCDPSession();await session.send('Browser.close');}catch{}try{await this.browser?.close();}catch{}}
+    if(this.child?.exitCode===null){await delay(500);if(this.child.exitCode===null)this.child.kill('SIGTERM');}
+    this.browser=null;this.child=null;this.context=null;this.page=null;
+  }
 }

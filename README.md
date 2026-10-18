@@ -74,7 +74,9 @@ OpenCode Go GPT-6 Luna가 품목·규격·수량·실제 금액을 정리합니�
 서명된 Supabase 작업 큐를 확인하며, 전용 Chrome 프로필은
 `~/Library/Application Support/Namofood/Coupang/chrome-profile`에만 있습니다.
 쿠키·비밀번호를 웹앱·Supabase·AI에 보내지 않습니다. 원래 Chrome 프로필은 읽거나
-변경하지 않습니다. 정리용 주문 텍스트에서 이메일·연락처와 표시된 배송지 필드를
+변경하지 않습니다. 일반 Chrome을 전용 프로필로 실행하며 제어 연결은 127.0.0.1
+임시 포트에만 연결합니다. 외부 IP에 Chrome 제어 포트를 공개하지 않습니다.
+정리용 주문 텍스트에서 이메일·연락처와 표시된 배송지 필드를
 제외하며, 서버에는 정리 결과만 별도 강한 키로 AES-GCM 암호화해 최대 24시간 보관합니다.
 작업 ID는 해당 브라우저의 sessionStorage에만 남겨 상태 확인으로 이어갈 수 있습니다.
 
