@@ -284,6 +284,13 @@ const provider = (input: string | URL | Request, init?: RequestInit) => {
   );
 };
 const handler = createHandler({ env, fetchImpl: provider, now: () => NOW });
+const storeStatusCalls = calls;
+const storeStatus = await handler(await request("status", {
+  body: { action: "status", app: "store", nonce: crypto.randomUUID() },
+}));
+assert(storeStatus.status === 200 && (await storeStatus.json()).ok === true,
+  "signed store status is supported without changing food/cafe authentication");
+assert(calls === storeStatusCalls, "store status never calls the provider");
 let labelPassCalls = 0;
 const labelPass = createHandler({
   env,

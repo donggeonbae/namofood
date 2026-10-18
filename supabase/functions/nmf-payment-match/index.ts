@@ -31,7 +31,7 @@ Deno.serve(async (request) => {
   }
   if (
     !body || body.action !== "match" ||
-    !["namofood", "namocafe"].includes(body.room)
+    !["namofood", "namocafe", "namostore"].includes(body.room)
   ) return json({ ok: false }, 400);
   if (
     !pw || !/^\d{13}$/.test(time) ||

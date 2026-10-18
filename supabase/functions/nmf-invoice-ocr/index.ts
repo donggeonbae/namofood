@@ -163,7 +163,7 @@ export function createHandler(dependencies: Dependencies = {}) {
       if (
         !body || typeof body !== "object" || Array.isArray(body) ||
         !UUID.test(String(body.nonce)) ||
-        !["food", "cafe"].includes(String(body.app)) ||
+        !["food", "cafe", "store"].includes(String(body.app)) ||
         !["status", "extract"].includes(String(body.action)) ||
         (body.documentType !== undefined &&
           body.documentType !== "invoice" && body.documentType !== "card" &&
