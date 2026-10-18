@@ -1,0 +1,11 @@
+// Read-only encrypted store snapshot; no connector jobs, purchases or ledger writes.
+const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+(async()=>{if(!process.env.NMF_PW)throw Error('NMF_PW required');const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+ const p=await browser.newPage();let blockedWrites=0;
+ await p.addInitScript(pw=>{localStorage.setItem('nmf_app','store');sessionStorage.setItem('nmf_session_pw',pw);},process.env.NMF_PW);
+ await p.route('**/*',r=>{if(r.request().isNavigationRequest())return r.fulfill({contentType:'text/html',body:fs.readFileSync('나모푸드_관리앱.html','utf8')});if(r.request().method()==='POST'&&new URL(r.request().url()).pathname==='/functions/v1/nmf-coupang'&&r.request().postDataJSON().action==='status')return r.continue();if(!['GET','HEAD','OPTIONS'].includes(r.request().method())){blockedWrites++;return r.abort();}return r.continue();});
+ await p.goto('https://d-bae.com/namofood/');
+ const snapshot=await p.evaluate(async()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudApplying=true;const row=await cloudFetch();if(!row)return {empty:true};const state=JSON.parse(await decryptText(getPw(),row.data));return {updated:row.updated_at,products:Object.values(state.storeProducts||{}).filter(p=>!p.deleted).map(({id,name,unit,price})=>({id,name,unit,price})),sales:Object.values(state.storeSales||{}).filter(r=>!r.deleted).map(({date,id,name,unit,qty,price,tickets})=>({date,id,name,unit,qty,price,tickets})),orders:Object.values(state.orders||{}).flat().filter(o=>o.coupang&&!state.orderEdits?.[o.id]?.deleted&&!o.ocrMeta?.duplicateReviewPending).map(o=>({id:o.id,date:o.date,items:o.items.map(({id,name,spec,unit,qty,storeProductId,storeUnitsPerPack})=>({id,name,spec,unit,qty,storeProductId,storeUnitsPerPack}))}))};});
+ const preview=await p.evaluate(async()=>{const r=await coupangApi('status');return {status:r.job?.status,orders:(r.job?.result?.orders||[]).map(o=>({date:o.date,items:o.items.map(({name,spec,unit,qty})=>({name,spec,unit,qty}))}))};});
+ assert.equal(blockedWrites,0);console.log(JSON.stringify({snapshot,unregisteredPreview:preview},null,2));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

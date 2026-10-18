@@ -25,6 +25,7 @@ const fixture={orders:[{orderNo:'12345678901234',date:'2026-10-12',status:'배�
  await p.locator('[data-coupang-item] input[aria-label="쿠팡 수량"]').first().fill('4');await p.locator('[data-coupang-item] input[aria-label="쿠팡 수량"]').first().press('Tab');
  await p.locator('#coupang-status').click();await p.waitForFunction(()=>coupangUi.status.includes('수정 내용은 유지'));
  assert.equal(await p.evaluate(()=>coupangUi.orders[0].items[0].qty),4,'status refresh preserves unsaved review edits');
+ await p.locator('#coupang-stock-import').click();assert.equal(await p.evaluate(()=>Object.keys(S.storeStockImports).length),1,'selected stock import is reachable from the actual review UI');assert.equal(await p.evaluate(()=>Object.values(S.orders).flat().length),0,'stock import never registers costs');await p.evaluate(()=>go('order'));
  await p.locator('#coupang-register').click();await p.waitForFunction(()=>!coupangUi.busy&&!!orderRef('coupang-12345678901234'));
  const first=await p.evaluate(()=>{const o=orderRef('coupang-12345678901234').order;return {items:o.items,amount:orderAmt(o),partial:o.coupang.partial};});
  assert.equal(first.items.length,1);assert.equal(first.items[0].qty,4);assert.equal(first.amount,12000,'partial import uses selected recorded amounts, not order grand total');assert(first.partial);

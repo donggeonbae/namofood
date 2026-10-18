@@ -1,4 +1,4 @@
-import {generateDevice,fingerprint,cipher,realtime} from './connectors/coupang/remote-protocol.mjs?v=1019-3-web-login';
+import {generateDevice,fingerprint,cipher,realtime} from './connectors/coupang/remote-protocol.mjs?v=1019-4-store-stock';
 const $=id=>document.getElementById(id),pending=new Map();let device,busy=false,peer,crypt,alive,expiry,closed=false,state='',generation=0,sendChain=Promise.resolve(),receiveChain=Promise.resolve();
 const status=text=>$('status').textContent=text;
 const error=e=>{$('error').textContent=typeof e==='string'?e:'연결하지 못했습니다. 웹앱에서 다시 열어 주세요.';};
@@ -21,7 +21,7 @@ async function poll(id,seconds){
  throw Error('승인 또는 연결 대기 시간이 지났습니다. 다시 시도해 주세요.');
 }
 async function send(data,gen=generation){if(!peer||!crypt||closed||gen!==generation)return;sendChain=sendChain.then(async()=>{const p=peer,key=crypt;if(!p||!key||gen!==generation)return;const packet=await key.seal(data);if(p===peer&&gen===generation)p.send(packet);}).catch(()=>{});return sendChain;}
-function stopConnection(){generation++;clearInterval(alive);clearTimeout(expiry);peer?.close();peer=null;crypt=null;$('verify').hidden=true;$('show-keyboard').hidden=true;$('screen-box').hidden=true;$('screen').removeAttribute('src');}
+function stopConnection(){generation++;clearInterval(alive);clearTimeout(expiry);clearTimeout(inputTimer);peer?.close();peer=null;crypt=null;focusId='';waitingInput='';$('keyboard').value='';$('reveal').checked=false;$('keyboard').type='password';$('composer').hidden=true;$('verify').hidden=true;$('show-keyboard').hidden=true;$('screen-box').hidden=true;$('screen').removeAttribute('src');}
 async function shutdown(){await send({type:'close'});closed=true;stopConnection();source?.postMessage({type:'nmf-coupang-login-dismiss'},location.origin);}
 async function start(){
  if(busy||peer)return;const gen=++generation;busy=true;state='';$('start').disabled=true;$('error').textContent='';
@@ -43,6 +43,8 @@ async function start(){
   peer=await realtime({...result.relay,topic:session.topic,onPacket:packet=>{
    receiveChain=receiveChain.then(async()=>{if(gen!==generation||!crypt)return;const data=await crypt.open(packet);if(gen!==generation)return;
     if(data.type==='frame'&&typeof data.image==='string'&&data.image.length<=150000&&/^[A-Za-z0-9+/]+=*$/.test(data.image)){$('screen').src='data:image/jpeg;base64,'+data.image;$('screen-box').hidden=false;}
+    if(data.type==='focus')updateFocus(data);
+    if(data.type==='input-result'&&data.id===waitingInput){clearTimeout(inputTimer);waitingInput='';if(data.ok){$('keyboard').value='';$('input-status').textContent='선택한 칸에 입력했습니다. 아래 쿠팡 화면에서 확인하세요.';}else $('input-status').textContent='선택한 입력칸이 바뀌었습니다. 화면에서 다시 선택하고 입력해 주세요.';updateInput();}
     if(data.type==='state'){
      state=data.status;status(String(data.message||'').slice(0,250));
      if(state==='ready'){stopConnection();$('start').disabled=false;$('start').textContent='다시 로그인 화면 열기';}
@@ -50,7 +52,7 @@ async function start(){
     }
    }).catch(()=>{});
   },onClose:()=>{receiveChain.finally(()=>{if(gen===generation&&state!=='ready'&&!closed){stopConnection();status('실시간 연결이 종료됐습니다. 다시 열 수 있습니다.');$('start').disabled=false;}});}});
-  $('verify').hidden=false;$('show-keyboard').hidden=false;await send({type:'hello'});
+  $('verify').hidden=false;$('show-keyboard').hidden=false;$('composer').hidden=false;await send({type:'hello'});
   alive=setInterval(()=>send({type:'alive'},gen),5000);
   expiry=setTimeout(()=>{if(gen!==generation)return;send({type:'close'},gen).finally(()=>{if(gen===generation){stopConnection();status('5분 제한 시간이 끝났습니다. 다시 열어 주세요.');$('start').disabled=false;}});},Math.max(0,session.expires-Date.now()));
  }catch(e){if(!closed&&gen===generation){stopConnection();error(e.message);$('start').disabled=false;}}
@@ -58,15 +60,16 @@ async function start(){
 }
 $('start').onclick=start;$('close').onclick=shutdown;$('verify').onclick=()=>send({type:'verify'});
 $('forget').onclick=async()=>{await send({type:'close'});stopConnection();await storage('readwrite',store=>store.delete('current'));device=await generateDevice();await storage('readwrite',store=>store.put(device,'current'));status('이 기기의 승인 정보를 지웠습니다. 다음 연결에는 맥미니 승인이 필요합니다.');$('start').disabled=false;};
-const keyboard=$('keyboard');$('show-keyboard').onclick=()=>keyboard.focus({preventScroll:true});
-$('screen').onpointerdown=event=>{if(!peer)return;event.preventDefault();const rect=event.currentTarget.getBoundingClientRect(),image=event.currentTarget;send({type:'click',x:(event.clientX-rect.left)*image.naturalWidth/rect.width,y:(event.clientY-rect.top)*image.naturalHeight/rect.height});keyboard.focus({preventScroll:true});};
+let focusId='',focusKind='none',waitingInput='',inputTimer;
+const keyboard=$('keyboard');$('show-keyboard').onclick=()=>keyboard.focus();
+function updateInput(){keyboard.disabled=!focusId||!!waitingInput;$('apply-input').disabled=!focusId||!!waitingInput||!peer;$('apply-input').textContent=waitingInput?'입력 중…':'입력하기';}
+function updateFocus(data){const id=typeof data.focusId==='string'&&/^[0-9a-f-]{36}$/i.test(data.focusId)?data.focusId:'';if(id!==focusId){keyboard.value='';$('reveal').checked=false;waitingInput='';clearTimeout(inputTimer);if(!$('input-status').textContent.includes('바뀌'))$('input-status').textContent='';}focusId=id;focusKind=['email','password','text'].includes(data.kind)?data.kind:'none';if(focusKind==='none')focusId='';keyboard.type=focusKind==='password'&&!$('reveal').checked?'password':'text';$('focus-label').textContent=focusId?({email:'아이디·이메일 입력 중',password:'비밀번호 입력 중',text:'선택한 입력칸 · 인증번호 등'})[focusKind]:'아래 쿠팡 화면에서 입력할 칸을 먼저 누르세요.';updateInput();}
+async function applyInput(){if(!focusId||waitingInput||!peer)return;waitingInput=crypto.randomUUID();updateInput();$('input-status').textContent='선택한 쿠팡 입력칸으로 전달 중…';const id=waitingInput;await send({type:'fill',id,focusId,text:keyboard.value});inputTimer=setTimeout(()=>{if(waitingInput!==id)return;waitingInput='';updateInput();$('input-status').textContent='입력 확인이 지연됩니다. 쿠팡 화면을 확인한 뒤 다시 입력하세요.';},10000);}
+$('apply-input').onclick=applyInput;$('reveal').onchange=()=>{keyboard.type=focusKind==='password'&&!$('reveal').checked?'password':'text';};$('next-field').onclick=()=>{if(peer&&!waitingInput)send({type:'key',key:'Tab'});};
+$('screen').onpointerdown=event=>{if(!peer)return;event.preventDefault();const rect=event.currentTarget.getBoundingClientRect(),image=event.currentTarget;send({type:'click',x:(event.clientX-rect.left)*image.naturalWidth/rect.width,y:(event.clientY-rect.top)*image.naturalHeight/rect.height});};
 $('screen').onwheel=event=>{if(peer){event.preventDefault();send({type:'scroll',dy:Math.max(-700,Math.min(700,event.deltaY))});}};
 keyboard.addEventListener('keydown',event=>{
- if(!peer||event.isComposing)return;
- if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){event.preventDefault();send({type:'key',key:'ControlOrMeta+A'});return;}
- if(['Backspace','Delete','Enter','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Escape'].includes(event.key)){event.preventDefault();send({type:'key',key:event.key});}
+ if(event.key==='Enter'&&!event.isComposing){event.preventDefault();applyInput();}
 });
-keyboard.addEventListener('input',event=>{if(event.isComposing)return;const text=keyboard.value;keyboard.value='';if(text)send({type:'text',text:text.slice(0,256)});});
-keyboard.addEventListener('paste',event=>{const text=event.clipboardData?.getData('text');if(text){event.preventDefault();keyboard.value='';send({type:'text',text:text.slice(0,256)});}});
 addEventListener('pagehide',()=>{send({type:'close'});stopConnection();});
 (async()=>{try{device=await storage('readonly',store=>store.get('current'));if(!device?.privateKey){device=await generateDevice();await storage('readwrite',store=>store.put(device,'current'));}status(device.certificate?.expires>Date.now()?'이 기기는 승인돼 있습니다. 로그인 화면을 열 수 있습니다.':'이 기기는 최초 1회 맥미니 승인이 필요합니다.');$('start').disabled=false;await start();}catch(e){error(e.message);}})();

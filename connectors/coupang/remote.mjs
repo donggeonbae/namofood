@@ -59,9 +59,14 @@ export class RemoteLogin{
           const data=await this.crypto.open(packet);if(!validInput(data,width,height))throw Error('invalid_input');
           this.lastHello=Date.now();this.errors=0;
           if(['hello','refresh'].includes(data.type)){this.lastHash='';await this.send({type:'state',status:'login_required',message:'쿠팡 공식 로그인 화면입니다. 직접 로그인하고 추가 인증을 완료하세요.'},generation);}
-          else if(data.type==='click')await page.mouse.click(data.x,data.y);
+          else if(data.type==='click'){await page.mouse.click(data.x,data.y);await this.focus(generation);}
           else if(data.type==='text')await page.keyboard.insertText(data.text);
-          else if(data.type==='key')await page.keyboard.press(data.key);
+          else if(data.type==='fill'){
+            const matches=await page.evaluate(id=>{const el=document.activeElement;return el?.dataset?.nmfLoginFocus===id&&['INPUT','TEXTAREA'].includes(el.tagName)&&!el.disabled&&!el.readOnly;},data.focusId);
+            if(matches){await page.keyboard.press('ControlOrMeta+A');await page.keyboard.insertText(data.text);}
+            await this.send({type:'input-result',id:data.id,ok:matches},generation);await this.focus(generation);
+          }
+          else if(data.type==='key'){await page.keyboard.press(data.key);await this.focus(generation);}
           else if(data.type==='scroll')await page.mouse.wheel(0,data.dy);
           else if(data.type==='verify')await this.verify(generation);
           else if(data.type==='close')await this.close(generation);
@@ -71,6 +76,13 @@ export class RemoteLogin{
     }catch(error){await this.close(generation);throw error;}
   }
   async send(data,generation=this.generation){if(generation!==this.generation)return;this.sendChain=this.sendChain.then(async()=>{const peer=this.relay,key=this.crypto;if(peer&&!this.stopping&&generation===this.generation){const packet=await key.seal(data);if(generation===this.generation&&!this.stopping&&peer===this.relay)peer.send(packet);}});return this.sendChain;}
+  async focus(generation=this.generation){
+    const value=await this.page.evaluate(()=>{
+      const el=document.activeElement;if(!el||!['INPUT','TEXTAREA'].includes(el.tagName)||el.disabled||el.readOnly||['hidden','checkbox','radio','submit','button','file'].includes(el.type))return {kind:'none',focusId:''};
+      el.dataset.nmfLoginFocus||=crypto.randomUUID();return {kind:el.type==='password'?'password':el.type==='email'||/email|username/i.test(el.autocomplete+' '+el.name+' '+el.id)?'email':'text',focusId:el.dataset.nmfLoginFocus};
+    });
+    if(generation!==this.generation)return;const key=JSON.stringify(value);if(this.lastFocus!==key){this.lastFocus=key;await this.send({type:'focus',...value},generation);}
+  }
   async verify(generation=this.generation){
     if(!this.active||this.stopping||generation!==this.generation)return;const page=this.page;
     if(!allowedNavigation(page.url()))return this.close(generation);
@@ -88,6 +100,7 @@ export class RemoteLogin{
       if(!allowedNavigation(page.url()))return await this.close(generation);
       if(!new URL(page.url()).pathname.startsWith('/login/')){await this.verify(generation);return;}
       if(!this.lastHello)return;
+      await this.focus(generation);
       if(await page.evaluate(()=>/access\s*denied/i.test(document.title+' '+(document.body?.innerText||'')))){await this.send({type:'state',status:'blocked',message:'쿠팡에서 접근을 차단했습니다. 잠시 후 다시 시도하세요.'},generation);return await this.close(generation);}
       const frame=await page.screenshot({type:'jpeg',quality:48,timeout:7000});if(frame.length>110000||generation!==this.generation)return;
       const hash=await sha(frame.toString('base64'));if(hash===this.lastHash||generation!==this.generation)return;this.lastHash=hash;

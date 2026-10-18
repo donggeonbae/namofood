@@ -56,6 +56,7 @@ export function validInput(data,width,height){
   if(['hello','alive','refresh','close','verify'].includes(data.type))return true;
   if(data.type==='click')return Number.isFinite(data.x)&&Number.isFinite(data.y)&&data.x>=0&&data.y>=0&&data.x<width&&data.y<height;
   if(data.type==='text')return typeof data.text==='string'&&data.text.length>0&&data.text.length<=256&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(data.text);
+  if(data.type==='fill')return UUID.test(data.focusId||'')&&UUID.test(data.id||'')&&typeof data.text==='string'&&data.text.length<=256&&!/[\u0000-\u001f\u007f]/.test(data.text);
   if(data.type==='key')return ['Backspace','Delete','Enter','Tab','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Escape','ControlOrMeta+A'].includes(data.key);
   if(data.type==='scroll')return Number.isFinite(data.dy)&&Math.abs(data.dy)<=700;
   return false;

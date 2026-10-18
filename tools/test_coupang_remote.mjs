@@ -14,6 +14,7 @@ test('only explicit login pages and bounded input can be controlled',()=>{
  for(const url of ['https://login.coupang.com/login/login.pang','https://mc.coupang.com/ssr/desktop/order/list','https://www.coupang.com/'])assert(allowedNavigation(url));
  for(const url of ['https://login.coupang.com.evil.example/login/','http://login.coupang.com/login/login.pang','https://www.coupang.com/vp/products/123','https://example.com','file:///etc/passwd'])assert(!allowedNavigation(url));
  assert(validInput({type:'text',text:'test input'},980,760));assert(validInput({type:'click',x:10,y:20},980,760));
+ assert(validInput({type:'fill',id:crypto.randomUUID(),focusId:crypto.randomUUID(),text:'fixture input'},980,760));assert(!validInput({type:'fill',id:crypto.randomUUID(),focusId:'',text:'bad'},980,760));
  for(const data of [{type:'eval',text:'document.cookie'},{type:'key',key:'Control+L'},{type:'text',text:'x'.repeat(257)},{type:'click',x:990,y:10},{type:'scroll',dy:900}])assert(!validInput(data,980,760));
 });
 test('server-issued metadata alone cannot authorize an unapproved local device',async()=>{
