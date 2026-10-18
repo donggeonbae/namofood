@@ -1,7 +1,7 @@
 // Production smoke: signed connector status and web-login entry only.
 // Purchase preview is opt-in; every business-ledger write stays blocked.
 const assert=require('node:assert/strict'),{chromium}=require('playwright');
-(async()=>{const pw=process.env.NMF_PW;if(!pw)throw Error('NMF_PW required');if(process.env.NMF_COUPANG_TEST_LOGIN==='1')throw Error('Native login button retired; use interactive web login/device approval instead.');const version=process.env.NMF_EXPECTED_VER||'1019-4-store-stock',browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+(async()=>{const pw=process.env.NMF_PW;if(!pw)throw Error('NMF_PW required');if(process.env.NMF_COUPANG_TEST_LOGIN==='1')throw Error('Native login button retired; use interactive web login/device approval instead.');const version=process.env.NMF_EXPECTED_VER||'1019-5-store-stock',browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
  const p=await browser.newPage(),errors=[];let writes=0,statusCalls=0,loginCalls=0;p.on('pageerror',e=>errors.push(e.message));
  await p.addInitScript(pw=>{localStorage.setItem('nmf_app','store');sessionStorage.setItem('nmf_session_pw',pw);},pw);
  await p.route('**/*',async route=>{const r=route.request(),url=new URL(r.url());
