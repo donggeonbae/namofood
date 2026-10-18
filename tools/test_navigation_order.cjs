@@ -4,7 +4,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
   const ctx=await browser.newContext(),p=await ctx.newPage(),errors=[];p.on('pageerror',e=>errors.push(e.message));
   await ctx.addInitScript(({app,pw})=>{localStorage.setItem('nmf_app',app);localStorage.setItem('nmf_supa_'+app,JSON.stringify({url:'',key:''}));if(pw)sessionStorage.setItem('nmf_session_pw',pw);},{app,pw:process.env.NMF_PW||''});
   await ctx.route('**/*',r=>process.env.NMF_NAV_URL?(['GET','HEAD','OPTIONS'].includes(r.request().method())&&new URL(r.request().url()).hostname==='d-bae.com'?r.continue():r.abort()):r.request().isNavigationRequest()?r.fulfill({contentType:'text/html',body:fs.readFileSync('나모푸드_관리앱.html','utf8')}):r.abort());
-  await p.goto(process.env.NMF_NAV_URL||'https://navigation.namofood.test');if(process.env.NMF_NAV_URL)await p.waitForFunction(()=>document.getElementById('appver')?.textContent==='버전 1019-6-finance-nav',null,{timeout:45000});
+  await p.goto(process.env.NMF_NAV_URL||'https://navigation.namofood.test');if(process.env.NMF_NAV_URL)await p.waitForFunction(()=>document.getElementById('appver')?.textContent==='버전 1019-7-store-import',null,{timeout:45000});
   assert.deepEqual(await p.evaluate(()=>{const f=document.querySelector('nav [data-p=fixed]');return [f.dataset.p,f.nextElementSibling.dataset.p,f.nextElementSibling.nextElementSibling.dataset.p];}),['fixed','pl','overview'],app+' finance menus immediately follow fixed costs');
   assert.equal(await p.locator('nav [data-p=roster]').isVisible(),app!=='store','preserve food/cafe employee menus');
   assert.equal(await p.locator('nav [data-p=fixed]').isVisible(),app!=='store');
