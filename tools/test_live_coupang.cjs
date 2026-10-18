@@ -1,7 +1,7 @@
 // Production smoke: read connector status. Optional login opens the official Mac window only.
 // Purchase preview is opt-in; every business-ledger write stays blocked.
 const assert=require('node:assert/strict'),{chromium}=require('playwright');
-(async()=>{const pw=process.env.NMF_PW;if(!pw)throw Error('NMF_PW required');const version=process.env.NMF_EXPECTED_VER||'1019-2-coupang-native',browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
+(async()=>{const pw=process.env.NMF_PW;if(!pw)throw Error('NMF_PW required');const version=process.env.NMF_EXPECTED_VER||'1019-3-web-login',browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});try{
  const p=await browser.newPage(),errors=[];let writes=0,statusCalls=0,loginCalls=0;p.on('pageerror',e=>errors.push(e.message));
  await p.addInitScript(pw=>{localStorage.setItem('nmf_app','store');sessionStorage.setItem('nmf_session_pw',pw);},pw);
  await p.route('**/*',async route=>{const r=route.request(),url=new URL(r.url());

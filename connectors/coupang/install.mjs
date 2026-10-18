@@ -23,7 +23,7 @@ const xml=value=>String(value).replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&'
 const agent=join(homedir(),'Library','LaunchAgents','com.namofood.coupang.plist');
 // launchd must not depend on a protected Documents checkout or future Git edits.
 const runtime=join(directory,'runtime');await mkdir(runtime,{recursive:true,mode:0o700});
-for(const name of ['worker.mjs','browser.mjs']){
+for(const name of ['worker.mjs','browser.mjs','remote.mjs','remote-protocol.mjs']){
   const source=await readFile(join(root,name),'utf8');
   await writeFile(join(runtime,name),source.replaceAll('../../supabase/functions/nmf-coupang/protocol.mjs','./protocol.mjs'),{mode:0o600});
 }

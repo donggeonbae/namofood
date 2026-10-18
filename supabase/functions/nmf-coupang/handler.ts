@@ -1,5 +1,6 @@
 import { equal, seal, signature, unseal, validRange } from "./protocol.mjs";
 import { organize } from "./ai.ts";
+import { issueDevice, validDevice, verifyDevice } from "./devices.ts";
 type Dependencies = {
   env: (key: string) => string;
   queue: any;
@@ -105,6 +106,68 @@ export function createHandler(
     try {
       if (role === "app") {
         if (body.room !== "namostore") return json({ ok: false }, 403);
+        if (body.action === "pair" || body.action === "remote_login") {
+          if (env("NMF_COUPANG_WEB_LOGIN_DISABLED") === "1") {
+            return json({
+              ok: false,
+              error: "웹앱 쿠팡 로그인이 관리자 설정으로 중지됐습니다.",
+            }, 503);
+          }
+          if (!(await queue.info()).online) {
+            return json({
+              ok: false,
+              error: "맥미니 연결 프로그램을 확인해 주세요.",
+            }, 409);
+          }
+          if (!env("SUPABASE_ANON_KEY")) {
+            return json({
+              ok: false,
+              error: "실시간 로그인 서버 설정이 필요합니다.",
+            }, 503);
+          }
+          if (body.action === "pair" && !validDevice(body.device)) {
+            return json({ ok: false }, 400);
+          }
+          if (
+            body.action === "remote_login" &&
+            !await verifyDevice(workerKey, body.certificate, now())
+          ) {
+            return json({
+              ok: false,
+              error: "이 기기는 아직 승인되지 않았거나 승인이 만료됐습니다.",
+            }, 403);
+          }
+          const width = body.width === 390 ? 390 : 980;
+          const original = body.action === "pair"
+            ? body.device
+            : body.certificate.device;
+          const device = {
+            id: original.id,
+            publicKey: {
+              kty: "EC",
+              crv: "P-256",
+              x: original.publicKey.x,
+              y: original.publicKey.y,
+              ext: true,
+            },
+          };
+          const payload = body.action === "pair" ? { device } : {
+            certificate: {
+              device,
+              expires: body.certificate.expires,
+              mac: body.certificate.mac,
+            },
+            width,
+          };
+          const jobId = await queue.enqueue(
+            body.nonce,
+            body.action,
+            null,
+            null,
+            await seal(workerKey, body.nonce, payload),
+          );
+          return json({ ok: true, jobId });
+        }
         if (body.action === "status" || body.action === "result") {
           const worker = await queue.info();
           let job = null;
@@ -174,10 +237,25 @@ export function createHandler(
         return json({ ok: true });
       }
       if (body.action === "claim") {
-        return json({ ok: true, job: await queue.claim() });
+        const job = await queue.claim();
+        if (job?.payloadCiphertext) {
+          job.payload = await unseal(workerKey, job.id, job.payloadCiphertext);
+          delete job.payloadCiphertext;
+        }
+        if (job?.kind === "remote_login") {
+          job.relay = {
+            url: "wss://rycibsczsgbkgtwfxyim.supabase.co/realtime/v1/websocket",
+            key: env("SUPABASE_ANON_KEY"),
+          };
+        }
+        return json({ ok: true, job });
       }
       if (body.action === "status") {
-        return json({ ok: true, worker: await queue.info() });
+        return json({
+          ok: true,
+          worker: await queue.info(),
+          webLogin: !!env("SUPABASE_ANON_KEY"),
+        });
       }
       if (!UUID.test(body.jobId || "") || !UUID.test(body.lease || "")) {
         return json({ ok: false }, 400);
@@ -212,7 +290,44 @@ export function createHandler(
         );
       }
       try {
-        const result = job.kind === "login"
+        const payload = job.payload_ciphertext
+          ? await unseal(workerKey, body.jobId, job.payload_ciphertext)
+          : null;
+        let remoteResult;
+        if (job.kind === "pair") {
+          remoteResult = body.approved === true
+            ? {
+              certificate: await issueDevice(workerKey, payload.device, now()),
+            }
+            : { denied: true };
+        }
+        if (job.kind === "remote_login") {
+          const s = body.session;
+          if (
+            !s || s.id !== body.jobId ||
+            !/^nmf-login-[a-f0-9]{64}$/.test(s.topic || "") ||
+            !validDevice({ id: s.id, publicKey: s.publicKey }) ||
+            !Number.isSafeInteger(s.expires) || s.expires <= now() ||
+            s.expires > now() + 301000 || ![390, 980].includes(s.width) ||
+            s.height !== 760
+          ) throw Error("invalid_session");
+          remoteResult = {
+            session: {
+              id: s.id,
+              topic: s.topic,
+              publicKey: s.publicKey,
+              expires: s.expires,
+              width: s.width,
+              height: s.height,
+            },
+            relay: {
+              url:
+                "wss://rycibsczsgbkgtwfxyim.supabase.co/realtime/v1/websocket",
+              key: env("SUPABASE_ANON_KEY"),
+            },
+          };
+        }
+        const result = remoteResult || (job.kind === "login"
           ? {
             state: ["ready", "login_required", "blocked"].includes(body.state)
               ? body.state
@@ -227,7 +342,7 @@ export function createHandler(
             env("NMF_INVOICE_API_KEY") || env("OPENCODE_GO_API_KEY") ||
               env("OPENCODE_API_KEY"),
             fetcher,
-          );
+          ));
         await queue.done(
           body.jobId,
           body.lease,

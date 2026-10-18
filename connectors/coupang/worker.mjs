@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { signature } from '../../supabase/functions/nmf-coupang/protocol.mjs';
 import { CoupangBrowser } from './browser.mjs';
+import {RemoteLogin,approveDevice} from './remote.mjs';
 
 export const directory=join(homedir(),'Library','Application Support','Namofood','Coupang');
 const browser=new CoupangBrowser(join(directory,'chrome-profile'));
@@ -33,14 +34,20 @@ async function run(){
   let polling=false;
   async function heartbeat(){try{await api('heartbeat',{state,...(active?{jobId:active.id,lease:active.lease}:{})});}catch{log('CONNECTOR_HEARTBEAT_RETRY');}}
   await heartbeat();const timer=setInterval(heartbeat,20000);
+  const remote=new RemoteLogin(browser,directory,async next=>{state=next;await heartbeat();});
   try{while(!stopping){
+    if(remote.active){await delay(1000);continue;}
     if(!polling){polling=true;
       try{
         const data=await api('claim');active=data.job||null;
         if(active){
           await api('progress',{jobId:active.id,lease:active.lease,stage:'opening',progress:10});
           try{
-            if(active.kind==='login'){
+            if(active.kind==='pair'){
+              const approved=await approveDevice(directory,active.payload.device);await api('finish',{jobId:active.id,lease:active.lease,approved});
+            }else if(active.kind==='remote_login'){
+              const session=await remote.start(active);await api('finish',{jobId:active.id,lease:active.lease,session});
+            }else if(active.kind==='login'){
               state=await browser.login();await api('finish',{jobId:active.id,lease:active.lease,state});
             }else{
               const snapshot=await browser.read((stage,progress)=>api('progress',{jobId:active.id,lease:active.lease,stage,progress}),{from:active.from,to:active.to});state='ready';
@@ -59,7 +66,7 @@ async function run(){
       }catch{log('CONNECTOR_POLL_RETRY');}finally{polling=false;}
     }
     await delay(5000);
-  }}finally{clearInterval(timer);await browser.detach();}
+  }}finally{clearInterval(timer);await remote.close();await browser.detach();}
 }
 try{await mkdir(directory,{recursive:true,mode:0o700});await (process.argv.includes('--login')?loginOnly():run());}
 catch{console.error('연결 프로그램을 시작하지 못했습니다. 설치 설정·전용 Chrome 창을 확인해 주세요.');process.exitCode=1;}
