@@ -43,7 +43,7 @@ async function run(){
             if(active.kind==='login'){
               state=await browser.login();await api('finish',{jobId:active.id,lease:active.lease,state});
             }else{
-              const snapshot=await browser.read((stage,progress)=>api('progress',{jobId:active.id,lease:active.lease,stage,progress}));state='ready';
+              const snapshot=await browser.read((stage,progress)=>api('progress',{jobId:active.id,lease:active.lease,stage,progress}),{from:active.from,to:active.to});state='ready';
               await api('finish',{jobId:active.id,lease:active.lease,state,snapshot});
             }
           }catch(error){
@@ -59,7 +59,7 @@ async function run(){
       }catch{log('CONNECTOR_POLL_RETRY');}finally{polling=false;}
     }
     await delay(5000);
-  }}finally{clearInterval(timer);await browser.close();}
+  }}finally{clearInterval(timer);await browser.detach();}
 }
 try{await mkdir(directory,{recursive:true,mode:0o700});await (process.argv.includes('--login')?loginOnly():run());}
 catch{console.error('연결 프로그램을 시작하지 못했습니다. 설치 설정·전용 Chrome 창을 확인해 주세요.');process.exitCode=1;}

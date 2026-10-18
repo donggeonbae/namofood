@@ -22,6 +22,7 @@ const codes = new Set([
   "invalid_orders",
   "invalid_order_identity",
   "ungrounded_order",
+  "ungrounded_order_date",
   "ineligible_order",
   "invalid_order_items",
   "ungrounded_item",
@@ -107,9 +108,15 @@ export function createHandler(
         if (body.action === "status" || body.action === "result") {
           const worker = await queue.info();
           let job = null;
-          if (body.jobId) {
-            if (!UUID.test(body.jobId)) return json({ ok: false }, 400);
-            const row = await queue.get(body.jobId);
+          if (body.jobId && !UUID.test(body.jobId)) {
+            return json({ ok: false }, 400);
+          }
+          {
+            const row = body.jobId
+              ? await queue.get(body.jobId)
+              : body.action === "status"
+              ? await queue.latest()
+              : null;
             if (row) {
               job = {
                 id: row.id,
@@ -231,7 +238,9 @@ export function createHandler(
         const message = error instanceof Error
             ? error.message
             : "import_failed",
-          code = codes.has(message) || /^ai_http_\d+$/.test(message)
+          code = codes.has(message) ||
+              /^ai_http_\d+(?:_(?:x_opencode_session|max_output_tokens|reasoning|store|stream|text|model|input|instructions))?$/
+                .test(message)
             ? message
             : "import_failed";
         await queue.fail(body.jobId, body.lease, code);

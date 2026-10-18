@@ -21,3 +21,9 @@ test('block detection includes title, not only body',async()=>{
   const client=new CoupangBrowser('/not-used-by-test');client.open=async()=>({url:()=>ORDER_URL,evaluate:async()=>({title:'Sorry! Access denied',text:'',password:false,url:ORDER_URL})});
   assert.equal(await client.state(),'blocked');
 });
+test('connector shutdown detaches without closing the logged-in Chrome',async()=>{
+  const client=new CoupangBrowser('/not-used-by-test');let disconnected=0,unreferenced=0;
+  client.browser={close:async()=>{disconnected++;},newBrowserCDPSession:async()=>{throw Error('must not close the native Chrome');}};
+  client.child={unref:()=>{unreferenced++;}};client.context={};client.page={};
+  await client.detach();assert.equal(disconnected,1);assert.equal(unreferenced,1);assert.equal(client.browser,null);assert.equal(client.context,null);
+});

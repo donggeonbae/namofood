@@ -1,11 +1,16 @@
 import { createHandler } from "../supabase/functions/nmf-coupang/handler.ts";
 import { organize } from "../supabase/functions/nmf-coupang/ai.ts";
-import { signature } from "../supabase/functions/nmf-coupang/protocol.mjs";
+import {
+  seal,
+  signature,
+} from "../supabase/functions/nmf-coupang/protocol.mjs";
 const assert = (v: unknown, message: string) => {
   if (!v) throw Error(message);
 };
 let calls = 0;
+let latestRow: Record<string, unknown> | null = null;
 const queue = {
+  latest: async () => latestRow,
   info: async () => {
     calls++;
     return { online: true, state: "ready" };
@@ -76,6 +81,28 @@ const good = await request({
   action: "status",
 });
 assert(good.status === 200, "app status works");
+const sharedId = crypto.randomUUID();
+latestRow = {
+  id: sharedId,
+  status: "done",
+  stage: "done",
+  progress: 100,
+  result_ciphertext: await seal("test-worker-password", sharedId, {
+    orders: [],
+  }),
+};
+const shared =
+  await (await request({ role: "app", room: "namostore", action: "status" }))
+    .json();
+assert(
+  shared.job?.id === sharedId && Array.isArray(shared.job.result?.orders),
+  "a fresh authorized client can recover the latest encrypted import preview",
+);
+assert(
+  !JSON.stringify(shared).includes("ciphertext"),
+  "do not return internal ciphertext",
+);
+latestRow = null;
 const job = await request({
   role: "app",
   room: "namostore",
@@ -126,6 +153,10 @@ const provider = (async (url: RequestInfo | URL, options?: RequestInit) => {
   assert(
     body.model === "gpt-6-luna" && body.store === false,
     "requested model, no response storage",
+  );
+  assert(
+    !body.text?.format,
+    "Go Luna rejects json_object format; prompt JSON is still strictly validated after generation",
   );
   assert(
     !String(options?.body).includes("test-worker-password"),

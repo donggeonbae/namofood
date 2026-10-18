@@ -22,6 +22,11 @@ export const queue = {
       await sql`select id,kind,status,stage,progress,error_code,result_ciphertext,created_at,completed_at from namofood_private.coupang_jobs where id=${id}::uuid and room=${room} and created_at>now()-interval '1 day'`;
     return row || null;
   },
+  async latest() {
+    const [row] =
+      await sql`select id,kind,status,stage,progress,error_code,result_ciphertext,created_at,completed_at from namofood_private.coupang_jobs where room=${room} and kind='import' and created_at>now()-interval '1 day' order by created_at desc limit 1`;
+    return row || null;
+  },
   async enqueue(
     id: string,
     kind: string,
@@ -53,7 +58,7 @@ export const queue = {
       if (active) return null;
       const lease = crypto.randomUUID();
       const [row] =
-        await tx`update namofood_private.coupang_jobs set status='running',stage='opening',progress=5,lease_token=${lease}::uuid,lease_until=now()+interval '3 minutes' where id=(select id from namofood_private.coupang_jobs where room=${room} and status='queued' order by created_at limit 1 for update skip locked) returning id,kind,from_date,to_date`;
+        await tx`update namofood_private.coupang_jobs set status='running',stage='opening',progress=5,lease_token=${lease}::uuid,lease_until=now()+interval '3 minutes' where id=(select id from namofood_private.coupang_jobs where room=${room} and status='queued' order by created_at limit 1 for update skip locked) returning id,kind,from_date::text as from_date,to_date::text as to_date`;
       return row
         ? {
           id: String(row.id),
@@ -70,7 +75,7 @@ export const queue = {
   },
   async beginFinish(id: string, lease: string) {
     const [row] =
-      await sql`update namofood_private.coupang_jobs set status='processing',stage='ai',progress=80,lease_until=now()+interval '3 minutes' where id=${id}::uuid and lease_token=${lease}::uuid and status='running' and lease_until>now() returning kind,from_date,to_date`;
+      await sql`update namofood_private.coupang_jobs set status='processing',stage='ai',progress=80,lease_until=now()+interval '3 minutes' where id=${id}::uuid and lease_token=${lease}::uuid and status='running' and lease_until>now() returning kind,from_date::text as from_date,to_date::text as to_date`;
     return row || null;
   },
   async done(id: string, lease: string, ciphertext: string) {
