@@ -504,6 +504,30 @@ async function csvRows(page) {
       await f.save(f.a); const shared = orderRecords(await f.getRemote()).find(order => order.id === registered.id);
       assert.deepEqual(shared, registered, 'encrypted cloud storage round-trip retains review metadata, original labels and all printed figures');
     });
+    await run('DUPLICATE_LATEST_ALL_FIELDS_MATCH_ARCHIVES_OLDER_AND_KEEPS_BOTH_PHOTOS', async f => {
+      const doc=documentFixture({items:[{name:'양파',spec:'10kg',qty:2,unit:'망',price:16500,supplyAmount:30000,tax:3000,amt:33000,confidence:.99,warnings:[]}]});
+      f.enqueue(doc);await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'latest-before.png'));await f.idle();await f.save(f.a);
+      const before=orderRecords(await readState(f.a)).find(o=>o.invoiceNo==='T-100');
+      f.enqueue(doc);await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'latest-after.png','#ed7032'));await f.idle();await f.save(f.a);
+      const records=orderRecords(await f.getRemote()).filter(o=>o.invoiceNo==='T-100'),active=records.filter(o=>!o.ocrMeta.referenceOnly),old=records.find(o=>o.id===before.id);
+      assert.equal(records.length,2);assert.equal(active.length,1);assert.notEqual(active[0].id,before.id);assert.equal(active[0].total,33000);
+      assert.equal(old.ocrMeta.supersededById,active[0].id);assert.equal(active[0].ocrMeta.supersedesIds[0],old.id);assert.equal(old.ocrMeta.balanceEvidence,false);
+      assert.deepEqual(old.items,before.items);assert.deepEqual(old.invoicePhoto,before.invoicePhoto);assert(active[0].invoicePhoto?.hash);assert.notEqual(active[0].invoicePhoto.hash,old.invoicePhoto.hash);
+      assert.equal(await f.a.locator('#invoice-duplicate-review').isVisible(),false);assert.equal(active[0].ocrMeta.duplicateAudit.automatic,true);
+    });
+    await run('DUPLICATE_LATEST_MISSING_VALUES_NEEDS_REVIEW_AND_EXPLICIT_SWITCH', async f => {
+      f.enqueue();await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'review-before.png'));await f.idle();await f.save(f.a);
+      f.enqueue();await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'review-after.png','#ed7032'));const dialog=await duplicateReview(f.a);
+      assert.equal(await dialog.locator('[data-invoice-duplicate-verification]').getAttribute('data-invoice-duplicate-verification'),'same');
+      assert.match(await dialog.innerText(),/빈칸|미확인/);await dialog.locator('[data-invoice-duplicate-latest]').click();await f.idle();await f.save(f.a);
+      const records=orderRecords(await f.getRemote()).filter(o=>o.invoiceNo==='T-100');assert.equal(records.length,2);assert.equal(records.filter(o=>!o.ocrMeta.referenceOnly).length,1);assert.equal(records.find(o=>!o.ocrMeta.referenceOnly).ocrMeta.duplicateAudit.automatic,false);
+    });
+    await run('DUPLICATE_LATEST_DIFFERENT_SPEC_OR_PRICE_CANNOT_REPLACE', async f => {
+      f.enqueue();await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'different-before.png'));await f.idle();
+      const different=documentFixture();different.items[0].spec='20kg';different.items[0].price=16000;
+      f.enqueue(different);await f.a.locator('#invoice-files').setInputFiles(await photo(f.a,'different-after.png','#ed7032'));const dialog=await duplicateReview(f.a);
+      assert(await dialog.locator('[data-invoice-duplicate-latest]').isDisabled());assert.equal(await dialog.locator('[data-invoice-duplicate-verification]').getAttribute('data-invoice-duplicate-verification'),'different');assert.match(await dialog.innerText(),/16,000/);await dialog.locator('[data-invoice-duplicate-cancel]').click();await f.idle();
+    });
     await run('DUPLICATE_SAME_VENDOR_AND_NUMBER_WAIT_FOR_REVIEW_OPEN_EXISTING', async f => {
       f.enqueue(); f.enqueue();
       await f.a.locator('#invoice-files').setInputFiles([await photo(f.a, 'same-number-a.png'), await photo(f.a, 'same-number-b.png', '#ed7032')]);

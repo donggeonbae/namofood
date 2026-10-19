@@ -64,6 +64,9 @@ export async function financeHash(state: TaxState): Promise<string> {
           ]),
         ),
         pricing,
+        ...(Object.values(state.fixedPurchases || {}).some(rows => rows.length)
+          ? { fixedPurchases: state.fixedPurchases }
+          : {}),
       }),
     ),
   );

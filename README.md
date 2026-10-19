@@ -161,6 +161,25 @@ Checks: `node tools/test_invoice_number_format.cjs`, `deno run --deny-env --deny
 
 ### Spreadsheet and period-ledger intake
 
+Purchase classification previews existing invoices before any move. The operator
+confirms line destinations: food ingredients, store beverages, or Food fixed-cost
+purchases. Clear new invoices can be classified after shared save; uncertain
+items and non-food Coupang purchases require confirmation. Mixed statements must
+balance exactly before splitting. The server locks both business roots, retains
+encrypted originals and recovery snapshots, and records an idempotent routing
+journal. Classified one-off costs are dated expenses, not recurring allowances.
+
+Exact duplicate review compares every item field as a multiset and all header
+amounts. Fully populated, arithmetically consistent duplicates use the newest
+upload and retain older evidence outside totals; incomplete matches require
+explicit review. Signed return/credit amounts can be shared without breaking
+the original-file linkage.
+
+Store catalog removal is shared across purchase, product, and sales-entry lists.
+Historical transactions and amounts remain available in the archived-items view.
+The per-unit purchase-cost calculator divides a purchase line amount by an
+editable total unit count; volume/weight is never treated as a piece count.
+
 See [Invoice spreadsheet intake](assets/README-invoice-files.md) for local XLSX/XLS/CSV/TSV parsing, encrypted originals, and the side-by-side source viewer.
 
 Recognized line-ledger layouts contain date/transaction number, item/specification, quantity, unit price, supply amount, VAT, total, counterparty, and description columns, plus a company/period heading. Read their original cells directly and group by date and transaction number. Never allocate one daily subtotal to multiple same-day transactions. Identify the supplier from the company heading and distinguish it from buyer columns.

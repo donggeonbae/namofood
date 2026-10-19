@@ -15,6 +15,7 @@ export type TaxState = {
   staff?: Row[];
   staffArchive?: Row[];
   fixedMonthly?: Record<string, unknown[]>;
+  fixedPurchases?: Record<string, Row[]>;
   supplies?: Row[];
 };
 const object = (v: unknown): Row =>
@@ -184,6 +185,7 @@ export function buildTaxReport(state: TaxState, asOf: string) {
       ...Object.keys(state.orders || {}),
       ...Object.keys(state.roster || {}),
       ...Object.keys(state.fixedMonthly || {}),
+      ...Object.keys(state.fixedPurchases || {}),
       current,
     ].filter((k) =>
       /^\d{4}-(?:0[1-9]|1[0-2])$/.test(k) && k.startsWith(year + "-") &&
@@ -265,6 +267,18 @@ export function buildTaxReport(state: TaxState, asOf: string) {
           items.reduce((sum, i) => sum + (money(i.tax) || 0), 0);
         inputVat += tax;
       }
+      // Classified supplies are one-off dated purchases, not a recurring monthly
+      // allowance. Blank VAT is never guessed; only recorded tax is observed.
+      const fixedReceipts = (state.fixedPurchases?.[month] || []).filter(o => validDate(o.date) && o.date.startsWith(month) && o.date <= asOf);
+      const ingredientVat = inputVat;
+      let fixedNet = 0;
+      for (const o of fixedReceipts) {
+        const items = Array.isArray(o.items) ? o.items.map(object) : [];
+        const total = money(o.total) ?? items.reduce((n, i) => n + (money(i.amt) || 0), 0);
+        const tax = money(o.tax) ?? items.reduce((n, i) => n + (money(i.tax) || 0), 0);
+        fixedNet += total - tax;
+        inputVat += tax;
+      }
       const mm = object(monthsManual[month]),
         gross = money(mm.grossSales) ?? revenue,
         outputVat = Math.round(gross / 11),
@@ -278,11 +292,11 @@ export function buildTaxReport(state: TaxState, asOf: string) {
         pay = labor(state, month, elapsed),
         fixedMonthly = fixed(state, month);
       const netRevenue = revenue - Math.round(revenue / 11),
-        netPurchases = orders.length ? purchases - inputVat : null,
+        netPurchases = orders.length || fixedReceipts.length ? purchases - ingredientVat : null,
         actualNet = netPurchases === null || !salesDays
           ? null
           : netRevenue - netPurchases - pay.total -
-            fixedMonthly * elapsed / days;
+            fixedMonthly * elapsed / days - fixedNet;
       const monthlyRevenue = salesDays ? revenue / salesDays * op : null,
         monthlyPurchases = netPurchases === null
           ? null
@@ -290,7 +304,7 @@ export function buildTaxReport(state: TaxState, asOf: string) {
         forecastNet = monthlyRevenue === null || monthlyPurchases === null
           ? null
           : monthlyRevenue - monthlyRevenue / 11 - monthlyPurchases -
-            pay.total / elapsed * days - fixedMonthly;
+            pay.total / elapsed * days - fixedMonthly - fixedNet;
       return [month, {
         month,
         elapsed,
@@ -309,7 +323,8 @@ export function buildTaxReport(state: TaxState, asOf: string) {
         missingAmount,
         unknownWages: pay.unknown,
         labor: pay.total,
-        fixed: fixedMonthly * elapsed / days,
+        fixed: fixedMonthly * elapsed / days + fixedNet,
+        fixedPurchaseCount: fixedReceipts.length,
         actualNet,
         forecastNet,
       }];

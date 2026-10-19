@@ -42,7 +42,10 @@
   const stockFields=['id','orderNo','date','name','spec','unit','qty','storeProductId','storeUnitsPerPack','at','deleted'];
   const orderFields=['id','date','vendor','invoiceNo','note','ocr','rawText','subtotal','tax','total','previousBalance','balanceTotal','warnings','invoicePhoto','invoiceFile'];
   const orderItemFields=['id','name','spec','qty','unit','price','supplyAmount','tax','amt','warnings','confidence','labelReview','sourceRefs','storeProductId','storeUnitsPerPack','storeExcluded'];
-  const ocrFields=['by','model','processedAt','registeredAt','confirmedAt','autoRegistered','imageSha256','fileName','sourceFileHash','sheetName','sourceKey','sourceRefs','sourceFileComplete','labelReview','duplicateCheckedIds','duplicateApprovedAt','duplicateReviewPending','referenceOnly','referenceAt','referenceReason','ledgerMaster','ledgerDaily','balanceEvidence','coveredByLedgerId','sourceAudit'];
+  // Invoice OCR preserves signed returns/credits. Apply the same bounded-number
+  // contract at shared save; a return must not orphan its encrypted source file.
+  const invoiceNumberOK=(value,limit=1e12)=>value==null||typeof value==='number'&&Number.isFinite(value)&&Math.abs(value)<=limit;
+  const ocrFields=['by','model','processedAt','registeredAt','confirmedAt','autoRegistered','imageSha256','fileName','sourceFileHash','sheetName','sourceKey','sourceRefs','sourceFileComplete','labelReview','duplicateCheckedIds','duplicateApprovedAt','duplicateReviewPending','referenceOnly','referenceAt','referenceReason','ledgerMaster','ledgerDaily','balanceEvidence','coveredByLedgerId','sourceAudit','supersedesIds','supersededById','duplicateAudit','purchaseRoute'];
   const orderView=o=>({...pick(o,orderFields),items:(o.items||[]).map(i=>pick(i,orderItemFields)),...(o.ocrMeta?{ocrMeta:pick(o.ocrMeta,ocrFields)}:{}),...(o.coupang?{coupang:pick(o.coupang,['orderNo','stockLinked','importedAt','partial','sourceItemCount','sourceTotal'])}:{})});
   const orderMap=s=>Object.fromEntries(Object.entries(s.orders||{}).filter(([m,rows])=>/^20\d{2}-(0[1-9]|1[0-2])$/.test(m)&&Array.isArray(rows)).map(([m,rows])=>[m,rows.map(orderView)]));
   function stockView(s){
@@ -187,7 +190,7 @@
       if(Date.parse(edit.at)<=Date.parse(previous?.at||'1970-01-01')||['ocr','coupang'].includes(edit.origin)&&previous&&(previous.deleted||!['ocr','coupang'].includes(previous.origin)))continue;
       const next=incomingOrders.get(id);
       if(!edit.deleted){
-        if(!next||next.id!==id||!/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(next.date)||!Array.isArray(next.items)||next.items.length>10000||JSON.stringify(next).length>2*1024*1024||['subtotal','tax','total','previousBalance','balanceTotal'].some(k=>next[k]!=null&&(typeof next[k]!=='number'||!Number.isFinite(next[k])||next[k]<0))||next.items.some(i=>['price','supplyAmount','tax','amt'].some(k=>i[k]!=null&&(typeof i[k]!=='number'||!Number.isFinite(i[k])||i[k]<0))||i.qty!=null&&!(typeof i.qty==='string'&&i.qty.length<=200)&&!(typeof i.qty==='number'&&Number.isFinite(i.qty)&&i.qty>=0)))throw Error('invalid_invoice');
+        if(!next||next.id!==id||!/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(next.date)||!Array.isArray(next.items)||next.items.length>10000||JSON.stringify(next).length>2*1024*1024||['subtotal','tax','total','previousBalance','balanceTotal'].some(k=>!invoiceNumberOK(next[k]))||next.items.some(i=>['price','supplyAmount','tax','amt'].some(k=>!invoiceNumberOK(i[k]))||i.qty!=null&&!(typeof i.qty==='string'&&i.qty.length<=200)&&!invoiceNumberOK(i.qty,1e9)))throw Error('invalid_invoice');
       }
       for(const {month}of found)out.orders[month]=out.orders[month].filter(o=>o.id!==id);
       if(!edit.deleted){

@@ -1,4 +1,6 @@
 import { readState, sql } from "../_shared/database.ts";
+import { handlePurchaseRouting } from "../_shared/purchase-routing-handler.ts";
+import { preservePurchaseRouting } from "../_shared/purchase-routing.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import {
   adminAuthorized,
@@ -110,6 +112,10 @@ Deno.serve(async (request) => {
       const id = body.room + "@local-draft-" + crypto.randomUUID();
       await sql`insert into public.namofood_state(id,data,updated_at)values(${id},${body.data},now())`;
       return json({ ok: true });
+    }
+    if (body.action === "purchase-route") {
+      const response = await handlePurchaseRouting(body, pw);
+      return json(response.data, response.status);
     }
     if (body.action !== "rest" || typeof body.path !== "string") {
       return json({ error: "invalid_action" }, 400);
@@ -274,13 +280,18 @@ Deno.serve(async (request) => {
         await tx`insert into public.namofood_state(id,data,updated_at)values(${id},${cipher},${rowBody.updated_at}) on conflict(id)do update set data=excluded.data,updated_at=excluded.updated_at`;
         return [{ id, updated_at: rowBody.updated_at }];
       }
+      if (admin && id === root && existing) {
+        const full = JSON.parse(await decryptText(pw, String(existing.data)));
+        const incoming = JSON.parse(await decryptText(pw, cipher));
+        cipher = await encryptText(pw, JSON.stringify(preservePurchaseRouting(full, incoming)));
+      }
       if (!admin) {
         if (!existing) throw Error("guest_cannot_create_room");
         const full = JSON.parse(await decryptText(pw, String(existing.data))),
           incoming = JSON.parse(await decryptText(pw, rowBody.data));
         cipher = await encryptText(
           pw,
-          JSON.stringify(policy.mergeGuest(full, incoming)),
+          JSON.stringify(preservePurchaseRouting(full, policy.mergeGuest(full, incoming))),
         );
       }
       await tx`insert into public.namofood_state(id,data,updated_at)values(${id},${cipher},${rowBody.updated_at}) on conflict(id)do update set data=excluded.data,updated_at=excluded.updated_at`;
