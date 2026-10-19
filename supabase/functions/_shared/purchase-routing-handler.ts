@@ -3,7 +3,7 @@ import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import { applyPurchaseRouting, purchaseRooms, purchaseRoutingPlan } from "./purchase-routing.ts";
 const messages: Record<string, string> = {
   purchase_changed: "발주가 수정됐습니다. 분류 제안을 새로 불러와 확인해 주세요.",
-  purchase_amount_review_required: "거래일·업체·품목 합계와 총액을 확인한 뒤 분리해 주세요.",
+  purchase_amount_review_required: "거래일·공급업체와 이동 위치를 확인해 주세요. 금액 미입력·합계 차이는 경고를 남기고 이동할 수 있습니다.",
   purchase_confirmation_required: "기존 발주·쿠팡 비식재료·판단이 애매한 품목은 확인 후 이동합니다.",
   purchase_destination_missing: "받을 사업장의 서버 자료를 먼저 연결해 주세요.",
   purchase_destination_exists: "이미 이동된 품목이 있거나 삭제됐습니다. 중복 생성하지 않았습니다.",

@@ -254,7 +254,7 @@ missing.namofood.orders["2026-10"].push(
   }),
 );
 plan = await invoiceLedgerPlan(missing, "namofood", "new");
-assert(!plan.canApply, "mixed missing amounts cannot silently allocate money");
+assert(plan.canApply&&!plan.automatic, "mixed missing amounts may move only after explicit review, never silently allocate money");
 const decimal = fresh();
 decimal.namofood.orders["2026-10"][0].items[0].spec = "1.5kg";
 const decimalNew = incoming(mixed);

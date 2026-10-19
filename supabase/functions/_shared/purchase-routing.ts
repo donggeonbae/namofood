@@ -58,24 +58,26 @@ export async function purchaseRoutingPlan(
     : null;
   const splitKnown = total !== null && rows.every((r: any) => r.amount !== null) &&
     rows.reduce((n: number, r: any) => n + r.amount, 0) === total;
+  const knownItemTotal = rows.reduce((n:number,r:any)=>n+(r.amount??0),0);
+  const missingAmounts = rows.filter((r:any)=>r.amount===null).length;
+  const amountReview = {sourceTotal:total,knownItemTotal,missingAmounts,difference:total===null?null:knownItemTotal-total,unresolved:!splitKnown};
   const keep: PurchaseTarget = fixed.includes(order) ? "fixed" : room === "namostore" ? "store" : "food";
   const moved = rows.some((r: any) => r.target !== keep);
   const parsedDate = typeof order.date === "string" ? new Date(order.date + "T12:00:00Z") : null;
   const validDate = typeof order.date === "string" && /^20\d{2}-\d{2}-\d{2}$/.test(order.date) &&
     parsedDate && Number.isFinite(+parsedDate) && parsedDate.toISOString().slice(0, 10) === order.date;
-  const requiresReview = rows.some((r: any) => !r.certain || r.overridden) ||
+  const requiresReview = amountReview.unresolved || rows.some((r: any) => !r.certain || r.overridden) ||
     !!order.coupang && targets.includes("fixed");
   return {
     room, id, keep, vendor: String(order.vendor || ""), date: order.date,
     fingerprint: await hash({ order, edit: state.orderEdits?.[id] }),
-    rows, targets, total, moved, requiresReview,
-    canApply: moved && total !== null && validDate && !!String(order.vendor || "").trim() && !/업체\s*미입력|업체\s*미확인|공급업체\s*미확인/.test(order.vendor) &&
-      (targets.length === 1 || splitKnown),
+    rows, targets, total, moved, requiresReview, amountReview,
+    canApply: moved && validDate && !!String(order.vendor || "").trim() && !/업체\s*미입력|업체\s*미확인|공급업체\s*미확인/.test(order.vendor),
     reason: !validDate || !String(order.vendor || "").trim()
       ? "거래일·공급업체 확인 필요"
-      : total === null ? "명세서 총액 확인 필요"
+      : total === null ? "총액 미입력 · 빈칸을 유지하고 확인 후 이동 가능"
       : targets.length > 1 && !splitKnown
-      ? "혼합 명세서의 품목 금액 합계가 총액과 일치해야 분리할 수 있습니다."
+      ? "품목 합계·총액 확인 필요 · 금액 경고를 남기고 이동 가능"
       : !moved ? "현재 사업장 유지" : requiresReview ? "확인 후 이동" : "자동 분류 가능",
   };
 }
@@ -126,7 +128,7 @@ export async function applyPurchaseRouting(
   if (plan.requiresReview && !confirmed) throw Error("purchase_confirmation_required");
   const sourceOrder = [...Object.values(source.orders || {}).flat(),...Object.values(source.fixedPurchases || {}).flat()].find((o: any) => o.id === id) as any;
   const operationId = await hash([room, id, plan.fingerprint]);
-  const routes: { room: string; target: PurchaseTarget; id: string; total: number }[] = [];
+  const routes: { room: string; target: PurchaseTarget; id: string; total: number|null }[] = [];
   // Validate/build every child before mutating any state.
   const built = [];
   for (const target of plan.targets) {
@@ -137,16 +139,18 @@ export async function applyPurchaseRouting(
     const whole = plan.targets.length === 1;
     const sum = (field: string) => items.every((i: any) => numeric(i[field]))
       ? items.reduce((n: number, i: any) => n + i[field], 0) : null;
-    const total = whole ? plan.total! : sum("amt")!;
+    const total = whole ? plan.total : sum("amt");
+    const amountWarning = plan.amountReview.unresolved ? `사업장 분류 금액 확인 필요 · 원본 총액 ${plan.total===null?'미입력':plan.total+'원'}, 확인된 품목 합계 ${plan.amountReview.knownItemTotal}원, 금액 미입력 ${plan.amountReview.missingAmounts}행. 차액은 임의 배분하지 않았습니다.` : '';
     const child = {
       ...clone(sourceOrder), id: childId, items,
       total, subtotal: whole ? sourceOrder.subtotal ?? null : sum("supplyAmount"),
       tax: whole ? sourceOrder.tax ?? null : sum("tax"),
       previousBalance: null, balanceTotal: null,
+      ...(amountWarning?{warnings:[...new Set([...(sourceOrder.warnings||[]),amountWarning])]}:{}),
       ocrMeta: {
         ...(clone(sourceOrder.ocrMeta || {})), referenceOnly: false,
         registeredAt: at,
-        purchaseRoute: { operationId, sourceRoom: room, sourceId: id, target, at },
+        purchaseRoute: { operationId, sourceRoom: room, sourceId: id, target, at, amountReview:plan.amountReview },
       },
     };
     // Split receipts cannot guess how a payment covers separate business costs.
@@ -170,7 +174,7 @@ export async function applyPurchaseRouting(
     referenceOnly: true, referenceAt: at,
     referenceReason: "품목별 사업장·고정비 분류 완료 · 원본 보관 / 중복 합산 제외",
     balanceEvidence: sourceOrder.balanceTotal != null,
-    purchaseRoute: { operationId, sourceRoom: room, sourceId: id, routes, at },
+    purchaseRoute: { operationId, sourceRoom: room, sourceId: id, routes, at, amountReview:plan.amountReview },
   });
   (source.orderEdits ||= {})[id] = { at, origin: "manual", deleted: false };
   (source.purchaseRoutes ||= {})[id] = { operationId, fingerprint: expected, routes, at };

@@ -21,7 +21,7 @@ assert(states.namofood.fixedPurchases["2026-10"][0].total === 3300, "nonfood fix
 assert((await applyPurchaseRouting(states, "namofood", "mixed", plan.fingerprint, {}, true, at)).already, "retry idempotent");
 assert(states.namofood.fixedPurchases["2026-10"].length === 1, "no duplicate fixed cost");
 const unbalanced = blank();unbalanced.orders["2026-10"] = [{ ...original, total: 9999 }];
-assert(!(await purchaseRoutingPlan(unbalanced, "namofood", "mixed")).canApply, "do not allocate missing discounts");
+const unbalancedPlan=await purchaseRoutingPlan(unbalanced,"namofood","mixed");assert(unbalancedPlan.canApply&&unbalancedPlan.requiresReview&&unbalancedPlan.amountReview.unresolved,"unbalanced receipt can move with confirmation; missing discounts stay unallocated");
 const store = blank();store.orders["2026-10"] = [{ ...original, coupang: { orderNo: "123456" } }];
 const cp = await purchaseRoutingPlan(store, "namostore", "mixed");
 assert(cp.requiresReview, "Coupang nonfood requires confirmation");

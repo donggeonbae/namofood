@@ -210,11 +210,11 @@ export async function invoiceLedgerPlan(
     choices: { ...defaults, ...choices },
     automatic,
     autoReplace: automatic ? candidates.map((c) => c.key) : [],
-    canApply: validDate(source.date) && knownVendor(source.vendor) && splitOK,
+    canApply: validDate(source.date) && knownVendor(source.vendor),
     reason: !knownVendor(source.vendor)
       ? "공급업체 확인 필요"
       : !splitOK
-      ? "품목 금액 합계와 총액을 확인해야 사업장별로 분리할 수 있습니다."
+      ? "품목 합계·총액 확인 필요 · 빈칸을 유지하고 확인 후 이동 가능"
       : !sourceSound
       ? "거래일·수량·금액 확인 필요"
       : !automatic
