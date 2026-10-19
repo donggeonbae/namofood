@@ -1,6 +1,6 @@
 // 나모푸드 레시피 자동 채움 — 순수 로직 (nmf_cloud.mjs 와 같은 암호화/병합 규칙)
 // Deno/Edge Runtime 전용: Web Crypto + CompressionStream 사용
-import { goEndpoint } from "../_shared/opencode-go.ts";
+import { GO_MODEL, goEndpoint } from "../_shared/opencode-go.ts";
 import {
   assertMealMenuAllowed,
   prohibitedMenuReason,
@@ -843,7 +843,7 @@ async function callRecipeModel(
       signal: AbortSignal.timeout(o.timeoutMs),
       body: JSON.stringify({
         model,
-        temperature: 0.3,
+        ...(model === GO_MODEL ? {} : { temperature: 0.3 }),
         max_tokens: o.maxTokens,
         messages: [{ role: "user", content: o.prompt }],
       }),

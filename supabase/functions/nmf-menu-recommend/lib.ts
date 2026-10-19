@@ -1,5 +1,5 @@
 // 나모푸드 식단 추천 — 기존 레시피명만 고르는 읽기 전용 Edge Function 순수 로직
-import { goEndpoint } from "../_shared/opencode-go.ts";
+import { GO_MODEL, goEndpoint } from "../_shared/opencode-go.ts";
 import { assertMealMenuAllowed } from "../_shared/menu-eligibility.ts";
 import { canonicalDish, dishAliases } from "../_shared/institutional-menu.ts";
 import {
@@ -1159,7 +1159,7 @@ async function callOpenCode(
       headers,
       body: JSON.stringify({
         model,
-        temperature: 0.35,
+        ...(model === GO_MODEL ? {} : { temperature: 0.35 }),
         max_tokens: Math.min(12_000, Math.max(1024, options.maxTokens || 8192)),
         messages: [{ role: "user", content: prompt }],
       }),

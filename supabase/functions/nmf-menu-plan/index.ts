@@ -1,7 +1,7 @@
 // 식단 AI 자동 작성은 운영자 요청으로 영구 중지했다 (2026-10-08).
 // 과거 호출 주소는 인증된 중지 응답만 반환하며 레시피 자동 작성은 별도 함수로 유지한다.
 // 호출 인증: Authorization: Bearer <NMF_CRON_SECRET>
-import { goEndpoint } from "../_shared/opencode-go.ts";
+import { GO_MODEL, goEndpoint } from "../_shared/opencode-go.ts";
 import {
   logValues,
   readState,
@@ -190,7 +190,7 @@ async function callLLM(
       headers,
       body: JSON.stringify({
         model,
-        temperature: 0.4,
+        ...(model === GO_MODEL ? {} : { temperature: 0.4 }),
         max_tokens: Math.max(
           512,
           Number(env("NMF_MENU_MAX_TOKENS", "10000")) || 10000,
