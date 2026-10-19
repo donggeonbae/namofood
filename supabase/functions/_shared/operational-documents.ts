@@ -35,7 +35,9 @@ export function ticketFiles(payload: any): any[] {
 }
 export function invoiceFileReferenced(state: any, kind: string, hash: string) {
   const field = kind === "invoice-photo" ? "invoicePhoto" : "invoiceFile";
-  return Object.values(state.orders || {}).filter(Array.isArray).flat().some((
+  const purchases = Object.values(state.orders || {}).filter(Array.isArray).flat();
+  const classified = Object.values(state.fixedPurchases || {}).filter(Array.isArray).flat().filter((o:any)=>o?.ocrMeta?.purchaseRoute?.target==="fixed");
+  return [...purchases,...classified].some((
     o: any,
   ) =>
     !state.orderEdits?.[o.id]?.deleted && o[field]?.hash === hash &&

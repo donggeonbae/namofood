@@ -48,6 +48,7 @@
   const ocrFields=['by','model','processedAt','registeredAt','confirmedAt','autoRegistered','imageSha256','fileName','sourceFileHash','sheetName','sourceKey','sourceRefs','sourceFileComplete','labelReview','duplicateCheckedIds','duplicateApprovedAt','duplicateReviewPending','referenceOnly','referenceAt','referenceReason','ledgerMaster','ledgerDaily','balanceEvidence','coveredByLedgerId','sourceAudit','supersedesIds','supersededById','duplicateAudit','purchaseRoute'];
   const orderView=o=>({...pick(o,orderFields),items:(o.items||[]).map(i=>pick(i,orderItemFields)),...(o.ocrMeta?{ocrMeta:pick(o.ocrMeta,ocrFields)}:{}),...(o.coupang?{coupang:pick(o.coupang,['orderNo','stockLinked','importedAt','partial','sourceItemCount','sourceTotal'])}:{})});
   const orderMap=s=>Object.fromEntries(Object.entries(s.orders||{}).filter(([m,rows])=>/^20\d{2}-(0[1-9]|1[0-2])$/.test(m)&&Array.isArray(rows)).map(([m,rows])=>[m,rows.map(orderView)]));
+  const fixedPurchaseView=s=>Object.fromEntries(Object.entries(s.fixedPurchases||{}).filter(([m,rows])=>/^20\d{2}-(0[1-9]|1[0-2])$/.test(m)&&Array.isArray(rows)).map(([m,rows])=>[m,rows.filter(o=>o?.ocrMeta?.purchaseRoute?.target==='fixed'&&!s.orderEdits?.[o.id]?.deleted).map(orderView)]));
   function stockView(s){
     const out={},targets={},orders=Object.values(s.orders||{}).flat().filter(o=>o?.coupang&&!s.orderEdits?.[o.id]?.deleted&&!o.ocrMeta?.referenceOnly),linked=new Set(orders.filter(o=>o.coupang.stockLinked).map(o=>o.coupang.orderNo));
     for(const [id,row]of Object.entries(s.storeStockImports||{}))if(safeKey(id)&&!linked.has(row.orderNo))out[id]=pick(row,stockFields);
@@ -89,12 +90,14 @@
     const settings=pick(s.settings||{},['shifts','staffRoles','recipeOrderMultiplier','printMeals','defaultBreakMinutes','defaultBreakZeroInitialized']);
     settings.meals=Object.fromEntries(meals.map(m=>[m,pick(s.settings?.meals?.[m]||{},['count'])]));
     settings.ticketLedger=pick(s.settings?.ticketLedger||{},['startDate','opening','buyer','supplier','unitPrice']);
-    // Archive contact/payroll fields, purchasing, taxes and corporate ticket sales never cross this boundary.
+    // Payroll/contact data, recurring fixed costs, general documents and taxes
+    // stay private. Operational invoices and routed fixed purchases are allowlisted.
     const staff = a => (a||[]).map(e=>({...pick(e,['id','name','role','off','archivedAt','historyNames']),...(e.def?{def:pick(e.def,['s','e','b'])}:{})}));
     const out=pick(s,['month','updatedAt','view','menus','menuManualEdits','menuExtraSlots','menuExtraEdits','menuRetirements','methods','hyg','cafeSeeded','recipeAsk','recipeResolutions','sources','accessEdits']);
     out.recipeMeta=Object.fromEntries(Object.entries(s.recipeMeta||{}).filter(([name])=>safeKey(name)).map(([name,v])=>[name,pick(v,['by','updated','cookingProfile'])]));
     out.board=boardView(s);
     out.orders=orderMap(s);out.orderEdits=Object.fromEntries(Object.entries(s.orderEdits||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['at','deleted','origin'])]));
+    out.fixedPurchases=fixedPurchaseView(s);
     out.prices=Object.fromEntries(Object.entries(s.prices||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['price','vendor'])]));
     Object.assign(out,pick(s,['orderAdj','extraOrders']));
     out.storeProducts=Object.fromEntries(Object.entries(s.storeProducts||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,productFields),priceConfigured:priceConfigured(v)}]));

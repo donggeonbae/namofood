@@ -7,7 +7,7 @@ const messages: Record<string, string> = {
   purchase_confirmation_required: "기존 발주·쿠팡 비식재료·판단이 애매한 품목은 확인 후 이동합니다.",
   purchase_destination_missing: "받을 사업장의 서버 자료를 먼저 연결해 주세요.",
   purchase_destination_exists: "이미 이동된 품목이 있거나 삭제됐습니다. 중복 생성하지 않았습니다.",
-  purchase_not_active: "보관용·중복 확인 중·이미 분류된 명세서는 다시 자동 이동하지 않습니다.",
+  purchase_not_active: "보관용·중복 확인 중인 명세서는 이동하지 않습니다. 현재 집계 중인 발주를 선택해 주세요.",
   purchase_original_missing: "연결된 원본을 찾지 못했습니다. 이동하지 않았습니다.",
 };
 export async function handlePurchaseRouting(body: any, pw: string) {
@@ -28,7 +28,7 @@ export async function handlePurchaseRouting(body: any, pw: string) {
       const candidates = (state.orders?.[body.month] || []).filter((o: any) =>
         (!body.orderId || o.id === body.orderId) &&
         !state.orderEdits?.[o.id]?.deleted && !o.ocrMeta?.referenceOnly &&
-        !o.ocrMeta?.duplicateReviewPending && !o.ocrMeta?.purchaseRoute
+        !o.ocrMeta?.duplicateReviewPending && !o.ocrMeta?.purchaseRoute?.routes
       );
       const offset = body.cursor ?? 0;
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000) return {status:400,data:{error:"invalid_cursor"}};

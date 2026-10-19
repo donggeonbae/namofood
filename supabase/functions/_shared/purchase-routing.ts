@@ -40,7 +40,7 @@ export async function purchaseRoutingPlan(
     .find((o: any) => o.id === id) as any;
   if (!order || state.orderEdits?.[id]?.deleted) throw Error("purchase_missing");
   if (order.ocrMeta?.referenceOnly || order.ocrMeta?.duplicateReviewPending ||
-      order.ocrMeta?.purchaseRoute) throw Error("purchase_not_active");
+      order.ocrMeta?.purchaseRoute?.routes) throw Error("purchase_not_active");
   const rows = (order.items || []).map((item: any, index: number) => {
     const key = item.id || String(index), suggested = classifyPurchaseItem(item, room);
     const target = choices[key] ?? suggested.target;
@@ -173,5 +173,12 @@ export async function applyPurchaseRouting(
   });
   (source.orderEdits ||= {})[id] = { at, origin: "manual", deleted: false };
   (source.purchaseRoutes ||= {})[id] = { operationId, fingerprint: expected, routes, at };
+  if(room === "namostore") for(const row of plan.rows.filter((r:any)=>r.target!=="store")) {
+    const item=sourceOrder.items[row.index],identity=JSON.stringify(["purchase-line-v2",id,String(item?.id||"row-"+row.index)]);
+    const linked=Object.values(source.storeProducts||{}).find((p:any)=>p.sourceIdentity===identity) as any;
+    const productId=item?.storeProductId||linked?.id,product=source.storeProducts?.[productId];
+    const stillStocked=Object.values(source.orders||{}).flat().some((o:any)=>o.id!==id&&!o.ocrMeta?.referenceOnly&&!source.orderEdits?.[o.id]?.deleted&&(o.items||[]).some((i:any)=>i.storeProductId===productId));
+    if(product&&!stillStocked)source.storeProducts[productId]={...product,deleted:true,at};
+  }
   return { already: false, routes, touched: [...new Set([room, ...routes.map((r) => r.room)])] };
 }

@@ -28,7 +28,7 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
       return r.abort();
     });
     await p.goto('https://offline.namofood.test');await p.waitForFunction(()=>!!cloudRemoteAt);await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudDirty=false;});
-    assert(await p.locator('#admin-password').isVisible());for(const name of ['settings','data','pl','overview','fixed'])assert(await p.locator('nav [data-p='+name+']').isHidden(),name);
+    assert(await p.locator('#admin-password').isVisible());for(const name of ['settings','data','pl','overview'])assert(await p.locator('nav [data-p='+name+']').isHidden(),name);assert(await p.locator('nav [data-p=fixed]').isVisible(),'procurement fixed receipts are shared');await p.evaluate(()=>go('fixed'));assert(!(await p.locator('#main').innerText()).includes('PRIVATE_FIXED'));
     assert(await p.locator('nav [data-p=order]').isVisible());await p.evaluate(()=>go('order'));assert(await p.locator('#invoice-files').count());assert.equal(await p.locator('#invoice-monthly-summary').count(),0);assert.equal(await p.locator('[data-order-view=card]').count(),0);
     for(const value of ['PRIVATE_PHONE','PRIVATE_FIXED'])assert(!JSON.stringify(await p.evaluate(()=>S)).includes(value));assert.equal(await p.evaluate(()=>S.staff[0].wage),undefined);
     await p.evaluate(()=>go('settings'));assert.equal(await p.evaluate(()=>page),'home');

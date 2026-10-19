@@ -47,6 +47,11 @@ const state = {
 };
 assert(invoiceFileReferenced(state, "invoice-photo", hash));
 assert(!invoiceFileReferenced(state, "invoice-file", hash));
+const fixedState={orders:{},fixedPurchases:{"2026-10":[{id:"routed",invoicePhoto:{hash},ocrMeta:{purchaseRoute:{target:"fixed"}}}]}};
+assert(invoiceFileReferenced(fixedState,"invoice-photo",hash));
+assert(!invoiceFileReferenced({orders:{},fixedPurchases:{"2026-10":[{id:"private-contract",invoicePhoto:{hash}}]}},"invoice-photo",hash));
+assert(!invoiceFileReferenced({orders:{},fixedDocuments:[{invoicePhoto:{hash}}]},"invoice-photo",hash));
+assert(!invoiceFileReferenced({...fixedState,orderEdits:{routed:{deleted:true}}},"invoice-photo",hash));
 assert(
   ticketFiles({
     v: 1,

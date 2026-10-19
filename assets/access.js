@@ -63,7 +63,7 @@
     }
     return rawFetch(input,init);
   };
-  const privatePages=new Set(['pl','overview','fixed','settings','data']);
+  const privatePages=new Set(['pl','overview','settings','data']);
   let salesTab='sales';
   function ticketHistoryHtml(){
     const dates=new Set();for(const key of Object.keys(S.sales[ym()]||{}))if(/^\d+\|(?:ticketIssued|ticketBuyer|ticketCompany)/.test(key))dates.add(dateKeyAt(ym(),Number(key.split('|')[0])));
@@ -239,6 +239,7 @@
     go=function(p){if(p==='ticketSales'){salesTab=APP==='food'?'ticket':'sales';p='sales';}else if(p==='sales')salesTab='sales';return originalGo(!isAdmin()&&privatePages.has(p)?'home':p);};
     const originals={...PAGES};
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
+      if(!isAdmin()&&p==='fixed')return '<h1>고정비 발주</h1><p class="sub">발주에서 분류된 품목과 원본만 표시합니다. 임차료·정기 고정비·소모품 설정·계약서·일반 서류함은 관리자 전용입니다.</p>'+monthPicker()+fixedPurchasesHtml();
       if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
       if(p==='order'&&!isAdmin()&&orderView==='card')orderView='sheet';
       const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):APP==='store'&&p==='recipe'?NmfStoreAmountsUI.products(isAdmin()):originals[p]();

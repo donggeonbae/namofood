@@ -180,6 +180,26 @@ Historical transactions and amounts remain available in the archived-items view.
 The per-unit purchase-cost calculator divides a purchase line amount by an
 editable total unit count; volume/weight is never treated as a piece count.
 
+Plain item-count text is a total, not an implicit pack: `Pepero 50g, 30 items`
+means 30 pieces even when the quantity column also says 30. Multiplication is
+used only for an explicit pack description or an operator-confirmed pack factor.
+The same parser drives stock and suggested per-unit cost. Missing catalog costs
+are filled where the count and purchase amount are clear; operator-entered and
+historical sale costs remain unchanged. Uncertain counts have per-item warnings.
+Imported catalog entries retain separate invoice-line identities even when their
+names match, with links to the relevant purchase records and saved originals.
+
+Classification previews preselect suggested moves. Operators can select/deselect
+lines, choose a shared destination, and confirm the selected transfer. Unselected
+lines remain in their original business; saved originals and totals are retained.
+Active classified receipts can be corrected without reaggregating archived sources.
+
+Food's shared Fixed Costs screen exposes only procurement-routed fixed-cost
+receipts and their linked invoice originals. Recurring fixed costs, general
+documents/contracts, payroll, and financial reports remain administrator-only.
+The server projects receipt fields explicitly and ignores guest attempts to edit
+the protected fixed-purchase records; private-document namespaces stay closed.
+
 See [Invoice spreadsheet intake](assets/README-invoice-files.md) for local XLSX/XLS/CSV/TSV parsing, encrypted originals, and the side-by-side source viewer.
 
 Recognized line-ledger layouts contain date/transaction number, item/specification, quantity, unit price, supply amount, VAT, total, counterparty, and description columns, plus a company/period heading. Read their original cells directly and group by date and transaction number. Never allocate one daily subtotal to multiple same-day transactions. Identify the supplier from the company heading and distinguish it from buyer columns.
