@@ -17,6 +17,7 @@ import {
   operationalDocumentKind,
   ticketFiles,
   validateOperationalBlob,
+  storeInvoicePurgePlan,
 } from "../_shared/operational-documents.ts";
 const policy = (globalThis as unknown as {
   NmfAccessPolicy: {
@@ -122,6 +123,25 @@ Deno.serve(async (request) => {
     if (body.action === "invoice-ledger") {
       const response = await handleInvoiceLedger(body, pw);
       return json(response.data, response.status);
+    }
+    if (body.action === "purge-store-invoice-files") {
+      // Validate before any SQL. The common-login HMAC/origin checks above apply.
+      try { storeInvoicePurgePlan(body.room, {}, body.files); }
+      catch { return json({error:'invalid_invoice_purge'},400); }
+      const result = await sql.begin(async tx => {
+        const [row] = await tx`select data from public.namofood_state where id='namostore' for update`;
+        if (!row) throw Error('store_state_missing');
+        const state = JSON.parse(await decryptText(pw,String(row.data)));
+        const plan = storeInvoicePurgePlan(body.room,state,body.files);
+        let removed = 0;
+        for (const f of plan.remove) {
+          const id = 'namostore#'+f.kind+'#'+f.hash;
+          const rows = await tx`delete from public.namofood_state where id=${id} returning id`;
+          removed += rows.length;
+        }
+        return {ok:true,removed,retained:plan.retained.length};
+      });
+      return json(result);
     }
     if (body.action !== "rest" || typeof body.path !== "string") {
       return json({ error: "invalid_action" }, 400);

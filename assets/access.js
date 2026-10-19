@@ -228,7 +228,7 @@
     root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
     return t.innerHTML;
   }
-  window.NmfAccess={isAdmin,invoiceLedger:body=>call({...body,action:'invoice-ledger'}),purchaseRoute:body=>call({...body,action:'purchase-route'}),archiveView:html=>isAdmin()?html:removeMoney(html,'roster'),showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
+  window.NmfAccess={isAdmin,purgeStoreInvoiceFiles:files=>call({action:'purge-store-invoice-files',room:'namostore',files}),invoiceLedger:body=>call({...body,action:'invoice-ledger'}),purchaseRoute:body=>call({...body,action:'purchase-route'}),archiveView:html=>isAdmin()?html:removeMoney(html,'roster'),showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
@@ -242,8 +242,8 @@
     };
     const originalArchivePayment=staffArchivePaymentHtml;staffArchivePaymentHtml=function(e,row){if(isAdmin()&&row&&staffNetPay(row).ready)return originalArchivePayment(e,row);return '<label class="payroll-paid"><input type="checkbox" data-staff-paid="'+esc(e.id)+'" '+(staffPayment(e.id)?.paid?'checked':'')+' onchange="setStaffPaid('+jsarg(e.id)+',this.checked)">'+kmonth()+' 지급 완료</label>';};
     const originalRosterCsv=csvRoster;csvRoster=function(){if(isAdmin())return originalRosterCsv();const days=periodDays('roster');csv('근무표_'+ym(),[['이름',...days.map(d=>d+'일')],...rosterStaff().map(e=>[e.name,...days.map(d=>{const c=rosterGet(e.id,d);return isWork(c)?c.s+'~'+c.e+' (휴게 '+c.b+'분)':c||'';})])]);};
-    for(const name of ['invoiceMonthlySummaryHtml','invoicePaymentHtml','paymentAiPanelHtml','coupangPanelHtml']){const original=window[name];window[name]=function(...args){return isAdmin()?original(...args):'';};}
-    for(const name of ['paymentAiSchedule','coupangResume']){const original=window[name];window[name]=function(...args){if(isAdmin())return original(...args);};}
+    for(const name of ['invoiceMonthlySummaryHtml','invoicePaymentHtml','paymentAiPanelHtml']){const original=window[name];window[name]=function(...args){return isAdmin()?original(...args):'';};}
+    for(const name of ['paymentAiSchedule']){const original=window[name];window[name]=function(...args){if(isAdmin())return original(...args);};}
     operationBase=policy.operations(S);
     const originalSave=save;save=function(){
       const next=policy.operations(S);if(!cloudApplying){S.accessEdits||={};for(const key of new Set([...Object.keys(operationBase),...Object.keys(next)]))if(JSON.stringify(operationBase[key])!==JSON.stringify(next[key]))S.accessEdits[key]={at:new Date(Math.max(Date.now(),(Date.parse(S.accessEdits[key]?.at)||0)+1)).toISOString()};}

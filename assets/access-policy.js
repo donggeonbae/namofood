@@ -19,7 +19,7 @@
     s.settings.defaultBreakMinutes=0;s.settings.defaultBreakZeroInitialized=true;return s;
   }
   const recipeFields=['comp','menu','item','qty','unit','storage','loss','form','method','allergy'];
-  const productFields=['id','name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','sourceIdentity','sourceSpec'];
+  const productFields=['id','name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','archiveHidden','sourceIdentity','sourceSpec'];
   const saleFields=['id','date','name','category','unit','price','ticketUnits','itemsPerTicket','settlementMode','cardAmount','cashAmount','qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'];
   const priced=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
   const priceConfigured=v=>Object.hasOwn(v,'price')?priced(v.price):v.priceConfigured===true;
@@ -207,7 +207,8 @@
       const old=out.storeProducts[id];if(!safeKey(id)||!clock(p)||old&&Date.parse(p.at)<=Date.parse(old.at||'1970-01-01'))continue;
       if(['name','category','unit'].some(k=>typeof p[k]!=='string'||!p[k].trim()||p[k].length>100))throw Error('invalid_product');
       if(p.price!=null&&!priced(p.price)||p.ticketUnits!=null&&!validRate(p.ticketUnits)||p.itemsPerTicket!=null&&!validRate(p.itemsPerTicket))throw Error('invalid_product_price_or_ticket_rate');
-      out.storeProducts[id]={...(old||{id,cost:null}),...pick(p,['name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','sourceIdentity','sourceSpec'])};
+      if(Object.hasOwn(p,'archiveHidden')&&typeof p.archiveHidden!=='boolean')throw Error('invalid_product_archive');
+      out.storeProducts[id]={...(old||{id,cost:null}),...pick(p,['name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','archiveHidden','sourceIdentity','sourceSpec'])};
     }
     out.storeSales||={};
     for(const [key,r]of Object.entries(incoming.storeSales||{})){

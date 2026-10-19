@@ -44,6 +44,13 @@ export function invoiceFileReferenced(state: any, kind: string, hash: string) {
     !o[field]?.deleted
   );
 }
+// Only unlinked Store invoice originals may be purged. Never accept arbitrary
+// database row IDs, private files, other rooms or a partially valid batch.
+export function storeInvoicePurgePlan(room: unknown, state: any, files: unknown) {
+  if (room !== 'namostore' || !Array.isArray(files) || !files.length || files.length > 200 || files.some(f => !f || !['invoice-photo','invoice-file'].includes(f.kind) || typeof f.hash !== 'string' || !/^[a-f0-9]{64}$/.test(f.hash))) throw Error('invalid_invoice_purge');
+  const unique = [...new Map(files.map(f=>[f.kind+'#'+f.hash,{kind:f.kind,hash:f.hash}])).values()];
+  return {remove:unique.filter(f=>!invoiceFileReferenced(state,f.kind,f.hash)),retained:unique.filter(f=>invoiceFileReferenced(state,f.kind,f.hash))};
+}
 export async function validateOperationalBlob(
   payload: any,
   id: string,

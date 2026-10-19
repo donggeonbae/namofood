@@ -28,6 +28,8 @@ const handler = createHandler({
   env: (key) => ({
     "NMF_PW": "test-app-password",
     "NMF_COUPANG_WORKER_TOKEN": "test-worker-password",
+    // Shared Store operations must still work when admin mode is configured.
+    "NMF_ADMIN_HASH": "configured-admin-hash-for-isolated-test",
   }[key] || ""),
   queue,
 });

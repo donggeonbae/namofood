@@ -59,6 +59,7 @@ const handler = createHandler({
     "NMF_PW": pw,
     "NMF_COUPANG_WORKER_TOKEN": workerKey,
     "SUPABASE_ANON_KEY": "test-public-key",
+    "NMF_ADMIN_HASH": "configured-admin-hash-for-isolated-test",
   }[key] || ""),
   queue,
 });

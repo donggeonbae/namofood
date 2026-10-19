@@ -3,6 +3,7 @@ import {
   operationalDocumentKind,
   ticketFiles,
   validateOperationalBlob,
+  storeInvoicePurgePlan,
 } from "../supabase/functions/_shared/operational-documents.ts";
 import { createHandler } from "../supabase/functions/nmf-invoice-ocr/index.ts";
 const assert = (v: unknown) => {
@@ -52,6 +53,9 @@ assert(invoiceFileReferenced(fixedState,"invoice-photo",hash));
 assert(!invoiceFileReferenced({orders:{},fixedPurchases:{"2026-10":[{id:"private-contract",invoicePhoto:{hash}}]}},"invoice-photo",hash));
 assert(!invoiceFileReferenced({orders:{},fixedDocuments:[{invoicePhoto:{hash}}]},"invoice-photo",hash));
 assert(!invoiceFileReferenced({...fixedState,orderEdits:{routed:{deleted:true}}},"invoice-photo",hash));
+assert(storeInvoicePurgePlan('namostore',state,[{kind:'invoice-photo',hash}]).retained.length===1);
+assert(storeInvoicePurgePlan('namostore',{orders:{}},[{kind:'invoice-photo',hash},{kind:'invoice-photo',hash}]).remove.length===1);
+for(const [room,files] of [['namofood',[{kind:'invoice-photo',hash}]],['namostore',[{kind:'fixed-document',hash}]],['namostore',[{kind:'invoice-photo',hash:'bad'}]],['namostore',[]],['namostore',Array(201).fill({kind:'invoice-photo',hash})]]){let rejected=false;try{storeInvoicePurgePlan(room,{},files);}catch{rejected=true;}assert(rejected);}
 assert(
   ticketFiles({
     v: 1,
