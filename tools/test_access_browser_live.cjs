@@ -8,13 +8,13 @@ const version=JSON.parse(require('node:fs').readFileSync('ver.json','utf8')).v;
   try{
     const p=await b.newPage({viewport:{width:1440,height:1000}}),errors=[];let blockedWrites=0; p.on('pageerror',e=>errors.push(e.message));
     await p.addInitScript(pw=>sessionStorage.setItem('nmf_session_pw',pw),pw);
-    await p.route('**/*',async r=>{
+    const readOnly=async r=>{
       const req=r.request(),u=new URL(req.url());if(['GET','HEAD','OPTIONS'].includes(req.method()))return r.continue();
       if(u.pathname.endsWith('/nmf-access')){const body=req.postDataJSON();if(body.action==='login'||body.action==='rest'&&body.method==='GET')return r.continue();blockedWrites++;return r.fulfill({status:503,json:{error:'Read-only verification'}});}
       if(u.pathname.endsWith('/nmf-tax-auto')&&req.postDataJSON()?.action==='status')return r.continue();
       if(u.pathname.endsWith('/nmf-invoice-ocr')&&req.postDataJSON()?.action==='status')return r.continue();
       return r.fulfill({status:503,json:{ok:false,error:'Read-only verification'}});
-    });
+    };await p.route('**/*',readOnly);
     await p.goto('https://d-bae.com/namofood/?v='+version);await p.waitForFunction(()=>window.NMF_ACCESS_REQUIRED&&window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});assert.equal(await p.evaluate(()=>APP_VER),version);
     await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudDirty=false;});
     for(const tab of ['settings','data','pl','overview','fixed'])assert(await p.locator('nav [data-p='+tab+']').isHidden(),tab);
@@ -35,7 +35,10 @@ const version=JSON.parse(require('node:fs').readFileSync('ver.json','utf8')).v;
     await p.evaluate(()=>go('overview'));await p.waitForFunction(()=>overview.loaded&&!overview.busy,null,{timeout:45000});assert((await p.evaluate(()=>overviewModel().rows)).every(r=>r.status==='ready'||r.status==='empty'));
     await p.reload();await p.waitForFunction(()=>!!window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});assert(!await p.evaluate(()=>NmfAccess.isAdmin()));assert(await p.locator('nav [data-p=data]').isHidden());
     await p.setViewportSize({width:390,height:900});await p.screenshot({path:'/tmp/nmf-access-live-guest-mobile.png'});assert(await p.evaluate(()=>main.scrollWidth<=main.clientWidth+1));
+    const store=await b.newPage({viewport:{width:1440,height:1000}});store.on('pageerror',e=>errors.push(e.message));await store.addInitScript(pw=>{localStorage.setItem('nmf_app','store');sessionStorage.setItem('nmf_session_pw',pw);},pw);await store.route('**/*',readOnly);
+    await store.goto('https://d-bae.com/namofood/?v='+version+'#sales');await store.waitForFunction(()=>window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});assert(await store.locator('.store-amount-table').isVisible());assert.equal(await store.locator('[data-store-amount=creditQty]').count(),0);assert.equal(await store.locator('[data-store-amount=cardAmount]').count(),await store.locator('[data-store-amount=cashAmount]').count());assert(!await store.evaluate(()=>Object.values(S.storeProducts||{}).some(p=>Object.hasOwn(p,'cost'))));await store.screenshot({path:'/tmp/nmf-store-amounts-live-desktop.png'});
+    await store.evaluate(()=>go('recipe'));assert(await store.locator('#store-ticketUnits').isVisible());assert.equal(await store.locator('[data-field=cost]').count(),0);await store.setViewportSize({width:320,height:900});for(const tab of ['sales','recipe']){await store.evaluate(tab=>go(tab),tab);assert(await store.evaluate(()=>main.scrollWidth<=main.clientWidth+1),'store '+tab+' mobile');}await store.screenshot({path:'/tmp/nmf-store-amounts-live-mobile.png'});await store.close();
     assert.deepEqual(errors,[]);assert.equal(blockedWrites,0,'mere navigation must not try to mutate production');
-    console.log(JSON.stringify({version,guestProcurementAndOcrStatus:true,ticketTab:true,guestPrivateTabsHidden:true,adminLogin:true,settingsBackup:true,adminFinancialPages:true,threeRoomOverview:true,refreshRelocked:true,mobile:true,ledgerWrites:0,providerCalls:0}));
+    console.log(JSON.stringify({version,guestProcurementAndOcrStatus:true,ticketTab:true,guestPrivateTabsHidden:true,adminLogin:true,settingsBackup:true,adminFinancialPages:true,threeRoomOverview:true,refreshRelocked:true,mobile:true,storeAmountAndTicketSettings:true,ledgerWrites:0,providerCalls:0}));
   }finally{await b.close();}
 })().catch(e=>{console.error(e.name+': '+e.message);process.exitCode=1;});

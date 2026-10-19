@@ -28,7 +28,7 @@ boot_marker = 'window.NMF_ACCESS_REQUIRED=false;/* NMF_ACCESS_BOOT */'
 if source.count(boot_marker) != 1:
     raise ValueError('Access boot boundary missing; refusing an unsafe build')
 asset_dir = os.path.join(os.path.dirname(os.path.abspath(src)), 'assets')
-boot = 'window.NMF_ACCESS_REQUIRED=true;\n' + '\n'.join(open(os.path.join(asset_dir, name), encoding='utf-8').read() for name in ('access-policy.js','access.js'))
+boot = 'window.NMF_ACCESS_REQUIRED=true;\n' + '\n'.join(open(os.path.join(asset_dir, name), encoding='utf-8').read() for name in ('access-policy.js','store-amounts.js','access.js'))
 source = source.replace(boot_marker, boot)
 source = source.replace('</head>', '''<style>
 #admin-access{padding:8px 10px;border:1px solid #ffffff35;border-radius:6px;margin:0 0 10px;font-size:12px;min-width:0;max-width:100%;box-sizing:border-box;flex-shrink:0}

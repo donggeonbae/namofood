@@ -72,28 +72,10 @@
   }
   function sharedSalesHtml(original){
     if(APP==='cafe')return cafeDailySalesHtml();
-    if(APP==='store')return storeChannelSalesHtml(original());
+    if(APP==='store')return NmfStoreAmountsUI.sales(isAdmin());
     if(APP!=='food')return original();
     if(salesTab==='ticket')return '<h1>식권</h1>'+periodPicker('sales')+foodTicketLedgerHtml(periodCurrent('sales').date)+ticketHistoryHtml();
     const t=document.createElement('template');t.innerHTML=original();t.content.querySelectorAll('#food-ticket-ledger,#food-ticket-documents').forEach(el=>el.remove());return t.innerHTML;
-  }
-  const storeChannels=[['ticketQty','식권'],['cardQty','카드'],['cashQty','현금'],['creditQty','당일 외상']];
-  function storeChannelSalesHtml(html){
-    const t=document.createElement('template');t.innerHTML=html;const date=periodCurrent('sales').date,day=Number(date.slice(8));
-    for(const tr of t.content.querySelectorAll('[data-store-sale]')){
-      const id=tr.dataset.storeSale,sale=S.storeSales[date+'|'+id],old=sale&&!sale.deleted?sale:null,disabled=old&&!old.paymentSplit&&old.qty>0;
-      const editButton=tr.querySelector('[data-store-payment-open]');if(editButton)editButton.textContent=old?.paymentSplit?'결제별 수량 수정':'결제별 입력';
-      if(S.storeProducts[id]?.priceConfigured)tr.querySelectorAll('small').forEach(el=>{if(el.textContent.includes('판매가 설정 필요'))el.remove();});
-      tr.cells[0].insertAdjacentHTML('beforeend','<div class="store-channel-grid">'+storeChannels.map(([key,label])=>'<label class="f">'+label+'(개)<input type="number" min="0" step="1" data-store-channel="'+key+'" data-product-id="'+esc(id)+'" value="'+(old?.paymentSplit?old[key]??0:'')+'" placeholder="0" '+(disabled?'disabled title="기존 미분류 기록은 결제별 수량 수정에서 전환해 주세요."':'')+' oninput="NmfAccess.setStoreChannel('+day+','+jsarg(id)+','+jsarg(key)+',this)" onchange="render()"></label>').join('')+'</div>');
-    }return t.innerHTML;
-  }
-  function setStoreChannel(day,id,key,el){
-    if(!storeChannels.some(([k])=>k===key))return false;const raw=el.value.replaceAll(',','').trim(),n=raw===''?0:Number(raw);if(!Number.isSafeInteger(n)||n<0){el.setCustomValidity('0 이상의 상품 개수를 입력하세요.');return false;}el.setCustomValidity('');
-    const date=dateKeyAt(ym(),day),k=date+'|'+id,p=S.storeProducts[id],old=S.storeSales[k];if(!p&&!old)return false;if(old&&!old.paymentSplit&&old.qty>0)return false;
-    const priced=old?.price??p?.price;if(priced==null&&!(old?.priceConfigured||p?.priceConfigured)){toast('관리자에게 상품 판매가 설정을 요청해 주세요.');return false;}
-    const row={...(old||{id,date,name:p.name,category:p.category,unit:p.unit,price:priced,cost:p.cost}),...Object.fromEntries(storeChannels.map(([key])=>[key,old?.paymentSplit?old[key]??0:0])),[key]:n};
-    if(!row.ticketQty&&row.tickets>0){toast('실제로 받은 식권 장수를 먼저 비워 주세요.');return false;}
-    row.qty=storeChannels.reduce((sum,[key])=>sum+row[key],0);row.paymentSplit=true;row.deleted=false;row.at=storeStamp(old);S.storeSales[k]=row;save();return true;
   }
   function cafeDailySalesHtml(){
     const date=periodCurrent('sales').date,d=Number(date.slice(8)),field=(day,key,label)=>'<label class="f">'+label+'<input type="text" inputmode="numeric" data-cafe-amount="'+key+'" data-sales-day-number="'+day+'" value="'+esc(_fmtNum(salesGet(day,key)))+'" placeholder="미입력" onchange="NmfAccess.setCafeAmount('+day+',\''+key+'\',this)"></label>';
@@ -176,7 +158,7 @@
       root.querySelectorAll('.kpi').forEach(el=>{if(/금액|식재비|미수|공급가|세액/.test(el.textContent))el.remove();});
       return t.innerHTML;
     }
-    if(APP==='cafe'&&currentPage==='sales')return html;
+    if(APP==='cafe'&&currentPage==='sales'||APP==='store'&&['sales','recipe'].includes(currentPage))return html;
     const retained=[];for(const el of root.querySelectorAll('#food-ticket-ledger,#food-ticket-documents,[data-ticket-history]')){const marker=document.createComment('shared-ticket-operations');el.replaceWith(marker);retained.push([marker,el]);}
     root.querySelectorAll('input').forEach(el=>{if(el.hasAttribute('data-sales-other')||/salesSet\([^)]*,\s*['"]other['"]/.test((el.getAttribute('oninput')||'')+' '+(el.getAttribute('onchange')||'')))el.dataset.publicEntry='other';});
     root.querySelectorAll('[data-admin-only],[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
@@ -228,13 +210,13 @@
     root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
     return t.innerHTML;
   }
-  window.NmfAccess={isAdmin,setStoreChannel,showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
+  window.NmfAccess={isAdmin,showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
     if(APP==='food'){PAGES.ticketSales=PAGES.sales;const ticketNav=document.createElement('button');ticketNav.dataset.p='ticketSales';ticketNav.innerHTML='<span class="ic">🎫</span>식권';ticketNav.addEventListener('click',()=>go('ticketSales'));document.querySelector('nav [data-p=sales]').after(ticketNav);}
     const originalTicketScope=foodTicketUiScope;foodTicketUiScope=function(){const before=foodTicketUi.scope,result=originalTicketScope();if(before!==foodTicketUi.scope)foodTicketUi.settingsOpen=true;return result;};foodTicketUi.settingsOpen=true;
-    const originalStorePayment=storePaymentOpen;storePaymentOpen=function(day,id){originalStorePayment(day,id);const dialog=document.getElementById('store-payment-dialog');if(!dialog)return;const old=S.storeSales[dateKeyAt(ym(),day)+'|'+id],tickets=dialog.querySelector('[data-store-payment=tickets]')?.closest('label');tickets?.insertAdjacentHTML('beforebegin','<label class="f">당일 외상으로 판매한 상품 수<input data-store-payment="creditQty" type="number" min="0" step="1" value="'+(old?.creditQty??'')+'" placeholder="0"></label>');dialog.querySelector('p.hint:last-of-type').textContent='총 판매 수량 = 식권·카드·현금·외상 상품 수 합계. 카드·현금·외상은 당시 판매가 기준으로 매출에 포함합니다. 실제 받은 식권 장수는 따로 입력하며, 식권 회수에 현금·카드·외상 수량은 포함하지 않습니다.';};
+    storeSalesCsv=function(){return NmfStoreAmountsUI.exportCsv(isAdmin());};
     const originalPaidCurrent=staffPaymentCurrent;staffPaymentCurrent=function(row,month=ym()){const record=staffPayment(row.e.id,month);return record?.basis==='manual-check-v1'?!!record.paid:originalPaidCurrent(row,month);};
     const originalSetPaid=setStaffPaid;setStaffPaid=function(id,paid,month=ym()){
       const row=laborRows().find(r=>r.e.id===id);if(isAdmin()&&row&&staffNetPay(row,month).ready)return originalSetPaid(id,paid,month);
@@ -259,7 +241,7 @@
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
       if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
       if(p==='order'&&!isAdmin()&&orderView==='card')orderView='sheet';
-      const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):originals[p]();
+      const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):APP==='store'&&p==='recipe'?NmfStoreAmountsUI.products(isAdmin()):originals[p]();
       return isAdmin()?html:removeMoney(html,p);
     };
     render=function(){paint();originalRender();if(APP==='food'){const ticket=page==='sales'&&salesTab==='ticket';document.querySelector('nav [data-p=ticketSales]')?.classList.toggle('on',ticket);document.querySelector('nav [data-p=sales]')?.classList.toggle('on',page==='sales'&&!ticket);if(ticket)history.replaceState(null,'','#ticketSales');}if(isAdmin()&&page==='data'){

@@ -2,6 +2,8 @@
 
 ## Admin access boundary (2026-10-19)
 
+- Store settlement amendment (1019-26): product retail price and tickets per item are shared editable operational configuration; acquisition cost stays admin-only. Show actual received vouchers in sheets and card/cash in KRW, deriving integer goods quantities with one browser/server policy (2,500 won, 0.25 voucher/item: 1 voucher = 4 goods, 12,500 card = 5 goods). No new Store credit inputs. Reject nondivisible amounts visibly, never round sales. Existing dated rows preserve price/rate snapshots; legacy quantity/credit records stay untouched until an explicit confirmed conversion. Revenue uses actual voucher value plus card/cash amounts once; recovery uses actual voucher count only. Preserve nonfinancial inventory, public other revenue, private financial summaries, Food ticket navigation and Cafe POS entry. Desktop compact columns become labeled mobile fields with no horizontal overflow.
+
 - Navigation correction (1019-24): `식권` must be an independent sidebar button directly after `판매 실적`, not a nested tab inside it. Preserve `#ticketSales` on refresh, show existing dated ticket records with an open action, and keep the internal sales lifecycle for store-recovery/document refresh. No transaction rewrite or migration.
 
 - User amendment (1019-21): procurement invoices, their original photos/sheets and item amounts are shared work data; only aggregate monthly/payable summaries and card/AI payment matching remain admin-only. Food Sales has adjacent `판매실적` / `식권` tabs; corporate ticket transactions, documents, unit prices and opening configuration live in `식권`, with company settings initially expanded. Other-revenue entry stays public. Cafe sales use daily POS amount and optional other revenue, not cups.
