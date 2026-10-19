@@ -37,7 +37,18 @@ export async function financeHash(state: TaxState): Promise<string> {
   const bytes = new TextEncoder().encode(
     JSON.stringify(
       canonical({
-        sales: state.sales || {},
+        sales: Object.fromEntries(
+          Object.entries(state.sales || {}).map((
+            [month, cells],
+          ) => [
+            month,
+            Object.fromEntries(
+              Object.entries(cells).filter(([key]) =>
+                !/^\d+\|(?:ticketBuyer|ticketCompanyName\|)/.test(key)
+              ),
+            ),
+          ]),
+        ),
         // Evidence attachments do not change any tax input. Preserve the existing
         // fingerprint exactly for orders without this new nonfinancial field.
         orders: Object.fromEntries(

@@ -28,6 +28,36 @@ export function validDate(v: unknown): v is string {
   const date = new Date(v + "T12:00:00Z");
   return Number.isFinite(+date) && date.toISOString().slice(0, 10) === v;
 }
+export function companyTicketSales(
+  cells: Row,
+  day: number,
+  defaultPrice: unknown = 10000,
+) {
+  const prices = money(defaultPrice) ?? 10000;
+  const parts = [{
+    qty: money(cells[day + "|ticketIssued"]),
+    price: money(cells[day + "|ticketIssuePrice"]) ?? prices,
+  }];
+  for (const key of Object.keys(cells)) {
+    const match = key.match(
+      new RegExp("^" + day + "\\|ticketCompanyQty\\|([a-zA-Z0-9_-]{1,64})$"),
+    );
+    if (!match || cells[day + "|ticketCompanyDeleted|" + match[1]]) continue;
+    parts.push({
+      qty: money(cells[key]),
+      price: money(cells[day + "|ticketCompanyPrice|" + match[1]]) ?? prices,
+    });
+  }
+  const entered = parts.filter((p) => p.qty !== null);
+  return {
+    quantity: entered.length
+      ? entered.reduce((sum, p) => sum + p.qty!, 0)
+      : null,
+    amount: entered.length
+      ? entered.reduce((sum, p) => sum + p.qty! * p.price, 0)
+      : null,
+  };
+}
 export function kstDay(now: number): string {
   return new Date(now + 9 * 3600000).toISOString().slice(0, 10);
 }
@@ -179,17 +209,19 @@ export function buildTaxReport(state: TaxState, asOf: string) {
             })
           );
         if (
-          money(cells[d + "|ticketIssued"]) !== null || values.some((v) =>
+          companyTicketSales(cells, d, object(st.ticketLedger).unitPrice)
+              .quantity !== null ||
+          values.some((v) => v !== null) || additional.some((v) =>
             v !== null
-          ) || additional.some((v) => v !== null) || countRevenue.some((v) =>
-            v !== null
-          )
+          ) || countRevenue.some((v) => v !== null)
         ) salesDays++;
-        const issued = money(cells[d + "|ticketIssued"]),
-          issuePrice = money(cells[d + "|ticketIssuePrice"]) ??
-            money(object(st.ticketLedger).unitPrice) ?? 10000;
-        revenue += (issued !== null
-          ? issued * issuePrice
+        const company = companyTicketSales(
+          cells,
+          d,
+          object(st.ticketLedger).unitPrice,
+        );
+        revenue += (company.quantity !== null
+          ? company.amount!
           : values.reduce<number>((sum, v, i) =>
             sum +
             (v || 0) *
@@ -197,7 +229,8 @@ export function buildTaxReport(state: TaxState, asOf: string) {
                 money(object(meals[MEALS[i]]).price) ??
                 0), 0)) +
           [...additional, ...countRevenue].reduce<number>(
-            (sum, v) => sum + (v || 0),
+            (sum, v) =>
+              sum + (v || 0),
             0,
           );
       }

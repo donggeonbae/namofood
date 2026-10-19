@@ -63,6 +63,30 @@ if (await financeHash(base) === await financeHash(changed)) {
 if (JSON.stringify(base) !== before) {
   throw Error("Tax must not mutate ticket ledger");
 }
+const companies = structuredClone(base);
+Object.assign(companies.sales!["2026-10"], {
+  "19|ticketBuyer": "A 회사",
+  "19|ticketCompanyName|b": "B 회사",
+  "19|ticketCompanyQty|b": 50,
+  "19|ticketCompanyPrice|b": 12000,
+});
+if (
+  buildTaxReport(companies, "2026-10-19").months["2026-10"].revenue !== 2610000
+) {
+  throw Error(
+    "Multi-company revenue sums each snapshotted price, not recovered tickets",
+  );
+}
+const renamed = structuredClone(companies);
+renamed.sales!["2026-10"]["19|ticketBuyer"] = "C 회사";
+renamed.sales!["2026-10"]["19|ticketCompanyName|b"] = "D 회사";
+if (await financeHash(companies) !== await financeHash(renamed)) {
+  throw Error("Company names cannot trigger tax generation");
+}
+renamed.sales!["2026-10"]["19|ticketCompanyDeleted|b"] = 1;
+if (
+  buildTaxReport(renamed, "2026-10-19").months["2026-10"].revenue !== 2010000
+) throw Error("Deleted company cannot contribute revenue");
 console.log(
   "TAX_COMPANY_TICKETS_SALES_ZERO_FALLBACK_CHANNELS_FUTURE_PRICE_DEBOUNCE_READONLY_OK",
 );
