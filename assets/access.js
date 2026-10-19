@@ -208,6 +208,7 @@
       root.querySelector('#staff-payroll-table')?.closest('.card')?.remove();
       // Directory operations remain shared; wage/contact/payroll documents stay private.
       root.querySelectorAll('.staff-detail-button,.staff-order-controls,.staff-insured').forEach(el=>el.remove());
+      const archiveHint=root.querySelector('#staffArchive > p.hint');if(archiveHint)archiveHint.textContent='보관 직원도 이름 수정·명단 복귀·삭제와 선택 월의 지급 완료 체크가 가능합니다. 명단에서 삭제해도 기존 근무 기록은 유지됩니다. 이전 이름으로도 검색할 수 있습니다.';
     }
     if(APP==='store'){
       const form=root.querySelector('#store-add-form');if(form)form.innerHTML='<h2>새 상품 추가</h2><p class="hint">새 상품·가격 설정은 관리자 모드에서 합니다. 등록된 상품의 판매수량은 일반 모드에서도 입력할 수 있습니다.</p>';
