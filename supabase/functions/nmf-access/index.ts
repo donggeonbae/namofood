@@ -1,6 +1,8 @@
 import { readState, sql } from "../_shared/database.ts";
 import { handlePurchaseRouting } from "../_shared/purchase-routing-handler.ts";
 import { preservePurchaseRouting } from "../_shared/purchase-routing.ts";
+import { preserveInvoiceLedgers } from "../_shared/invoice-ledger.ts";
+import { handleInvoiceLedger } from "../_shared/invoice-ledger-handler.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import {
   adminAuthorized,
@@ -115,6 +117,10 @@ Deno.serve(async (request) => {
     }
     if (body.action === "purchase-route") {
       const response = await handlePurchaseRouting(body, pw);
+      return json(response.data, response.status);
+    }
+    if (body.action === "invoice-ledger") {
+      const response = await handleInvoiceLedger(body, pw);
       return json(response.data, response.status);
     }
     if (body.action !== "rest" || typeof body.path !== "string") {
@@ -283,7 +289,7 @@ Deno.serve(async (request) => {
       if (admin && id === root && existing) {
         const full = JSON.parse(await decryptText(pw, String(existing.data)));
         const incoming = JSON.parse(await decryptText(pw, cipher));
-        cipher = await encryptText(pw, JSON.stringify(preservePurchaseRouting(full, incoming)));
+        cipher = await encryptText(pw, JSON.stringify(preserveInvoiceLedgers(full, preservePurchaseRouting(full, incoming))));
       }
       if (!admin) {
         if (!existing) throw Error("guest_cannot_create_room");
@@ -291,7 +297,7 @@ Deno.serve(async (request) => {
           incoming = JSON.parse(await decryptText(pw, rowBody.data));
         cipher = await encryptText(
           pw,
-          JSON.stringify(preservePurchaseRouting(full, policy.mergeGuest(full, incoming))),
+          JSON.stringify(preserveInvoiceLedgers(full, preservePurchaseRouting(full, policy.mergeGuest(full, incoming)))),
         );
       }
       await tx`insert into public.namofood_state(id,data,updated_at)values(${id},${cipher},${rowBody.updated_at}) on conflict(id)do update set data=excluded.data,updated_at=excluded.updated_at`;

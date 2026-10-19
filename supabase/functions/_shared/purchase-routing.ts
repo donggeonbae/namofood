@@ -24,7 +24,7 @@ export function classifyPurchaseItem(item: any, room: string) {
   const snack = /과자|쿠크다스|초코하임|화이트하임|버터링|초코파이|몽쉘|오예스|비스킷|크래커|초콜릿|사탕|젤리|껌/;
   const keep: PurchaseTarget = room === "namostore" ? "store" : "food";
   if (nonfood.test(name)) return { target: "fixed" as const, kind: "nonfood", certain: true, reason: "세제·비품·비식재료" };
-  if (ingredient.test(name)) return { target: keep, kind: "ingredient", certain: true, reason: "식재료 · 현재 사업장 유지" };
+  if (ingredient.test(name)) return { target: "food" as const, kind: "ingredient", certain: true, reason: "식재료 → 푸드" };
   if (beverage.test(name)) return { target: "store" as const, kind: "beverage", certain: true, reason: "판매용 음료 → 매점" };
   if (snack.test(name)) return { target: keep, kind: "snack", certain: true, reason: "과자·간식 · 현재 사업장 유지" };
   return { target: keep, kind: "unknown", certain: false, reason: "자동 판단 보류 · 현재 위치 유지" };
@@ -36,7 +36,8 @@ export async function purchaseRoutingPlan(
   choices: Record<string, PurchaseTarget> = {},
 ) {
   if (!purchaseRooms.includes(room as any)) throw Error("invalid_purchase_room");
-  const order = Object.values(state.orders || {}).filter(Array.isArray).flat()
+  const fixed = Object.values(state.fixedPurchases || {}).filter(Array.isArray).flat();
+  const order = [...Object.values(state.orders || {}).filter(Array.isArray).flat(), ...fixed]
     .find((o: any) => o.id === id) as any;
   if (!order || state.orderEdits?.[id]?.deleted) throw Error("purchase_missing");
   if (order.ocrMeta?.referenceOnly || order.ocrMeta?.duplicateReviewPending ||
@@ -57,7 +58,7 @@ export async function purchaseRoutingPlan(
     : null;
   const splitKnown = total !== null && rows.every((r: any) => r.amount !== null) &&
     rows.reduce((n: number, r: any) => n + r.amount, 0) === total;
-  const keep: PurchaseTarget = room === "namostore" ? "store" : "food";
+  const keep: PurchaseTarget = fixed.includes(order) ? "fixed" : room === "namostore" ? "store" : "food";
   const moved = rows.some((r: any) => r.target !== keep);
   const parsedDate = typeof order.date === "string" ? new Date(order.date + "T12:00:00Z") : null;
   const validDate = typeof order.date === "string" && /^20\d{2}-\d{2}-\d{2}$/.test(order.date) &&
@@ -65,7 +66,7 @@ export async function purchaseRoutingPlan(
   const requiresReview = rows.some((r: any) => !r.certain || r.overridden) ||
     !!order.coupang && targets.includes("fixed");
   return {
-    room, id, vendor: String(order.vendor || ""), date: order.date,
+    room, id, keep, vendor: String(order.vendor || ""), date: order.date,
     fingerprint: await hash({ order, edit: state.orderEdits?.[id] }),
     rows, targets, total, moved, requiresReview,
     canApply: moved && total !== null && validDate && !!String(order.vendor || "").trim() && !/업체\s*미입력|업체\s*미확인|공급업체\s*미확인/.test(order.vendor) &&
@@ -123,7 +124,7 @@ export async function applyPurchaseRouting(
   if (plan.fingerprint !== expected) throw Error("purchase_changed");
   if (!plan.canApply) throw Error("purchase_amount_review_required");
   if (plan.requiresReview && !confirmed) throw Error("purchase_confirmation_required");
-  const sourceOrder = Object.values(source.orders).flat().find((o: any) => o.id === id) as any;
+  const sourceOrder = [...Object.values(source.orders || {}).flat(),...Object.values(source.fixedPurchases || {}).flat()].find((o: any) => o.id === id) as any;
   const operationId = await hash([room, id, plan.fingerprint]);
   const routes: { room: string; target: PurchaseTarget; id: string; total: number }[] = [];
   // Validate/build every child before mutating any state.

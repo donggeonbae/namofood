@@ -25,7 +25,7 @@ export async function handlePurchaseRouting(body: any, pw: string) {
       const [row] = await readState("namofood_state", body.room);
       if (!row) return { status: 200, data: { plans: [], more: false } };
       const state = JSON.parse(await decryptText(pw, String(row.data)));
-      const candidates = (state.orders?.[body.month] || []).filter((o: any) =>
+      const candidates = [...state.orders?.[body.month] || [],...body.orderId ? state.fixedPurchases?.[body.month] || [] : []].filter((o: any) =>
         (!body.orderId || o.id === body.orderId) &&
         !state.orderEdits?.[o.id]?.deleted && !o.ocrMeta?.referenceOnly &&
         !o.ocrMeta?.duplicateReviewPending && !o.ocrMeta?.purchaseRoute?.routes
@@ -48,7 +48,7 @@ export async function handlePurchaseRouting(body: any, pw: string) {
       const states: Record<string, any> = {};
       for (const row of rows) states[String(row.id)] = JSON.parse(await decryptText(pw, String(row.data)));
       if (!states[body.room]) throw Error("purchase_missing");
-      const original = Object.values(states[body.room].orders || {}).flat().find((o: any) => o.id === body.id) as any;
+      const original = [...Object.values(states[body.room].orders || {}).flat(),...Object.values(states[body.room].fixedPurchases || {}).flat()].find((o: any) => o.id === body.id) as any;
       if (!original) throw Error("purchase_missing");
       if (!body.auto && body.confirmed !== true) throw Error("purchase_confirmation_required");
       if (body.auto && !states[body.room].purchaseRoutes?.[body.id]) {

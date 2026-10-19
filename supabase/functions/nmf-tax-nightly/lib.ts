@@ -11,6 +11,7 @@ export type TaxState = {
   settings?: Row;
   sales?: Record<string, Row>;
   orders?: Record<string, Row[]>;
+  orderEdits?: Record<string, Row>;
   roster?: Record<string, Row>;
   staff?: Row[];
   staffArchive?: Row[];
@@ -269,7 +270,7 @@ export function buildTaxReport(state: TaxState, asOf: string) {
       }
       // Classified supplies are one-off dated purchases, not a recurring monthly
       // allowance. Blank VAT is never guessed; only recorded tax is observed.
-      const fixedReceipts = (state.fixedPurchases?.[month] || []).filter(o => validDate(o.date) && o.date.startsWith(month) && o.date <= asOf);
+      const fixedReceipts = (state.fixedPurchases?.[month] || []).filter(o => !object(o.ocrMeta).referenceOnly && !object(state.orderEdits?.[String(o.id)]).deleted && validDate(o.date) && o.date.startsWith(month) && o.date <= asOf);
       const ingredientVat = inputVat;
       let fixedNet = 0;
       for (const o of fixedReceipts) {
