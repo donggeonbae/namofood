@@ -13,7 +13,7 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
       if(u.pathname.endsWith('/nmf-tax-auto')&&req.postDataJSON()?.action==='status')return r.continue();
       return r.fulfill({status:503,json:{ok:false,error:'Read-only verification'}});
     });
-    await p.goto('https://d-bae.com/namofood/?v=1019-18-admin-store');await p.waitForFunction(()=>window.NMF_ACCESS_REQUIRED&&window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});
+    await p.goto('https://d-bae.com/namofood/?v=1019-19-admin-access');await p.waitForFunction(()=>window.NMF_ACCESS_REQUIRED&&window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});assert.equal(await p.evaluate(()=>APP_VER),'1019-19-admin-access');
     await p.evaluate(()=>{clearInterval(cloudPollTimer);clearTimeout(cloudTimer);clearTimeout(saveTimer);cloudDirty=false;});
     for(const tab of ['settings','data','pl','overview','fixed','order'])assert(await p.locator('nav [data-p='+tab+']').isHidden(),tab);
     assert(!await p.evaluate(()=>Object.hasOwn(S.staff[0]||{},'account')));
@@ -25,6 +25,6 @@ const assert=require('node:assert/strict'),{chromium}=require('playwright');
     await p.reload();await p.waitForFunction(()=>!!window.NmfAccess&&!!cloudRemoteAt,null,{timeout:60000});assert(!await p.evaluate(()=>NmfAccess.isAdmin()));assert(await p.locator('nav [data-p=data]').isHidden());
     await p.setViewportSize({width:390,height:900});await p.screenshot({path:'/tmp/nmf-access-live-guest-mobile.png'});assert(await p.evaluate(()=>main.scrollWidth<=main.clientWidth+1));
     assert.deepEqual(errors,[]);assert.equal(blockedWrites,0,'mere navigation must not try to mutate production');
-    console.log(JSON.stringify({version:'1019-18-admin-store',guestPrivateTabsHidden:true,adminLogin:true,settingsBackup:true,adminFinancialPages:true,threeRoomOverview:true,refreshRelocked:true,mobile:true,ledgerWrites:0,providerCalls:0}));
+    console.log(JSON.stringify({version:'1019-19-admin-access',guestPrivateTabsHidden:true,adminLogin:true,settingsBackup:true,adminFinancialPages:true,threeRoomOverview:true,refreshRelocked:true,mobile:true,ledgerWrites:0,providerCalls:0}));
   }finally{await b.close();}
 })().catch(e=>{console.error(e.name+': '+e.message);process.exitCode=1;});

@@ -126,7 +126,8 @@
     return '<h1>레시피</h1><div class="card"><label class="f">음식·재료 검색<input id="rqq" value="'+esc(recipeQ)+'" onchange="recipeQ=this.value;render()" placeholder="검색어를 입력하고 Enter"></label><p class="hint">조리법·재료를 열람할 수 있습니다. 원본 레시피 수정은 관리자 모드에서 이용해 주세요.</p></div>'+Object.keys(map).filter(name=>!query||name.toLowerCase().includes(query)||map[name].some(r=>String(r.item).toLowerCase().includes(query))).sort((a,b)=>a.localeCompare(b,'ko')).map(name=>'<details class="card" '+(rSel===name?'open':'')+'><summary>'+esc(name)+'</summary><div class="tbl"><table><thead><tr><th>재료</th><th>1인 기준량</th></tr></thead><tbody>'+map[name].map(r=>'<tr><td>'+esc(r.item)+'</td><td>'+esc(r.qty)+' '+esc(r.unit)+'</td></tr>').join('')+'</tbody></table></div><p style="white-space:pre-wrap">'+esc(S.methods?.[name]||'')+'</p></details>').join('');
   }
   window.NmfAccess={isAdmin,initialize(){
-    const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';document.querySelector('.appsw').after(bar);
+    const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
+    const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
     cloudRevisionUnchanged=async function(){
       if(!cloudRemoteAt||!revisions.has(cloud.room))return false;

@@ -22,7 +22,7 @@ async function call(body,token){const raw=JSON.stringify(body),time=String(Date.
   for(const endpoint of ['nmf-tax-auto','nmf-payment-match','nmf-invoice-ocr']){const r=await fetch(base+'/functions/v1/'+endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'status'})});assert.equal(r.status,403,endpoint+' rejects guest');}
   if(process.env.NMF_EXPECT_LOCKED==='1'){
     const source=fs.readFileSync('나모푸드_관리앱.html','utf8'),key=source.match(/const SUPA_DEFAULT = \{url:"[^"]+", key:"([^"]+)"/)[1];
-    for(const id of ['namofood','namofood@2026-10-19','namofood#fixed-documents']){const r=await fetch(base+'/rest/v1/namofood_state?id=eq.'+encodeURIComponent(id)+'&select=data',{headers:{apikey:key,Authorization:'Bearer '+key}});assert.equal(r.status,403,'legacy direct API denied');}
+    for(const id of ['namofood','namofood@2026-10-19','namofood#fixed-documents']){const r=await fetch(base+'/rest/v1/namofood_state?id=eq.'+encodeURIComponent(id)+'&select=data',{headers:{apikey:key,Authorization:'Bearer '+key}});assert.equal(r.status,401,'anonymous direct database access denied');const error=await r.json();assert.equal(error.code,'42501');assert.match(error.message,/permission denied for table namofood_state/);}
   }
   console.log(JSON.stringify({roots,adminRead:!!token,guestProjection:true,privateDocumentsDenied:true,backupsDenied:true,financialEndpointsDenied:true,legacyApiLocked:process.env.NMF_EXPECT_LOCKED==='1',ledgerWrites:0,providerCalls:0}));
 })().catch(e=>{console.error(e.name+': '+e.message);process.exitCode=1;});

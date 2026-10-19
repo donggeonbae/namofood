@@ -37,7 +37,8 @@ source = source.replace('</head>', '''<style>
 #admin-access .btn{padding:7px 9px;font-size:12px;white-space:nowrap;width:auto;min-width:0;margin:0}
 #admin-access small{display:block;overflow-wrap:anywhere;color:#ffdbac}
 nav [hidden]{display:none!important}
-@media screen and (max-width:900px){#admin-access{flex:0 0 228px;width:228px;margin:0}}
+.access-switch-stack{min-width:0;max-width:100%}
+@media screen and (max-width:900px){nav{align-items:center}.access-switch-stack{flex:0 0 228px;width:228px}nav .access-switch-stack .appsw{width:100%;margin:0 0 5px}#admin-access{width:100%;margin:0;padding:5px 7px}}
 </style></head>''')
 plain = source.encode('utf-8')
 salt = secrets.token_bytes(16); iv = secrets.token_bytes(12)

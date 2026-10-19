@@ -33,6 +33,7 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
     await p.evaluate(()=>go('settings'));assert.equal(await p.evaluate(()=>page),'home');
     await p.evaluate(()=>go('sales'));assert(await p.getByRole('heading',{name:'판매 실적 · 식수 입력'}).isVisible());assert(!(await p.locator('#main').innerText()).includes('이달 실제 매출'));
     await p.evaluate(()=>go('roster'));assert(!await p.locator('#staff-payroll-table').count());assert(!(await p.locator('#main').innerText()).includes('시급'));
+    await p.evaluate(()=>go('recipe'));assert(await p.locator('#main details').count()>0);assert((await p.locator('#main').innerText()).includes('원본 레시피 수정은 관리자'));
     const before=apiReads;assert(await p.evaluate(()=>cloudRevisionUnchanged()));assert.equal(apiReads,before,'revision check must not download state');
     await p.locator('#admin-password').fill('wrong');await p.locator('#admin-form button').click();await p.waitForFunction(()=>document.getElementById('admin-message').textContent.includes('맞지'));assert.equal(await p.locator('#admin-password').inputValue(),'');
     await p.evaluate(()=>{clearTimeout(saveTimer);cloudDirty=false;});await p.locator('#admin-password').fill(admin);await p.locator('#admin-form button').click();await p.waitForFunction(()=>NmfAccess.isAdmin());await p.waitForFunction(()=>S.staff[0]?.wage===19999);
@@ -41,7 +42,7 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
     await p.evaluate(()=>{localStorage.setItem(KEY,JSON.stringify(S));});await p.waitForTimeout(450);
     const caches=await p.evaluate(()=>Object.entries(localStorage));assert(caches.some(([key])=>key.endsWith('#admin-draft')));for(const [,value]of caches){assert(!value.includes('PRIVATE_PHONE'));assert(!value.includes('PRIVATE_FIXED'));assert(!value.includes('test-token'));assert(!value.includes('test-admin'));}
     await p.reload();await p.waitForFunction(()=>document.getElementById('admin-password'));assert(!await p.evaluate(()=>NmfAccess.isAdmin()));assert(await p.locator('nav [data-p=settings]').isHidden());
-    for(const width of [1440,390,320]){await p.setViewportSize({width,height:1000});await p.evaluate(()=>go('home'));assert(await p.evaluate(()=>main.scrollWidth<=main.clientWidth+1));assert(await p.locator('#admin-access').evaluate(e=>e.scrollWidth<=e.clientWidth+1));}
+    for(const width of [1440,390,320]){await p.setViewportSize({width,height:1000});await p.evaluate(()=>go('home'));assert(await p.evaluate(()=>main.scrollWidth<=main.clientWidth+1));assert(await p.locator('#admin-access').evaluate(e=>e.scrollWidth<=e.clientWidth+1));const box=await p.locator('#admin-form button').boundingBox();assert(box.x>=0&&box.x+box.width<=width,'login button must fit on screen');}
     assert.deepEqual(errors,[]);console.log('ADMIN_GUEST_SERVER_PROJECTION_SETTINGS_BACKUP_DENIAL_LOGIN_CACHE_ENCRYPTION_RELOAD_RELOCK_REVISION_NO_FULL_DOWNLOAD_MOBILE_OK');
   }finally{await b.close();fs.rmSync(temp,{recursive:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

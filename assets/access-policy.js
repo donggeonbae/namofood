@@ -20,11 +20,11 @@
     const settings=pick(s.settings||{},['shifts','staffRoles','recipeOrderMultiplier','printMeals']);
     settings.meals=Object.fromEntries(meals.map(m=>[m,pick(s.settings?.meals?.[m]||{},['count'])]));
     // Archive contact/payroll fields, purchasing, taxes and corporate ticket sales never cross this boundary.
-    const staff = a => (a||[]).map(e=>pick(e,['id','name','role','def','off','archivedAt']));
+    const staff = a => (a||[]).map(e=>({...pick(e,['id','name','role','off','archivedAt']),...(e.def?{def:pick(e.def,['s','e','b'])}:{})}));
     const out=pick(s,['month','updatedAt','view','menus','menuManualEdits','menuExtraSlots','menuExtraEdits','menuRetirements','methods','hyg','cafeSeeded','board']);
     Object.assign(out,{settings,staff:staff(s.staff),staffArchive:staff(s.staffArchive),
       recipes:(s.recipes||[]).map(r=>pick(r,['comp','menu','item','qty','unit','storage','loss','form','method','allergy'])),
-      roster:maps(s.roster,rosterKey),rosterEdits:maps(s.rosterEdits,rosterKey,v=>pick(v,['at','deleted'])),
+      roster:maps(s.roster,rosterKey,v=>v&&typeof v==='object'?pick(v,['s','e','b']):v),rosterEdits:maps(s.rosterEdits,rosterKey,v=>pick(v,['at','deleted'])),
       sales:maps(s.sales,salesKey),salesEdits:maps(s.salesEdits,salesKey,v=>pick(v,['at']))});
     return out;
   }
