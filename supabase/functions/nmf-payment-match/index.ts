@@ -2,6 +2,7 @@ import { sql } from "../_shared/database.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import { equal } from "../nmf-tax-nightly/auth.ts";
 import { candidatesFrom, reviewPayments, sha, signature } from "./lib.ts";
+import { adminAuthorized } from "../_shared/admin-auth.ts";
 const env = (k: string) => (Deno.env.get(k) || "").trim();
 const origins = new Set(["https://d-bae.com", "https://donggeonbae.github.io"]);
 Deno.serve(async (request) => {
@@ -12,7 +13,7 @@ Deno.serve(async (request) => {
       "Vary": "Origin",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers":
-        "apikey,content-type,x-nmf-time,x-nmf-signature",
+        "apikey,content-type,x-nmf-time,x-nmf-signature,x-nmf-admin-session",
     });
   if (origins.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
   const json = (value: unknown, status = 200) =>
@@ -20,6 +21,9 @@ Deno.serve(async (request) => {
   if (origin && !origins.has(origin)) return json({ ok: false }, 403);
   if (request.method === "OPTIONS") return json({ ok: true });
   if (request.method !== "POST") return json({ ok: false }, 405);
+  if (env("NMF_ADMIN_HASH") && !await adminAuthorized(request)) {
+    return json({ ok: false, error: "관리자 인증이 필요합니다." }, 403);
+  }
   const raw = await request.text();
   if (raw.length > 150000) return json({ ok: false }, 413);
   const pw = env("NMF_PW"), time = request.headers.get("x-nmf-time") || "";

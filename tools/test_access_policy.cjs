@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict');
+require('../assets/access-policy.js');
+const {project,mergeGuest}=globalThis.NmfAccessPolicy;
+const state={settings:{fixed:[['PRIVATE_FIXED',999]],wage:12345,meals:{중식:{count:100,price:9999}}},staff:[{id:'a',name:'직원',wage:777,phone:'PRIVATE_PHONE',account:'PRIVATE_BANK'}],staffArchive:[{id:'b',name:'보관',bonus:999}],orders:{secret:111},staffPayments:{private:true},staffDeductions:{private:true},ticketLedger:{private:true},sales:{'2026-10':{'1|ticketIssued':999,'1|ticketBuyer':'PRIVATE_BUYER','1|중식':20,'1|cashCount|중식':3,'1|other':123}},roster:{'2026-10':{'a|1':{s:'09:00',e:'18:00',b:60},'a|adj':999}},recipes:[{menu:'국',item:'물',qty:100,price:888}],menus:{'2026-10':{'1|중식|n':100}},menuManualEdits:{},rosterEdits:{},salesEdits:{}};
+const publicState=project(state),serialized=JSON.stringify(publicState);
+for(const secret of ['PRIVATE','12345','9999','777','888','orders','staffPayments','staffDeductions','ticketIssued','bonus'])assert(!serialized.includes(secret),secret);
+assert.equal(publicState.sales['2026-10']['1|중식'],20);assert.equal(publicState.settings.meals.중식.count,100);
+const incoming=structuredClone(publicState),at=new Date().toISOString();
+incoming.settings.fixed=[];incoming.staff[0].wage=0;incoming.orders={};incoming.sales['2026-10']['1|중식']=0;incoming.salesEdits={'2026-10':{'1|중식':{at},'1|ticketIssued':{at}}};
+incoming.roster['2026-10']['a|1']={s:'10:00',e:'18:00',b:60};incoming.rosterEdits={'2026-10':{'a|1':{at},'a|adj':{at}}};
+incoming.menus['2026-10']['1|중식|n']=0;incoming.menuManualEdits={'2026-10':{'1|중식|n':{at}}};
+const merged=mergeGuest(state,incoming);
+assert.deepEqual(merged.settings,state.settings);assert.deepEqual(merged.staff,state.staff);assert.deepEqual(merged.orders,state.orders);assert.deepEqual(merged.staffPayments,state.staffPayments);
+assert.equal(merged.sales['2026-10']['1|ticketIssued'],999);assert.equal(merged.sales['2026-10']['1|other'],123);assert.equal(merged.sales['2026-10']['1|중식'],0);
+assert.equal(merged.roster['2026-10']['a|adj'],999);assert.equal(merged.roster['2026-10']['a|1'].s,'10:00');assert.equal(merged.menus['2026-10']['1|중식|n'],0);
+const invalid=structuredClone(incoming);invalid.sales['2026-10']['1|중식']=-1;assert.throws(()=>mergeGuest(state,invalid));
+const stale=structuredClone(incoming);stale.salesEdits['2026-10']['1|중식'].at='2020-01-01';assert.equal(mergeGuest(merged,stale).sales['2026-10']['1|중식'],0);
+console.log('ACCESS_POLICY_DEFAULT_DENY_PRIVATE_FIELDS_SAFE_GUEST_MERGE_ZERO_ROSTER_COUNTS_VALIDATION_STALE_OK');

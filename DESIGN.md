@@ -1,5 +1,13 @@
 # Design
 
+## Admin access boundary (2026-10-19)
+
+- Compact password form directly below the three app switches. No remembered admin login. Settings and Backup are private alongside money, private documents and payroll; general operational screens remain available. New visits/reloads/app switches require authentication again, and expired/BFCache sessions lock.
+- This is a server boundary, not CSS masking: default-deny projection on read; per-field clocked operational merges on write; private-document/backup/financial endpoint checks. Original shared-password encryption remains for existing background jobs, but anonymous direct state access must be revoked at cutover. Never include private historical seed/wages in the common-password production bundle.
+- Guest local cache contains projected fields only. Admin drafts use a high-entropy key released only after server authentication, held in memory, never the short PIN. Preserve old unsent drafts in private server backups before discarding references; warn on failure. Preserve all existing ledgers and permissions for cron/worker credentials.
+- Store payment editing distinguishes goods sold by ticket/card/cash from actual voucher count (10,000 won per voucher). Explicitly confirm conversion of legacy unclassified rows, preserve historical prices and avoid double-counting cash/card as voucher settlement. Blank actual voucher count must not invent recovered vouchers.
+- Imported Coupang date deletion is a folded review-list operation with confirmation and persistent deletion markers, not actual Coupang cancellation or ledger/inventory deletion. Product auto-catalog insertion preserves unknown retail price/pack conversion and deleted product identity.
+
 ## Source of truth
 
 - Status: Active for the management app, including finance and compact screen density. Preserve print typography and stored calculations.

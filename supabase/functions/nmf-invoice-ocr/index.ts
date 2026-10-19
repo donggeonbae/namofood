@@ -1,6 +1,7 @@
 // One-shot, review-only invoice OCR. No database/storage writes or invoice logging.
 // Secrets: NMF_PW, NMF_INVOICE_API_KEY / OPENCODE_GO_API_KEY / OPENCODE_API_KEY.
 // User-selected Go plan, honestly identified invoice client. Never fall back to paid Zen.
+import { adminAuthorized } from "../_shared/admin-auth.ts";
 import {
   applyLabelReview,
   failedLabelReview,
@@ -50,7 +51,7 @@ export function createHandler(dependencies: Dependencies = {}) {
       "Vary": "Origin",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers":
-        "authorization, apikey, content-type, x-nmf-time, x-nmf-signature",
+        "authorization, apikey, content-type, x-nmf-time, x-nmf-signature,x-nmf-admin-session",
     });
     if (origin && ORIGINS.has(origin)) {
       headers.set("Access-Control-Allow-Origin", origin);
@@ -88,6 +89,9 @@ export function createHandler(dependencies: Dependencies = {}) {
         );
       }
       const declaredLength = request.headers.get("content-length");
+      if (env("NMF_ADMIN_HASH") && !await adminAuthorized(request, env)) {
+        return json({ ok: false, error: "관리자 인증이 필요합니다." }, 403);
+      }
       if (declaredLength && Number(declaredLength) > BODY_LIMIT) {
         throw new OcrError("body_too_large", 413, "사진 요청이 너무 큽니다.");
       }

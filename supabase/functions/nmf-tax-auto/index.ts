@@ -1,14 +1,15 @@
 import { readState, sql } from "../_shared/database.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import {
-  buildTaxReport,
   buildCostReview,
+  buildTaxReport,
   kstDay,
   reviewTax,
   type TaxState,
 } from "../nmf-tax-nightly/lib.ts";
 import { equal, statusAuthorized } from "../nmf-tax-nightly/auth.ts";
 import { financeHash, inspectFinance } from "./debounce.ts";
+import { adminAuthorized } from "../_shared/admin-auth.ts";
 
 const env = (key: string, fallback = "") =>
   (Deno.env.get(key) || fallback).trim();
@@ -22,7 +23,7 @@ Deno.serve(async (request) => {
     Vary: "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "authorization,apikey,content-type,x-nmf-time,x-nmf-signature",
+      "authorization,apikey,content-type,x-nmf-time,x-nmf-signature,x-nmf-admin-session",
   });
   if (origins.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
   const json = (body: unknown, status = 200) =>
@@ -42,6 +43,9 @@ Deno.serve(async (request) => {
   }
   const password = env("NMF_PW");
   if (body?.action === "status") {
+    if (env("NMF_ADMIN_HASH") && !await adminAuthorized(request)) {
+      return json({ ok: false, error: "관리자 인증이 필요합니다." }, 403);
+    }
     const year = String(body.year || "");
     if (
       !/^20\d{2}$/.test(year) ||

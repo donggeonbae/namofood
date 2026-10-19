@@ -11,6 +11,35 @@ from cryptography.hazmat.primitives import hashes
 src, outdir, password = sys.argv[1], sys.argv[2], sys.argv[3]
 ITER = 600_000
 plain = open(src, 'rb').read()
+import re
+# The common app password must not unlock historical private seed data. Current
+# private state is served separately, only after server-side admin authentication.
+source = plain.decode('utf-8')
+match = re.search(r'^const SEED = (.+);$', source, re.MULTILINE)
+if not match:
+    raise ValueError('SEED boundary missing; refusing an unsafe production build')
+seed = json.loads(match.group(1))
+for field in ('staff', 'purch', 'stock'):
+    seed[field] = []
+seed['menu30'] = {}
+source = source[:match.start()] + 'const SEED = ' + json.dumps(seed, ensure_ascii=False) + ';' + source[match.end():]
+source = re.sub(r"^    for\(const e of state.staff\|\|\[\]\)if\(\['최동희','배선호','최영환'\].*?$", '', source, flags=re.MULTILINE)
+boot_marker = 'window.NMF_ACCESS_REQUIRED=false;/* NMF_ACCESS_BOOT */'
+if source.count(boot_marker) != 1:
+    raise ValueError('Access boot boundary missing; refusing an unsafe build')
+asset_dir = os.path.join(os.path.dirname(os.path.abspath(src)), 'assets')
+boot = 'window.NMF_ACCESS_REQUIRED=true;\n' + '\n'.join(open(os.path.join(asset_dir, name), encoding='utf-8').read() for name in ('access-policy.js','access.js'))
+source = source.replace(boot_marker, boot)
+source = source.replace('</head>', '''<style>
+#admin-access{padding:8px 10px;border:1px solid #ffffff35;border-radius:6px;margin:0 0 10px;font-size:12px;min-width:0;max-width:100%;box-sizing:border-box;flex-shrink:0}
+#admin-access form{display:grid;grid-template-columns:auto minmax(45px,1fr) auto;gap:6px;align-items:center}
+#admin-access input{width:100%;min-width:0;padding:7px;font-size:13px;box-sizing:border-box}
+#admin-access .btn{padding:7px 9px;font-size:12px;white-space:nowrap;width:auto;min-width:0;margin:0}
+#admin-access small{display:block;overflow-wrap:anywhere;color:#ffdbac}
+nav [hidden]{display:none!important}
+@media screen and (max-width:900px){#admin-access{flex:0 0 228px;width:228px;margin:0}}
+</style></head>''')
+plain = source.encode('utf-8')
 salt = secrets.token_bytes(16); iv = secrets.token_bytes(12)
 key = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=ITER).derive(password.encode('utf-8'))
 ct = AESGCM(key).encrypt(iv, plain, None)

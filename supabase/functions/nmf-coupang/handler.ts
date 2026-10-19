@@ -1,6 +1,7 @@
 import { equal, seal, signature, unseal, validRange } from "./protocol.mjs";
 import { organize } from "./ai.ts";
 import { issueDevice, validDevice, verifyDevice } from "./devices.ts";
+import { adminAuthorized } from "../_shared/admin-auth.ts";
 type Dependencies = {
   env: (key: string) => string;
   queue: any;
@@ -42,7 +43,7 @@ export function createHandler(
         "Vary": "Origin",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers":
-          "apikey,content-type,x-nmf-time,x-nmf-signature",
+          "apikey,content-type,x-nmf-time,x-nmf-signature,x-nmf-admin-session",
       });
     if (origins.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
     const json = (data: unknown, status = 200) =>
@@ -105,6 +106,9 @@ export function createHandler(
     }
     try {
       if (role === "app") {
+        if (env("NMF_ADMIN_HASH") && !await adminAuthorized(request, env)) {
+          return json({ ok: false, error: "관리자 인증이 필요합니다." }, 403);
+        }
         if (body.room !== "namostore") return json({ ok: false }, 403);
         if (body.action === "pair" || body.action === "remote_login") {
           if (env("NMF_COUPANG_WEB_LOGIN_DISABLED") === "1") {
