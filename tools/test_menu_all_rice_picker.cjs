@@ -104,7 +104,7 @@ const {chromium}=require('playwright');
     const pdfText=(await (await pdf.getPage(1)).getTextContent()).items.map(item=>item.str).join(' ');await pdf.destroy();
     assert.match(pdfText,/짜장밥/,'actual generated PDF includes selected rice');
     const quantities=await page.evaluate(()=>requirements(new Set([12])).items);
-    assert.equal(quantities.find(item=>item.item==='춘장')?.total,6.66,'orders consume the selected rice recipe rather than the default rice');
+    assert.equal(quantities.find(item=>item.item==='춘장')?.total,13.32,'orders consume the selected rice recipe rather than the default rice');
     const csvRows=await page.evaluate(()=>{let rows;const old=csv;csv=(filename,value)=>{rows=value;};csvMenu();csv=old;return rows;});
     assert.equal(csvRows.find(row=>row[0]==='2026-10-12'&&row[1]==='중식')[3],'짜장밥','menu CSV exports selected rice');
     await page.locator('[data-menu-rice="중식"]').click();

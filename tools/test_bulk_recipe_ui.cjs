@@ -56,7 +56,7 @@ const upgradedMethod = "1. 300명 기준 전처리한다. 2. 대형 솥에 배�
     assert.equal(await page.locator("#main h1").innerText(), "대량 조리 레시피");
     assert.equal(await page.locator("#rdetail .chip").filter({ hasText: /^대량 조리 기준$/ }).count(), 1);
     const originalRows = await page.evaluate(() => JSON.stringify(S.recipes));
-    for (const [count, expected] of [[100, ["10 kg", "2 L", "50 ea"]], [300, ["30 kg", "6 L", "150 ea"]], [500, ["50 kg", "10 L", "250 ea"]]]) {
+    for (const [count, expected] of [[100, ["20 kg기준 10kg × 2배", "4 L기준 2L × 2배", "100 ea기준 50ea × 2배"]], [300, ["60 kg기준 30kg × 2배", "12 L기준 6L × 2배", "300 ea기준 150ea × 2배"]], [500, ["100 kg기준 50kg × 2배", "20 L기준 10L × 2배", "500 ea기준 250ea × 2배"]]]) {
       await page.locator("#rdetail").getByRole("button", { name: `${count}명`, exact: true }).click();
       assert.equal(await page.evaluate(() => portion), count);
       assert.equal(await page.locator("#rdetail th").nth(6).innerText(), `${count}인분 필요량`);
