@@ -1,4 +1,5 @@
 import { materializeLedger } from "../supabase/functions/nmf-invoice-ocr/ledger.ts";
+import { createHandler } from "../supabase/functions/nmf-invoice-ocr/index.ts";
 import {
   type SheetCell,
   validateSheet,
@@ -214,6 +215,90 @@ const valid = responsesEnvelope({
 assert(
   valid.status === "completed" && valid.output[0].content[0].text === "{}",
   "completed native response normalizes without financial rewriting",
+);
+let nativeCalls = 0;
+const password = "offline-ledger-http",
+  stamp = String(Date.now()),
+  encoder = new TextEncoder();
+const handler = createHandler({
+  env: (
+    key,
+  ) => ({ NMF_PW: password, OPENCODE_GO_API_KEY: "offline-test" }[key] ||
+    ""),
+  fetchImpl: (async (_url, init) => {
+    nativeCalls++;
+    const req = JSON.parse(String(init?.body)),
+      labels = JSON.parse(req.messages[0].content[0].text);
+    return new Response(JSON.stringify({
+      type: "message",
+      role: "assistant",
+      model: GO_MODEL,
+      stop_reason: "end_turn",
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          items: labels.items.map((row: Record<string, unknown>) => ({
+            ...row,
+            uncertain: false,
+          })),
+        }),
+      }],
+    }));
+  }) as typeof fetch,
+});
+const hex = (v: ArrayBuffer) =>
+  [...new Uint8Array(v)].map((x) => x.toString(16).padStart(2, "0")).join("");
+const keyBytes = await crypto.subtle.importKey(
+  "raw",
+  encoder.encode(password),
+  { name: "HMAC", hash: "SHA-256" },
+  false,
+  ["sign"],
+);
+async function http(aware: boolean) {
+  const raw = JSON.stringify({
+    action: "extract",
+    app: "food",
+    documentType: "spreadsheet",
+    nonce: crypto.randomUUID(),
+    spreadsheet: sheet,
+    supportsLedgerReview: aware,
+  });
+  const hash = hex(await crypto.subtle.digest("SHA-256", encoder.encode(raw)));
+  const sig = hex(
+    await crypto.subtle.sign(
+      "HMAC",
+      keyBytes,
+      encoder.encode(`nmf-invoice:${hash}:${stamp}`),
+    ),
+  );
+  return handler(
+    new Request("https://offline/functions/v1/nmf-invoice-ocr", {
+      method: "POST",
+      headers: {
+        origin: "https://d-bae.com",
+        "content-type": "application/json",
+        "x-nmf-time": stamp,
+        "x-nmf-signature": sig,
+      },
+      body: raw,
+    }),
+  );
+}
+const stale = await http(false);
+assert(
+  stale.status === 409 &&
+    (await stale.json()).code === "client_update_required" && nativeCalls === 0,
+  "old open clients cannot accidentally count the ledger as new financial purchases",
+);
+const fresh = await http(true), freshData = await fresh.json();
+assert(
+  fresh.status === 200 && freshData.documents.length === 2 &&
+    nativeCalls === 1 &&
+    freshData.documents.every((d: { sourceAudit?: { sourceType: string } }) =>
+      d.sourceAudit?.sourceType === "period-ledger"
+    ),
+  "updated HTTP client receives all source-linked invoices with one native Haiku label review",
 );
 const thinking = responsesEnvelope({
   type: "message",

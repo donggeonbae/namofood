@@ -385,6 +385,20 @@ export function createHandler(dependencies: Dependencies = {}) {
                 }]),
               ),
             );
+          if (
+            sheetInvoices.some((row) =>
+              row.sourceAudit?.sourceType === "period-ledger"
+            ) && body.supportsLedgerReview !== true
+          ) {
+            // An already-open old web app would ignore sourceAudit and count
+            // the ledger again. Require the new reference-only import path.
+            sheetInvoices = undefined;
+            throw new OcrError(
+              "client_update_required",
+              409,
+              "원장 중복 합산을 막으려면 웹앱을 새로고침해 새 버전으로 바꾼 뒤 다시 올려 주세요.",
+            );
+          }
           const pooled: InvoiceDocument = {
             date: null,
             vendor: "",
