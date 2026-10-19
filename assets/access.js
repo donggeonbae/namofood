@@ -65,13 +65,17 @@
   };
   const privatePages=new Set(['pl','overview','fixed','settings','data']);
   let salesTab='sales';
-  function salesTabsHtml(){return '<div class="tabs noprint" role="tablist" aria-label="판매 업무"><button role="tab" data-sales-tab="sales" aria-selected="'+(salesTab==='sales')+'" class="'+(salesTab==='sales'?'on':'')+'" onclick="NmfAccess.showSalesTab(\'sales\')">판매실적</button><button role="tab" data-sales-tab="ticket" aria-selected="'+(salesTab==='ticket')+'" class="'+(salesTab==='ticket'?'on':'')+'" onclick="NmfAccess.showSalesTab(\'ticket\')">식권</button></div>';}
+  function ticketHistoryHtml(){
+    const dates=new Set();for(const key of Object.keys(S.sales[ym()]||{}))if(/^\d+\|(?:ticketIssued|ticketBuyer|ticketCompany)/.test(key))dates.add(dateKeyAt(ym(),Number(key.split('|')[0])));
+    const rows=[...dates].sort().reverse().map(date=>{const day=foodTicketDay(date);return '<tr><td><button class="btn small" onclick="NmfAccess.openTicketDate('+jsarg(date)+')">'+esc(date)+'</button></td><td>'+day.companies.map(c=>esc(c.name||'회사 미입력')).join(' · ')+'</td><td class="num">'+(day.issued===null?'미입력':num(day.issued,0)+'장')+'</td><td class="num">'+(day.issued===null?'미입력':won(day.amount))+'</td></tr>';}).join('');
+    return '<section class="card" data-ticket-history><h2>'+kmonth()+' 식권 거래 기록</h2><p class="hint">날짜를 누르면 기존 회사별 판매 내역을 열어 수정할 수 있습니다.</p><div class="tbl"><table><thead><tr><th>날짜</th><th>거래 회사</th><th>판매 식권</th><th>거래 금액</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+(rows?'':'<p class="hint">이 달에 입력된 회사 식권 거래가 없습니다. 다른 달은 위 날짜에서 선택하세요.</p>')+'</section>';
+  }
   function sharedSalesHtml(original){
     if(APP==='cafe')return cafeDailySalesHtml();
     if(APP==='store')return storeChannelSalesHtml(original());
     if(APP!=='food')return original();
-    if(salesTab==='ticket')return '<h1>식권</h1>'+salesTabsHtml()+periodPicker('sales')+foodTicketLedgerHtml(periodCurrent('sales').date);
-    const t=document.createElement('template');t.innerHTML=original();t.content.querySelectorAll('#food-ticket-ledger,#food-ticket-documents').forEach(el=>el.remove());t.content.querySelector('h1')?.insertAdjacentHTML('afterend',salesTabsHtml());return t.innerHTML;
+    if(salesTab==='ticket')return '<h1>식권</h1>'+periodPicker('sales')+foodTicketLedgerHtml(periodCurrent('sales').date)+ticketHistoryHtml();
+    const t=document.createElement('template');t.innerHTML=original();t.content.querySelectorAll('#food-ticket-ledger,#food-ticket-documents').forEach(el=>el.remove());return t.innerHTML;
   }
   const storeChannels=[['ticketQty','식권'],['cardQty','카드'],['cashQty','현금'],['creditQty','당일 외상']];
   function storeChannelSalesHtml(html){
@@ -173,7 +177,7 @@
       return t.innerHTML;
     }
     if(APP==='cafe'&&currentPage==='sales')return html;
-    const retained=[];for(const el of root.querySelectorAll('#food-ticket-ledger,#food-ticket-documents')){const marker=document.createComment('shared-ticket-operations');el.replaceWith(marker);retained.push([marker,el]);}
+    const retained=[];for(const el of root.querySelectorAll('#food-ticket-ledger,#food-ticket-documents,[data-ticket-history]')){const marker=document.createComment('shared-ticket-operations');el.replaceWith(marker);retained.push([marker,el]);}
     root.querySelectorAll('input').forEach(el=>{if(el.hasAttribute('data-sales-other')||/salesSet\([^)]*,\s*['"]other['"]/.test((el.getAttribute('oninput')||'')+' '+(el.getAttribute('onchange')||'')))el.dataset.publicEntry='other';});
     root.querySelectorAll('[data-admin-only],[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
     root.querySelectorAll('.kpi').forEach(el=>{if(/원|매출|인건비|급여|순익|수익|수당|사업자 부담|세금/.test(el.textContent))el.remove();});
@@ -224,10 +228,11 @@
     root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
     return t.innerHTML;
   }
-  window.NmfAccess={isAdmin,setStoreChannel,showSalesTab(tab){salesTab=tab==='ticket'?'ticket':'sales';go('sales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
+  window.NmfAccess={isAdmin,setStoreChannel,showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
+    if(APP==='food'){const ticketNav=document.createElement('button');ticketNav.dataset.p='ticketSales';ticketNav.innerHTML='<span class="ic">🎫</span>식권';ticketNav.addEventListener('click',()=>go('ticketSales'));document.querySelector('nav [data-p=sales]').after(ticketNav);}
     const originalTicketScope=foodTicketUiScope;foodTicketUiScope=function(){const before=foodTicketUi.scope,result=originalTicketScope();if(before!==foodTicketUi.scope)foodTicketUi.settingsOpen=true;return result;};foodTicketUi.settingsOpen=true;
     const originalStorePayment=storePaymentOpen;storePaymentOpen=function(day,id){originalStorePayment(day,id);const dialog=document.getElementById('store-payment-dialog');if(!dialog)return;const old=S.storeSales[dateKeyAt(ym(),day)+'|'+id],tickets=dialog.querySelector('[data-store-payment=tickets]')?.closest('label');tickets?.insertAdjacentHTML('beforebegin','<label class="f">당일 외상으로 판매한 상품 수<input data-store-payment="creditQty" type="number" min="0" step="1" value="'+(old?.creditQty??'')+'" placeholder="0"></label>');dialog.querySelector('p.hint:last-of-type').textContent='총 판매 수량 = 식권·카드·현금·외상 상품 수 합계. 카드·현금·외상은 당시 판매가 기준으로 매출에 포함합니다. 실제 받은 식권 장수는 따로 입력하며, 식권 회수에 현금·카드·외상 수량은 포함하지 않습니다.';};
     const originalPaidCurrent=staffPaymentCurrent;staffPaymentCurrent=function(row,month=ym()){const record=staffPayment(row.e.id,month);return record?.basis==='manual-check-v1'?!!record.paid:originalPaidCurrent(row,month);};
@@ -249,7 +254,7 @@
       if(!cloudRemoteAt||!revisions.has(cloud.room))return false;
       const before=cloudRemoteAt;try{const r=await call({action:'rest',method:'GET',path:'/rest/v1/rpc/nmf_state_revision?room='+encodeURIComponent(cloud.room)});if(!r.ok)return false;const [row]=await r.json();return cloudRemoteAt===before&&Date.parse(row?.updated_at)===Date.parse(before)&&row.revision===revisions.get(cloud.room);}catch{return false;}
     };
-    go=function(p){return originalGo(!isAdmin()&&privatePages.has(p)?'home':p);};
+    go=function(p){if(p==='ticketSales'){salesTab=APP==='food'?'ticket':'sales';p='sales';}else if(p==='sales')salesTab='sales';return originalGo(!isAdmin()&&privatePages.has(p)?'home':p);};
     const originals={...PAGES};
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
       if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
@@ -257,7 +262,7 @@
       const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):originals[p]();
       return isAdmin()?html:removeMoney(html,p);
     };
-    render=function(){paint();originalRender();if(isAdmin()&&page==='data'){
+    render=function(){paint();originalRender();if(APP==='food'){const ticket=page==='sales'&&salesTab==='ticket';document.querySelector('nav [data-p=ticketSales]')?.classList.toggle('on',ticket);document.querySelector('nav [data-p=sales]')?.classList.toggle('on',page==='sales'&&!ticket);if(ticket)history.replaceState(null,'','#ticketSales');}if(isAdmin()&&page==='data'){
       const card=document.createElement('div');card.className='card';card.innerHTML='<h2>이 기기 관리자 임시저장</h2><p class="hint">자동으로 서버 자료를 덮어쓰지 않습니다. 필요하면 JSON으로 내려받아 비교하세요.</p><button class="btn" id="admin-draft-download">임시저장 내려받기</button>';
       card.querySelector('button').onclick=async()=>{const blob=get.call(localStorage,KEY+'#admin-draft');if(!blob)return toast('임시저장이 없습니다.');try{const raw=await decryptText(password,blob);const url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='관리자_임시저장_'+todayKey()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{toast('임시저장을 열지 못했습니다.');}};document.getElementById('main').prepend(card);
     }};

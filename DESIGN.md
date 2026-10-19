@@ -2,6 +2,8 @@
 
 ## Admin access boundary (2026-10-19)
 
+- Navigation correction (1019-24): `식권` must be an independent sidebar button directly after `판매 실적`, not a nested tab inside it. Preserve `#ticketSales` on refresh, show existing dated ticket records with an open action, and keep the internal sales lifecycle for store-recovery/document refresh. No transaction rewrite or migration.
+
 - User amendment (1019-21): procurement invoices, their original photos/sheets and item amounts are shared work data; only aggregate monthly/payable summaries and card/AI payment matching remain admin-only. Food Sales has adjacent `판매실적` / `식권` tabs; corporate ticket transactions, documents, unit prices and opening configuration live in `식권`, with company settings initially expanded. Other-revenue entry stays public. Cafe sales use daily POS amount and optional other revenue, not cups.
 - Staff names/order/default hours/off days and store/restore/hide-from-archive operations remain shared; wages, allowances, deductions, contacts/accounts and payroll documents remain private. Archived staff paid acknowledgement is a shared status without exposing an amount; manual acknowledgement is explicitly separate from a net-pay fingerprint. Archive actions stack inside their cell, with no protruding buttons. Store channel goods counts use inline ticket/card/cash/credit fields; actual vouchers remain separate and credit is recognized once at the historical selling price.
 
