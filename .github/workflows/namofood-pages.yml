@@ -1,0 +1,77 @@
+name: Publish Namofood
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - ver.json
+      - coupang-login.html
+      - assets/**
+      - .nojekyll
+      - .github/workflows/namofood-pages.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: namofood-pages
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository == 'donggeonbae/namofood' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate and package encrypted public files
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
+          const html = fs.readFileSync('index.html', 'utf8');
+          const version = JSON.parse(fs.readFileSync('ver.json', 'utf8')).v;
+          assert.match(version, /^[a-zA-Z0-9-]+$/);
+          assert(html.includes("window.__VER='" + version + "'"), 'loader and version manifest must agree');
+          assert(!html.includes('const SEED = '), 'plaintext private app must never be published');
+          const match = html.match(/<script id="payload" type="application\/json">([^<]+)<\/script>/);
+          assert(match, 'encrypted payload is required');
+          const payload = JSON.parse(match[1]);
+          assert(payload.v === 1 && payload.iter >= 600000 && typeof payload.ct === 'string' && payload.ct.length > 1000, 'valid encrypted release required');
+          const files = ['index.html', 'ver.json', 'coupang-login.html', '.nojekyll',
+            'assets/access-policy.js', 'assets/access.js', 'assets/store-amounts.js',
+            'assets/menu-pdf.js', 'assets/sales-report.js', 'assets/sales-report-template.json',
+            'assets/invoice-sheet-worker.js', 'assets/xlsx-0.20.3.full.min.js', 'assets/xlsx-LICENSE.txt'];
+          const target = process.env.NMF_PAGES_DIR || '_site';
+          assert(!fs.existsSync(target), 'refuse to overwrite an existing output');
+          fs.mkdirSync(target);
+          for (const file of files) {
+            const stat = fs.lstatSync(file);
+            assert(stat.isFile() && !stat.isSymbolicLink(), 'only explicit regular public files: ' + file);
+            const dest = path.join(target, file);
+            fs.mkdirSync(path.dirname(dest), { recursive: true });
+            fs.copyFileSync(file, dest);
+          }
+          console.log(JSON.stringify({ version, publicFiles: files.length, plaintextIncluded: false }));
+          NODE
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          path: _site
+          retention-days: 1
+  deploy:
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy the validated public artifact
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
