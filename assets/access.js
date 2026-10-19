@@ -194,7 +194,7 @@
       root.querySelector('#staff-payroll-table')?.closest('.card')?.remove();
       // Directory operations remain shared; wage/contact/payroll documents stay private.
       root.querySelectorAll('.staff-detail-button,.staff-order-controls,.staff-insured').forEach(el=>el.remove());
-      const archiveHint=root.querySelector('#staffArchive > p.hint');if(archiveHint)archiveHint.textContent='보관 직원도 이름 수정·명단 복귀·삭제와 선택 월의 지급 완료 체크가 가능합니다. 명단에서 삭제해도 기존 근무 기록은 유지됩니다. 이전 이름으로도 검색할 수 있습니다.';
+      const archiveHint=root.querySelector('#staffArchive > p.hint');if(archiveHint)archiveHint.textContent='보관 직원도 이름 수정·명단 복귀·삭제와 선택 월의 지급 완료 체크가 가능합니다. 검색하면 명단에서 삭제된 직원·이전 이름도 함께 찾습니다. 같은 이름의 기록도 근무 월별로 각각 유지합니다.';
     }
     if(APP==='store'){
       const form=root.querySelector('#store-add-form');if(form)form.innerHTML='<h2>새 상품 추가</h2><p class="hint">새 상품·가격 설정은 관리자 모드에서 합니다. 등록된 상품의 판매수량은 일반 모드에서도 입력할 수 있습니다.</p>';
@@ -210,7 +210,7 @@
     root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
     return t.innerHTML;
   }
-  window.NmfAccess={isAdmin,showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
+  window.NmfAccess={isAdmin,archiveView:html=>isAdmin()?html:removeMoney(html,'roster'),showSalesTab(tab){go(tab==='ticket'?'ticketSales':'sales');},openTicketDate(date){if(!invoiceValidDate(date))return;S.month=date.slice(0,7);periodViews.sales={mode:'day',date};go('ticketSales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;

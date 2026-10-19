@@ -8,6 +8,9 @@ const converted=policy.storeSettlement(p,{tickets:1,cardAmount:12500,cashAmount:
 assert.throws(()=>policy.storeSettlement(p,{tickets:1,cardAmount:12501,cashAmount:0}),/카드/);
 assert.throws(()=>policy.storeSettlement(p,{tickets:-1,cardAmount:0,cashAmount:0}));
 assert.equal(policy.storeSettlement({...p,ticketUnits:null},{tickets:1,cardAmount:0,cashAmount:0}).qty,4,'old products default to price / 10,000 without rewriting history');
+assert.equal(typeof policy.itemsPerTicket,'function');assert.equal(policy.itemsPerTicket(p),4,'legacy 0.25 is displayed as four goods per ticket');
+for(const qty of [3,4,6])assert.equal(policy.storeSettlement({...p,itemsPerTicket:qty},{tickets:2,cardAmount:0,cashAmount:0}).qty,qty*2,'direct quantities avoid reciprocal rounding');
+assert.throws(()=>policy.storeSettlement({...p,itemsPerTicket:.5},{tickets:1,cardAmount:0,cashAmount:0}));
 const now=new Date().toISOString(),full={settings:{defaultBreakZeroInitialized:true},staff:[],staffArchive:[],storeProducts:{cola:p},storeSales:{},orders:{},sales:{}};
 const draft=policy.project(full);assert.equal(draft.storeProducts.cola.price,2500);assert.equal(draft.storeProducts.cola.ticketUnits,.25);assert(!Object.hasOwn(draft.storeProducts.cola,'cost'));
 draft.storeSales['2026-10-19|cola']={id:'cola',date:'2026-10-19',...converted,price:1,cost:1,ticketUnits:1,at:now};

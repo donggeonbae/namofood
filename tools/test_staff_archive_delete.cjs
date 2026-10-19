@@ -116,7 +116,9 @@ async function printedText(page) {
     assert.equal(dialogs.length, duplicateDialogs);
 
     await page.locator('#staffArchiveSearch').fill('이전 별칭');
-    assert.deepEqual(await uiRows(), [], 'hidden records remain absent even when searching their exact historical alias');
+    assert.deepEqual(await uiRows(), ['arch-12'], 'historical aliases now find preserved hidden records without relisting them');
+    assert.equal(await deletion('arch-12').count(), 0);
+    assert.equal(await page.locator('[data-staff-archive-id="arch-12"] .chip').innerText(), '기록만 보관');
     await page.locator('button[data-staff-archive-open="arch-12"]').focus();
     await page.locator('button[data-staff-archive-open="arch-12"]').press('Enter');
     assert.equal(await page.locator('#staffArchiveSearch').inputValue(), '');
@@ -217,13 +219,16 @@ async function printedText(page) {
     await page.locator('#staffArchiveSearch').fill('보관 0');
     assert.deepEqual(await uiRows(), ['arch-00']);
     await deletion('arch-00').click();
-    assert.deepEqual(await uiRows(), [], 'deleting a searched result keeps the query and correctly shows an empty result');
+    assert.deepEqual(await uiRows(), ['arch-00'], 'explicit search now includes preserved hidden records');
+    assert.equal(await deletion('arch-00').count(), 0, 'search never relists a deleted person');
+    assert.equal(await page.locator('[data-staff-archive-id="arch-00"] .chip').innerText(), '기록만 보관');
     assert.equal(await page.locator('#staffArchiveSearch').inputValue(), '보관 0');
     const noHistory = await page.evaluate(() => structuredClone(findStaff('arch-00')));
     await page.evaluate(() => { applyState({ staff: [], staffArchive: [], roster: {}, settings: structuredClone(S.settings) }); render(); });
     assert.deepEqual(await page.evaluate(() => findStaff('arch-00')), noHistory, 'an empty older import cannot discard the hidden record even if it has no shifts');
     assert.equal(await page.evaluate(() => S.staffEdits['arch-00'].listed), false);
-    assert.equal(await page.locator('input[data-staff-archive-name="arch-00"]').count(), 0);
+    assert.equal(await page.locator('input[data-staff-archive-name="arch-00"]').count(), 1, 'the retained search can find the hidden record after an older import');
+    assert.equal(await deletion('arch-00').count(), 0);
 
     await page.evaluate(incoming => { S = normalize(incoming); cloudStaffBase = null; staffArchiveSearch = ''; staffArchivePage = 2; staffArchiveOpen = true; render(); }, structuredClone(hiddenState));
     const newerArchived = structuredClone(hiddenState);

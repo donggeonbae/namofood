@@ -19,22 +19,25 @@
     s.settings.defaultBreakMinutes=0;s.settings.defaultBreakZeroInitialized=true;return s;
   }
   const recipeFields=['comp','menu','item','qty','unit','storage','loss','form','method','allergy'];
-  const productFields=['id','name','category','unit','price','ticketUnits','at','deleted','sourceIdentity','sourceSpec'];
-  const saleFields=['id','date','name','category','unit','price','ticketUnits','settlementMode','cardAmount','cashAmount','qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'];
+  const productFields=['id','name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','sourceIdentity','sourceSpec'];
+  const saleFields=['id','date','name','category','unit','price','ticketUnits','itemsPerTicket','settlementMode','cardAmount','cashAmount','qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'];
   const priced=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
   const priceConfigured=v=>Object.hasOwn(v,'price')?priced(v.price):v.priceConfigured===true;
   const ticketRate=p=>p.ticketUnits==null?(priced(p.price)?p.price/10000:null):p.ticketUnits;
+  const itemsPerTicket=p=>p.itemsPerTicket!=null?p.itemsPerTicket:ticketRate(p)==null?null:ticketRate(p)>0?1/ticketRate(p):0;
   const validRate=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=1000000&&Math.abs(v*1000000-Math.round(v*1000000))<0.0001;
   function storeSettlement(product,values){
     const price=product.price,rate=ticketRate(product),tickets=values.tickets,cardAmount=values.cardAmount,cashAmount=values.cashAmount;
-    if(!priced(price)||!validRate(rate))throw Error('상품 판매가와 개당 식권 수를 먼저 설정하세요.');
+    const direct=product.itemsPerTicket!=null;
+    if(!priced(price)||!validRate(direct?product.itemsPerTicket:rate))throw Error('상품 판매가와 식권 1장당 수량을 먼저 설정하세요.');
     if(!Number.isSafeInteger(tickets)||tickets<0||tickets>1000000)throw Error('받은 식권은 0 이상의 정수 장수로 입력하세요.');
     const goods=(amount,label)=>{if(!priced(amount)||amount>1e12)throw Error(label+' 금액은 0 이상의 정수 원으로 입력하세요.');if(!amount)return 0;if(!price||amount%price)throw Error(label+' 금액이 판매가로 나누어지지 않습니다. 결제 금액을 확인하세요.');return amount/price;};
-    const scaled=Math.round(rate*1000000),ticketScaled=BigInt(tickets)*1000000n;
-    if(tickets&&(!scaled||ticketScaled%BigInt(scaled)))throw Error('식권 장수가 개당 식권 수로 나누어지지 않습니다. 상품 기준을 확인하세요.');
-    const ticketQty=tickets?Number(ticketScaled/BigInt(scaled)):0,cardQty=goods(cardAmount,'카드'),cashQty=goods(cashAmount,'현금'),qty=ticketQty+cardQty+cashQty;
+    let ticketQty=0;
+    if(direct){const scaled=BigInt(Math.round(product.itemsPerTicket*1000000))*BigInt(tickets);if(tickets&&(!product.itemsPerTicket||scaled%1000000n))throw Error('식권 장수 × 1장당 수량이 상품 개수로 나누어지지 않습니다.');ticketQty=Number(scaled/1000000n);}
+    else{const scaled=Math.round(rate*1000000),ticketScaled=BigInt(tickets)*1000000n;if(tickets&&(!scaled||ticketScaled%BigInt(scaled)))throw Error('식권 장수가 상품 개수로 나누어지지 않습니다. 상품 기준을 확인하세요.');ticketQty=tickets?Number(ticketScaled/BigInt(scaled)):0;}
+    const cardQty=goods(cardAmount,'카드'),cashQty=goods(cashAmount,'현금'),qty=ticketQty+cardQty+cashQty;
     if(!Number.isSafeInteger(qty)||qty>1000000)throw Error('하루 상품 판매 수량은 1,000,000개 이하로 입력하세요.');
-    return {settlementMode:'amount-v1',paymentSplit:true,ticketUnits:rate,tickets,cardAmount,cashAmount,ticketQty,cardQty,cashQty,creditQty:0,qty};
+    return {settlementMode:'amount-v1',paymentSplit:true,...(direct?{itemsPerTicket:product.itemsPerTicket}:{ticketUnits:rate}),tickets,cardAmount,cashAmount,ticketQty,cardQty,cashQty,creditQty:0,qty};
   }
   const stockFields=['id','orderNo','date','name','spec','unit','qty','storeProductId','storeUnitsPerPack','at','deleted'];
   const orderFields=['id','date','vendor','invoiceNo','note','ocr','rawText','subtotal','tax','total','previousBalance','balanceTotal','warnings','invoicePhoto','invoiceFile'];
@@ -197,14 +200,14 @@
     for(const [id,p]of Object.entries(incoming.storeProducts||{})){
       const old=out.storeProducts[id];if(!safeKey(id)||!clock(p)||old&&Date.parse(p.at)<=Date.parse(old.at||'1970-01-01'))continue;
       if(['name','category','unit'].some(k=>typeof p[k]!=='string'||!p[k].trim()||p[k].length>100))throw Error('invalid_product');
-      if(p.price!=null&&!priced(p.price)||p.ticketUnits!=null&&!validRate(p.ticketUnits))throw Error('invalid_product_price_or_ticket_rate');
-      out.storeProducts[id]={...(old||{id,cost:null}),...pick(p,['name','category','unit','price','ticketUnits','at','deleted','sourceIdentity','sourceSpec'])};
+      if(p.price!=null&&!priced(p.price)||p.ticketUnits!=null&&!validRate(p.ticketUnits)||p.itemsPerTicket!=null&&!validRate(p.itemsPerTicket))throw Error('invalid_product_price_or_ticket_rate');
+      out.storeProducts[id]={...(old||{id,cost:null}),...pick(p,['name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','sourceIdentity','sourceSpec'])};
     }
     out.storeSales||={};
     for(const [key,r]of Object.entries(incoming.storeSales||{})){
       if(!safeKey(key)||!r||!clock(r)||!/^20\d{2}-\d{2}-\d{2}$/.test(r.date)||key!==r.date+'|'+r.id)continue;
       const old=out.storeSales[key],product=out.storeProducts[r.id];if(!old&&!product||old&&Date.parse(r.at)<=Date.parse(old.at||'1970-01-01'))continue;
-      const base=old||{id:r.id,date:r.date,name:product.name,category:product.category,unit:product.unit,price:product.price,cost:product.cost,ticketUnits:ticketRate(product)};
+      const base=old||{id:r.id,date:r.date,name:product.name,category:product.category,unit:product.unit,price:product.price,cost:product.cost,ticketUnits:ticketRate(product),...(product.itemsPerTicket!=null?{itemsPerTicket:product.itemsPerTicket}:{})};
       if(r.settlementMode==='amount-v1'){
         const result=storeSettlement({...base,ticketUnits:base.ticketUnits??ticketRate({price:base.price})},r);
         if(result.qty!==r.qty||['ticketQty','cardQty','cashQty','creditQty'].some(k=>result[k]!==r[k]))throw Error('invalid_store_derived_quantity');
@@ -226,5 +229,5 @@
     }
     return out;
   }
-  root.NmfAccessPolicy={project,mergeGuest,operations,initializeBreakDefaults,storeSettlement,ticketRate};
+  root.NmfAccessPolicy={project,mergeGuest,operations,initializeBreakDefaults,storeSettlement,ticketRate,itemsPerTicket};
 })(globalThis);
