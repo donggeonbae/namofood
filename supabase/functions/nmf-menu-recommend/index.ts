@@ -259,11 +259,11 @@ Deno.serve(async (request: Request) => {
         baseUrl: env("OPENCODE_BASE_URL", "https://opencode.ai/zen/go/v1"),
         primaryModel: env(
           "NMF_MENU_RECOMMEND_MODEL",
-          env("NMF_MENU_MODEL", "deepseek-v4.1-flash"),
+          env("NMF_MENU_MODEL", "claude-haiku-5-5"),
         ),
         fallbackModel: env(
           "NMF_MENU_RECOMMEND_FALLBACK_MODEL",
-          env("NMF_MENU_FALLBACK_MODEL", "minimax-m3"),
+          env("NMF_MENU_FALLBACK_MODEL", "claude-haiku-5-5"),
         ),
         timeoutMs: Math.min(
           55_000,

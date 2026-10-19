@@ -15,7 +15,7 @@ $plainZen = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropS
 $cron = -join ((1..40) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })   # cron ↔ 함수 공유 비밀 (자동 생성)
 
 npx --yes supabase link --project-ref $ref | Out-Null
-npx --yes supabase secrets set "NMF_PW=$plainPw" "OPENCODE_API_KEY=$plainZen" "NMF_CRON_SECRET=$cron" "NMF_RECIPE_MODEL=deepseek-v4.1-flash" "NMF_RECIPE_FALLBACK_MODEL=minimax-m3"
+npx --yes supabase secrets set "NMF_PW=$plainPw" "OPENCODE_API_KEY=$plainZen" "NMF_CRON_SECRET=$cron" "NMF_RECIPE_MODEL=claude-haiku-5-5" "NMF_RECIPE_FALLBACK_MODEL=claude-haiku-5-5"
 if (-not $?) { throw "secrets set 실패" }
 
 Write-Host "`n[2/5] 식단 자동 작성 중지 확인 후 마이그레이션 적용"

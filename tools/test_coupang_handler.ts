@@ -146,12 +146,12 @@ const order = {
 let providerCalls = 0;
 const provider = (async (url: RequestInfo | URL, options?: RequestInit) => {
   assert(
-    String(url) === "https://opencode.ai/zen/go/v1/responses",
+    String(url) === "https://opencode.ai/inference/go/anthropic/v1/messages",
     "Go endpoint only",
   );
   const body = JSON.parse(String(options?.body));
   assert(
-    body.model === "gpt-6-luna" && body.store === false,
+    body.model === "claude-haiku-5-5" && !("store" in body),
     "requested model, no response storage",
   );
   assert(

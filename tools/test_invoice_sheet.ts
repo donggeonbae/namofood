@@ -57,13 +57,11 @@ const mapping = {
 const wire = (value: unknown) =>
   new Response(
     JSON.stringify({
-      status: "completed",
-      output: [{
-        type: "message",
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: JSON.stringify(value) }],
-      }],
+      type: "message",
+      role: "assistant",
+      model: "claude-haiku-5-5",
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify(value) }],
     }),
   );
 let calls: Record<string, unknown>[] = [], current: unknown = mapping;
@@ -77,7 +75,7 @@ const handler = createHandler({
     const body = JSON.parse(String(init?.body));
     calls.push(body);
     assert(
-      body.input[0].content.some((c: { text?: string }) =>
+      body.messages[0].content.some((c: { text?: string }) =>
         /JSON/.test(c.text || "")
       ),
       "JSON mode declares its format in user input as well as system instructions",

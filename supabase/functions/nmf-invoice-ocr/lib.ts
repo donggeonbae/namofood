@@ -78,7 +78,7 @@ const object = (value: unknown): Record<string, unknown> => {
   }
   return value as Record<string, unknown>;
 };
-function text(value: unknown, max = 200): string {
+function text(value: unknown, max = 500): string {
   if (value == null) return "";
   if (typeof value !== "string") throw invalid();
   return [...value].filter((character) =>
@@ -382,7 +382,7 @@ function labeledTransactionDate(raw: string): string | null {
 }
 export function validateDocument(value: unknown): InvoiceDocument {
   const source = object(value);
-  if (!Array.isArray(source.items) || source.items.length > 200) {
+  if (!Array.isArray(source.items) || source.items.length > 1000) {
     throw invalid();
   }
   const document: InvoiceDocument = {
@@ -607,7 +607,7 @@ function reviewLabels(
 ): { name: string; spec: string; unit: string } {
   const row = object(value);
   for (
-    const [key, limit] of [["name", 200], ["spec", 200], ["unit", 24]] as const
+    const [key, limit] of [["name", 500], ["spec", 500], ["unit", 24]] as const
   ) {
     if (
       typeof row[key] !== "string" || [...row[key] as string].length > limit

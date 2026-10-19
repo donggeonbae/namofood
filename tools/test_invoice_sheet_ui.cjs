@@ -1,7 +1,7 @@
 // Real browser + worker parsing; all ledger, source storage and AI calls isolated.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),crypto=require('node:crypto'),{chromium}=require('playwright');
 const root=path.join(__dirname,'..'),source=fs.readFileSync(path.join(root,'나모푸드_관리앱.html'),'utf8'),password='offline-sheet-password';
-(async()=>{const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'}),context=await browser.newContext({acceptDownloads:true}),page=await context.newPage(),errors=[],db=new Map();let aiCalls=0,failStore=true,dataReads=0;
+(async()=>{const browser=await chromium.launch({headless:true,executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'}),context=await browser.newContext({acceptDownloads:true}),page=await context.newPage(),errors=[],db=new Map();let aiCalls=0,failStore=true,dataReads=0,ledgerMode=false;
  page.on('pageerror',e=>errors.push(e.message));
  await context.addInitScript(pw=>{sessionStorage.setItem('nmf_session_pw',pw);localStorage.setItem('nmf_pw',pw);localStorage.setItem('nmf_cloud_bootstrap_done','1');},password);
  await context.route('**/*',async route=>{const q=route.request(),u=new URL(q.url());
@@ -12,8 +12,8 @@ const root=path.join(__dirname,'..'),source=fs.readFileSync(path.join(root,'나�
    assert(body.spreadsheet.cells.some(c=>c.a==='A2'&&c.v==='26-10-12'),'actual worker sends original date text');
    await new Promise(r=>setTimeout(r,50));
    return route.fulfill({json:{ok:true,documentType:'spreadsheet',model:'offline-fixture',processedAt:'2026-10-17T00:00:00Z',labelReview:{status:'completed',model:'offline',reviewedRows:3,changedRows:0},documents:[
-    {sourceKey:'1'.repeat(64),sourceRefs:['A2','C2','E2'],document:{date:'2026-10-12',vendor:'검증유통',total:30000,tax:null,rawText:'A2: 26-10-12\nC2: 양파',warnings:[],items:[{name:'양파',qty:2,price:15000,amt:30000,tax:0},{name:'세제',qty:'생수×3',price:null,amt:null,tax:null}]}},
-    {sourceKey:'2'.repeat(64),sourceRefs:['A4','C4','E4'],document:{date:'2026-10-13',vendor:'검증유통',total:5000,rawText:'A4: 26-10-13\nC4: 당근',warnings:[],items:[{name:'당근',qty:1,amt:5000}]}},
+    {...(ledgerMode?{sourceAudit:{sourceType:'period-ledger',rowCount:2,sheetItemCount:3,periodTotal:35000,totalMatches:true}}:{}),sourceKey:'1'.repeat(64),sourceRefs:['A2','C2','E2'],document:{date:'2026-10-12',vendor:'검증유통',total:30000,tax:null,rawText:'A2: 26-10-12\nC2: 양파',warnings:[],items:[{name:'양파',qty:2,price:15000,amt:30000,tax:0},{name:'세제',qty:'생수×3',price:null,amt:null,tax:null}]}},
+    {...(ledgerMode?{sourceAudit:{sourceType:'period-ledger',rowCount:1,sheetItemCount:3,periodTotal:35000,totalMatches:true}}:{}),sourceKey:'2'.repeat(64),sourceRefs:['A4','C4','E4'],document:{date:'2026-10-13',vendor:'검증유통',total:5000,rawText:'A4: 26-10-13\nC4: 당근',warnings:[],items:[{name:'당근',qty:1,amt:5000}]}},
    ]}});
   }
   if(u.hostname==='sheet-store.namofood.test'&&u.pathname==='/rest/v1/namofood_state'){
@@ -39,6 +39,7 @@ const root=path.join(__dirname,'..'),source=fs.readFileSync(path.join(root,'나�
   assert(await page.evaluate(()=>{const before=structuredClone(S);delete before.orders['2026-10'][0].invoiceFile;return taxAiFinanceKey(before)===taxAiFinanceKey(S);}), 'attachment-only edits do not change financial hash');
   assert(await page.evaluate(()=>{const remote=structuredClone(S);const left=S.orders['2026-10'][0],right=remote.orders['2026-10'][0];delete right.invoiceFile;const target=structuredClone(right);preserveInvoicePhoto(target,left,right);return !!target.invoiceFile;}),'stale financial edits preserve original file references');
   for(const width of [1920,390,320]){await page.setViewportSize({width,height:1000});assert(await page.evaluate(()=>document.getElementById('main').scrollWidth<=document.getElementById('main').clientWidth+1),'no page overflow '+width);}
+  ledgerMode=true;await page.locator('#invoice-files').setInputFiles({name:'기간원장.csv',mimeType:'text/csv',buffer:Buffer.concat([bytes,Buffer.from('\n')])});await page.waitForFunction(()=>!invoiceOcr.busy,{},{timeout:40000});const preserved=await page.evaluate(()=>{const all=Object.values(S.orders).flat();return {financial:all.filter(invoiceFinancial).length,financialTotal:all.filter(invoiceFinancial).reduce((n,o)=>n+orderAmt(o),0),refs:all.filter(o=>o.ocrMeta?.referenceOnly).map(o=>({source:o.ocrMeta.sourceAudit?.sourceType,file:!!o.invoiceFile,items:o.items.length}))};});assert.equal(preserved.financial,2);assert.equal(preserved.financialTotal,35000);assert.equal(preserved.refs.length,2);assert(preserved.refs.every(o=>o.source==='period-ledger'&&o.file),'overlapping ledger retains every item and original file, excluded from all financial totals without duplicate dialogs');
   assert.deepEqual(errors,[]);console.log('INVOICE_SHEET_BROWSER_WORKER_UPLOAD_HMAC_PARTIAL_RETRY_DEDUP_ENCRYPTED_ORIGINAL_DOWNLOAD_MOBILE_OK');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

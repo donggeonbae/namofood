@@ -1,5 +1,6 @@
 // 나모푸드 레시피 자동 채움 — 순수 로직 (nmf_cloud.mjs 와 같은 암호화/병합 규칙)
 // Deno/Edge Runtime 전용: Web Crypto + CompressionStream 사용
+import { goEndpoint } from "../_shared/opencode-go.ts";
 import {
   assertMealMenuAllowed,
   prohibitedMenuReason,
@@ -653,7 +654,7 @@ export type OpenCodeProtocol = "chat-completions" | "messages";
 /** OpenCode Go 모델 표의 endpoint 구분을 따른다. */
 export function openCodeProtocol(model: string): OpenCodeProtocol {
   const id = model.trim().toLowerCase().replace(/^opencode-go\//, "");
-  return /^(minimax-m|qwen3\.)/.test(id) ? "messages" : "chat-completions";
+  return /^(claude-|minimax-m|qwen3\.)/.test(id) ? "messages" : "chat-completions";
 }
 
 function responseText(content: unknown): string {
@@ -826,6 +827,7 @@ async function callRecipeModel(
   const path = protocol === "messages" ? "messages" : "chat/completions";
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "User-Agent": "namofood-recipe/1.0",
     Authorization: `Bearer ${o.apiKey}`,
     "x-opencode-session": o.sessionId?.() || crypto.randomUUID(),
   };
@@ -835,7 +837,7 @@ async function callRecipeModel(
   }
   let r: Response;
   try {
-    r = await fetchImpl(`${o.baseUrl.replace(/\/$/, "")}/${path}`, {
+    r = await fetchImpl(goEndpoint(o.baseUrl, model, path), {
       method: "POST",
       headers,
       signal: AbortSignal.timeout(o.timeoutMs),

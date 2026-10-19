@@ -66,7 +66,7 @@ let calls = 0;
 const fetcher = ((_url: unknown, opts: RequestInit) => {
   calls++;
   const req = JSON.parse(String(opts.body)),
-    input = JSON.parse(req.input[0].content[0].text.split("\n").at(-1));
+    input = JSON.parse(req.messages[0].content[0].text.split("\n").at(-1));
   assert(
     input.costReview.benchmark.sample === 78 &&
       input.costReview.months["2026-10"].foodRatio === .7,
@@ -100,7 +100,7 @@ const fetcher = ((_url: unknown, opts: RequestInit) => {
 const ai = await reviewTax(report, {
   apiKey: "fixture",
   baseUrl: "https://opencode.ai/zen/go/v1",
-  model: "gpt-6-luna",
+  model: "claude-haiku-5-5",
   fetcher,
 });
 assert(

@@ -190,7 +190,7 @@ export function splitDateChunks(
 export function openCodeProtocol(model: string): OpenCodeProtocol {
   const id = model.trim().toLowerCase().replace(/^opencode-go\//, "");
   // 2026-09-25 기준 MiniMax M3/M2.x와 Qwen3.x는 /messages 이다.
-  return /^(minimax-m|qwen3\.)/.test(id) ? "messages" : "chat-completions";
+  return /^(claude-|minimax-m|qwen3\.)/.test(id) ? "messages" : "chat-completions";
 }
 
 function textFromContent(content: unknown): string {

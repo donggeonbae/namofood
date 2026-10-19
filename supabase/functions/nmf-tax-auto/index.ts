@@ -65,7 +65,7 @@ Deno.serve(async (request) => {
             (env("NMF_TAX_API_KEY") || env("NMF_INVOICE_API_KEY") ||
               env("OPENCODE_GO_API_KEY") || env("OPENCODE_API_KEY")),
         ),
-        model: env("NMF_TAX_MODEL", "gpt-6-luna"),
+        model: env("NMF_TAX_MODEL", "claude-haiku-5-5"),
         pending: Boolean(q?.needs_inspection || q?.due_at),
         dueAt: q?.due_at || null,
         last: q
@@ -131,7 +131,7 @@ Deno.serve(async (request) => {
       apiKey: env("NMF_TAX_API_KEY") || env("NMF_INVOICE_API_KEY") ||
         env("OPENCODE_GO_API_KEY") || env("OPENCODE_API_KEY"),
       baseUrl: env("NMF_TAX_BASE_URL", "https://opencode.ai/zen/go/v1"),
-      model: env("NMF_TAX_MODEL", "gpt-6-luna"),
+      model: env("NMF_TAX_MODEL", "claude-haiku-5-5"),
     });
     const cipher = await encryptText(
       password,

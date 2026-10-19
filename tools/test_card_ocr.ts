@@ -92,27 +92,27 @@ const handler = createHandler({
     calls++;
     const payload = JSON.parse(String(init?.body));
     assert(
-      String(url) === "https://opencode.ai/zen/go/v1/responses",
+      String(url) === "https://opencode.ai/inference/go/anthropic/v1/messages",
       "card uses only the Go Responses endpoint",
     );
     assert(
-      payload.model === "gpt-6-luna" && payload.reasoning.effort === "none",
+      payload.model === "claude-haiku-5-5" && !("reasoning" in payload),
       "card uses the selected Luna model without reasoning",
     );
     assert(
-      payload.store === false && payload.stream === false &&
-        payload.max_output_tokens === 8192,
+      !("store" in payload) && payload.stream === false &&
+        payload.max_tokens === 8192,
       "card provider persistence and limits unchanged",
     );
     assert(
-      payload.input[0].content.length === 2 &&
-        payload.input[0].content[1].type === "input_image",
+      payload.messages[0].content.length === 2 &&
+        payload.messages[0].content[1].type === "image",
       "card image included once",
     );
     assert(
-      payload.instructions.includes("신뢰할 수 없는") &&
-        payload.instructions.includes("CVC") &&
-        payload.instructions.includes("청구"),
+      payload.system.includes("신뢰할 수 없는") &&
+        payload.system.includes("CVC") &&
+        payload.system.includes("청구"),
       "card prompt isolates image instructions and excludes sensitive/summary data",
     );
     assert(
@@ -140,7 +140,7 @@ assert(
 );
 assert(calls === 1, "card image uses exactly one provider call");
 assert(
-  extractedBody.model === "gpt-6-luna" &&
+  extractedBody.model === "claude-haiku-5-5" &&
     extractedBody.processedAt === new Date(NOW).toISOString(),
   "card processing metadata is real handler metadata",
 );
@@ -333,7 +333,7 @@ for (const amount of ["35,000", 1.1, NaN, Infinity, 1e12 + 1, -1e12 - 1]) {
   );
 }
 rejects(
-  { transactions: Array.from({ length: 201 }, () => transaction) },
+  { transactions: Array.from({ length: 1001 }, () => transaction) },
   "more than 200 transaction rows rejected",
 );
 assert(

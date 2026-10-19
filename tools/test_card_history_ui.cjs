@@ -56,11 +56,11 @@ async function fixture(browser) {
           assert.equal(request.headers()['x-nmf-signature'], createHmac('sha256', password).update('nmf-invoice:' + digest + ':' + at).digest('hex'));
           assert.equal(request.headers().apikey, 'offline-anon-fixture'); assert.equal(body.app, 'food'); assert.equal(body.documentType, 'card');
           requests.push(body);
-          if (body.action === 'status') return route.fulfill({ json: { ok: true, configured: true, model: 'gpt-6-luna', provider: 'opencode-go', documentTypes: ['invoice', 'card'] } });
+          if (body.action === 'status') return route.fulfill({ json: { ok: true, configured: true, model: 'claude-haiku-5-5', provider: 'opencode-go', documentTypes: ['invoice', 'card'] } });
           assert.equal(body.action, 'extract'); assert.equal(body.image.mime, 'image/jpeg');
           const planned = responses.shift(); assert(planned, 'each photo has an explicit synthetic response'); if (planned.gate) await planned.gate;
           if (planned.status) return route.fulfill({ status: planned.status, json: { ok: false, error: planned.error } });
-          return route.fulfill({ json: { ok: true, documentType: 'card', document: planned.document, model: 'gpt-6-luna', imageSha256: createHash('sha256').update(Buffer.from(body.image.data, 'base64')).digest('hex'), processedAt: '2026-10-11T00:00:00.000Z' } });
+          return route.fulfill({ json: { ok: true, documentType: 'card', document: planned.document, model: 'claude-haiku-5-5', imageSha256: createHash('sha256').update(Buffer.from(body.image.data, 'base64')).digest('hex'), processedAt: '2026-10-11T00:00:00.000Z' } });
         }
         if (url.origin === 'https://offline-cloud.namofood.test' && url.pathname === '/rest/v1/namofood_state') {
           if (request.method() === 'GET') return route.fulfill({ json: remote ? [remote] : [] });

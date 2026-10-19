@@ -75,7 +75,7 @@ let calls = 0;
 const fake = ((_url: unknown, options: RequestInit) => {
   const request = JSON.parse(String(options.body));
   eq(
-    /json/i.test(request.input[0].content[0].text),
+    /json/i.test(request.messages[0].content[0].text),
     true,
     "JSON mode instruction in input, not only system instructions",
   );
@@ -109,7 +109,7 @@ const fake = ((_url: unknown, options: RequestInit) => {
 const review = await reviewTax(report, {
   apiKey: "fixture",
   baseUrl: "https://opencode.ai/zen/go/v1",
-  model: "gpt-6-luna",
+  model: "claude-haiku-5-5",
   fetcher: fake,
 });
 eq(calls, 1, "single AI call");
@@ -124,7 +124,7 @@ try {
   await reviewTax(report, {
     apiKey: "fixture",
     baseUrl: "https://evil.test",
-    model: "gpt-6-luna",
+    model: "claude-haiku-5-5",
     fetcher: fake,
   });
 } catch {

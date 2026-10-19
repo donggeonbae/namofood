@@ -55,9 +55,9 @@ Deno.serve(async (request) => {
     }, 400);
   }
   if (!candidates.length) {
-    return json({ ok: true, matches: [], model: "gpt-6-luna" });
+    return json({ ok: true, matches: [], model: "claude-haiku-5-5" });
   }
-  const hash = await sha(JSON.stringify(candidates)),
+  const hash = await sha(JSON.stringify(["claude-haiku-5-5", candidates])),
     token = crypto.randomUUID(),
     room = body.room;
   let claimed = false;
@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
           matches: JSON.parse(
             await decryptText(pw, String(cached.result_ciphertext)),
           ),
-          model: "gpt-6-luna",
+          model: "claude-haiku-5-5",
           cached: true,
         });
       }
@@ -131,7 +131,7 @@ Deno.serve(async (request) => {
     );
     const ciphertext = await encryptText(pw, JSON.stringify(matches));
     await sql`update namofood_private.payment_match_runs set status='done',completed_at=now(),result_ciphertext=${ciphertext} where room=${room} and batch_hash=${hash} and lease_token=${token}::uuid`;
-    return json({ ok: true, matches, model: "gpt-6-luna", cached: false });
+    return json({ ok: true, matches, model: "claude-haiku-5-5", cached: false });
   } catch (error) {
     const message = error instanceof Error
         ? error.message

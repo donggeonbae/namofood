@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
 (async()=>{
-  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-4-invoice-review',model=process.env.NMF_EXPECTED_OCR_MODEL||'gpt-6-luna';
+  const password=process.env.NMF_PW,version=process.env.NMF_EXPECTED_VER||'1011-4-invoice-review',model=process.env.NMF_EXPECTED_OCR_MODEL||'claude-haiku-5-5';
   if(!password)throw new Error('NMF_PW is required');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
   try{

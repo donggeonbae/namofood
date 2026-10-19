@@ -399,19 +399,29 @@ CVC·비밀번호는 서버와 화면 양쪽에서 걸러냅니다. 카드 끝 4
 제공업체의 데이터 처리 정책은
 별도로 적용됩니다. 실제 거래 자료의 인식값은 반드시 원본과 대조해야 합니다.
 
+행별 거래처원장은 `일자-No. / 품목명(규격) / 수량 / 단가 / 공급가액 / 부가세 / 합계 / 거래처명 / 적요` 열과 회사명·기간 제목을 확인하면 원본 셀로 직접 읽습니다.
+날짜·거래번호별로 나누며 같은 날짜의 여러 거래에 일별 소계를 중복 배정하지 않습니다.
+공급업체는 회사명 제목에서 확인하고 구매자 열과 구분합니다. 일반 품목 수 한도는 1,000개,
+품목명·규격은 각각 500자입니다(파일·셀·행 크기 안전 한도는 별도 유지).
+금액 없는 품목·반품 음수·빈 세액을 보존하고 소계·총합계와 대조합니다.
+원장 출처는 `sourceAudit.sourceType=period-ledger`로 전달해 앱에서 참고 보관·중복 합산 제외합니다.
+기존 명세서의 삭제·금액 변경·원장 기준 전환은 자동으로 하지 않습니다.
+검사: `deno run tools/test_invoice_ledger.ts`, `node tools/verify_invoice_ledger_files.cjs <원장.xlsx>`.
+
 서버 비밀값은 기존 `NMF_PW`와 OCR 전용 `NMF_INVOICE_API_KEY`,
 `OPENCODE_GO_API_KEY`, 기존 `OPENCODE_API_KEY` 순서로 확인합니다.
 사용자가 선택한 **Go 플랜**으로만 요청합니다. 기본 모델은 이미지 입력 지원 모델
-**GPT-6 Luna (`gpt-6-luna`)**이며, 엔드포인트는
-`https://opencode.ai/zen/go/v1/responses`입니다. 사진은 고해상도 입력으로 보내고,
+**Claude Haiku 5.5 (`claude-haiku-5-5`)**이며, 엔드포인트는
+`https://opencode.ai/inference/go/anthropic/v1/messages`입니다. 사진은 원본 이미지 입력으로 보내고,
 JSON을 추출하며 완료·거절·출력 중단 상태를 구분합니다. 인식 이후 같은 모델에
 품목명·규격·단위만 텍스트로 보내 실제 2차 검수를 합니다. 두 번째 응답은 숫자·금액·
 날짜·거래처·OCR 원문을 바꿀 수 없고, 숫자·포장규격·규격 단위 변경이나 빈 단위
 추측은 반영하지 않습니다. 최초 표기와 완료·일부 완료·실패 상태를 앱에서 볼 수 있습니다.
 검수가 실패해도 유효한 표 인식 내역은 유지합니다. 사진당 최대 2회 호출이며
-두 호출이 기존 전체 시간 제한을 공유하고 자동 재시도하지 않습니다. `store:false`로
-Responses 보관을 요청하지 않습니다. 제공업체의 별도 처리 정책은 그대로 적용됩니다.
-`NMF_INVOICE_MODEL`을 명시한다면 `gpt-6-luna`여야 하며,
+두 호출이 기존 전체 시간 제한을 공유하고 자동 재시도하지 않습니다.
+Anthropic Messages에는 OpenAI 전용 `store`·`reasoning` 옵션을 보내지 않습니다.
+제공업체의 별도 보관 정책은 그대로 적용됩니다.
+`NMF_INVOICE_MODEL`을 명시한다면 `claude-haiku-5-5`여야 하며,
 `NMF_INVOICE_TIMEOUT_MS`는 기본 100초, 최대 120초입니다.
 `NMF_INVOICE_BASE_URL`은 Go 주소만 허용합니다. 앱은 실제 이름의 User-Agent와
 사진 한 장의 대화에 해당하는 서명된 요청 기반 세션 ID를 전달합니다.
@@ -427,7 +437,7 @@ Go의 공식 사용 안내는 코딩 에이전트용이므로 일반 웹앱 OCR 
 `tools/verify_invoice_photo.cjs`는 운영자가 명시한 원본 사진만 실제 서버에서 처리하는
 확인 도구입니다. `NMF_INVOICE_PHOTOS`에 명시 경로를 전달하고 `NMF_PW`를 환경에
 안전하게 입력합니다. 품목 수·합계를 대조하지만 발주 등록이나 데이터베이스 저장은 하지 않습니다.
-`NMF_EXPECTED_OCR_MODEL=gpt-6-luna`, `NMF_EXPECTED_OCR_PLAN=go`로 지정하면
+`NMF_EXPECTED_OCR_MODEL=claude-haiku-5-5`, `NMF_EXPECTED_OCR_PLAN=go`로 지정하면
 사진을 보내기 전에 서버 모델과 Go 플랜도 확인합니다.
 배포 후 `node tools/test_live_invoice_status.cjs`는 실제 암호화 페이지와 서명된 상태 조회만
 확인합니다. 사진을 보내거나 인식 서비스를 호출하지 않고 운영 데이터 쓰기를 차단합니다.
@@ -538,7 +548,7 @@ cron 비밀값으로 인증하며 실제 식단·레시피·상태 백업에는 
 
 | 파일                                                                 | 설명                                                                                                                                 |
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `supabase/functions/nmf-recipe-fill/`                                | Edge Function. 상태 복호화 → 빠진 음식 → deepseek-v4.1-flash(OpenCode Zen)로 레시피 생성, minimax-m3 fallback → CAS 병합·암호화 저장 |
+| `supabase/functions/nmf-recipe-fill/`                                | Edge Function. 상태 복호화 → 빠진 음식 → Claude Haiku 5.5(OpenCode Go)로 레시피 생성 → CAS 병합·암호화 저장 |
 | `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql`        | 실행 기록 표 `namofood_recipe_runs`와 최초 일정                                                                                      |
 | `supabase/migrations/20260922060000_nmf_recipe_fill_every_10min.sql` | pg_cron을 10분마다 확인하도록 변경                                                                                                   |
 | `tools/nmf_cron_setup.ps1`                                           | 1회 설정 스크립트 (비밀값 입력 → 마이그레이션 → vault → 배포 → dry-run)                                                              |
@@ -549,8 +559,8 @@ cron 비밀값으로 인증하며 실제 식단·레시피·상태 백업에는 
 저장합니다(저장소에는 남지 않음). 실행 기록 확인:
 `select * from namofood_recipe_runs order by started_at desc;` 비밀번호를 바꾸면
 `supabase secrets set NMF_PW=새비밀번호` 도 같이 바꿔야 합니다. 레시피 모델은
-`NMF_RECIPE_MODEL`(기본 `deepseek-v4.1-flash`)과
-`NMF_RECIPE_FALLBACK_MODEL`(기본 `minimax-m3`), 1회 생성 수는
+`NMF_RECIPE_MODEL`·`NMF_RECIPE_FALLBACK_MODEL` 모두 기본 `claude-haiku-5-5`이며,
+같은 모델은 중복 호출하지 않습니다. 추천·세금 검토·카드 연결·쿠팡 정리도 같은 Go 모델입니다. 1회 생성 수는
 `NMF_MAX_PER_RUN`(기본 8, 메뉴별 병렬 생성), 오류 재시도 대기는
 DB claim에서 2분, 실행 제한시간은 4분입니다. LLM 제한은
 `NMF_RECIPE_TIMEOUT_MS`(기본 52초, 최대 55초 적용)/`NMF_RECIPE_MAX_TOKENS`로

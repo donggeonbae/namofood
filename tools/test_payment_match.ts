@@ -64,7 +64,7 @@ const fake = ((_url: unknown, options: RequestInit) => {
   calls++;
   const request = JSON.parse(String(options.body));
   assert(
-    /JSON/.test(request.input[0].content[0].text),
+    /JSON/.test(request.messages[0].content[0].text),
     "JSON mode input requirement",
   );
   assert(

@@ -229,34 +229,34 @@ function identityLabels(document = fixture) {
 const provider = (input: string | URL | Request, init?: RequestInit) => {
   calls++;
   assert(
-    String(input) === "https://opencode.ai/zen/go/v1/responses",
+    String(input) === "https://opencode.ai/inference/go/anthropic/v1/messages",
     "only the user-selected Go endpoint, never paid Zen fallback",
   );
   const sent = JSON.parse(String(init?.body));
-  const labelOnly = sent.input[0].content.length === 1;
+  const labelOnly = sent.messages[0].content.length === 1;
   assert(
-    sent.model === "gpt-6-luna" && sent.reasoning.effort === "none" &&
-      sent.max_output_tokens === 8192,
+    sent.model === "claude-haiku-5-5" && !("reasoning" in sent) &&
+      sent.max_tokens === 8192,
     "bounded vision model configuration",
   );
   assert(
     !("temperature" in sent) && !("thinking" in sent) &&
-      !("max_tokens" in sent) && !("messages" in sent) &&
+      !("max_output_tokens" in sent) && !("input" in sent) &&
       !("response_format" in sent) && !String(init?.body).includes(PASSWORD),
     "no Chat Completions parameters, incompatible sampling or password leak",
   );
   assert(
-    Array.isArray(sent.input[0].content) &&
-      sent.input[0].content[0].type === "input_text" &&
-      (labelOnly || (sent.input[0].content[1].type === "input_image" &&
-        sent.input[0].content[1].detail === "high" &&
-        sent.input[0].content[1].image_url === `data:image/png;base64,${PNG}`)),
+    Array.isArray(sent.messages[0].content) &&
+      sent.messages[0].content[0].type === "text" &&
+      (labelOnly || (sent.messages[0].content[1].type === "image" &&
+        sent.messages[0].content[1].source.media_type === "image/png" &&
+        sent.messages[0].content[1].source.data === PNG)),
     "actual image array is unchanged on OCR, review receives text only",
   );
   assert(
-    sent.store === false && sent.stream === false &&
-      sent.text.format.type === "json_object" &&
-      sent.instructions.includes(labelOnly ? "rowIndex" : "previousBalance"),
+    !("store" in sent) && sent.stream === false &&
+      !("text" in sent) && /JSON/.test(sent.system) &&
+      sent.system.includes(labelOnly ? "rowIndex" : "previousBalance"),
     "bounded nonstored JSON Responses request keeps invoice instructions",
   );
   assert(
@@ -298,14 +298,14 @@ const labelPass = createHandler({
   fetchImpl: (_input, init) => {
     labelPassCalls++;
     const sent = JSON.parse(String(init?.body));
-    const isReview = sent.input[0].content.length === 1;
+    const isReview = sent.messages[0].content.length === 1;
     if (isReview) {
-      const labels = JSON.parse(sent.input[0].content[0].text);
+      const labels = JSON.parse(sent.messages[0].content[0].text);
       assert(
         Object.keys(labels).join() === "outputFormat,items" &&
           labels.outputFormat === "JSON" &&
           Object.keys(labels.items[0]).join() === "rowIndex,name,spec,unit" &&
-          !sent.input[0].content.some((part: Record<string, string>) =>
+          !sent.messages[0].content.some((part: Record<string, string>) =>
             part.type === "input_image"
           ) &&
           !JSON.stringify(labels).includes(fixture.rawText) &&
@@ -626,7 +626,7 @@ assert(
   "status truthfully advertises real label review and maximum two provider calls without performing either",
 );
 assert(
-  result.model === "gpt-6-luna",
+  result.model === "claude-haiku-5-5",
   "requested GPT-6 Luna is the exact default, never GPT-5.6 or Kimi",
 );
 assert(
@@ -777,7 +777,7 @@ for (
       selectedKeyCalls++;
       const headers = new Headers(init?.headers);
       assert(
-        String(input) === "https://opencode.ai/zen/go/v1/responses" &&
+        String(input) === "https://opencode.ai/inference/go/anthropic/v1/messages" &&
           headers.get("authorization") === `Bearer ${expectedKey}` &&
           headers.get("x-opencode-session") === `nmf-invoice-cafe-${nonce}`,
         "Go credential precedence and signed app/nonce session binding",
@@ -1080,7 +1080,7 @@ const parallel = createHandler({
   fetchImpl: async (_input, init) => {
     await gate;
     const labelOnly =
-      JSON.parse(String(init?.body)).input[0].content.length === 1;
+      JSON.parse(String(init?.body)).messages[0].content.length === 1;
     return new Response(
       JSON.stringify(
         completedResponse(
@@ -1106,7 +1106,7 @@ const burstHandler = createHandler({
     burstCalls++;
     await burstGate;
     const labelOnly =
-      JSON.parse(String(init?.body)).input[0].content.length === 1;
+      JSON.parse(String(init?.body)).messages[0].content.length === 1;
     return new Response(
       JSON.stringify(
         completedResponse(
@@ -1186,7 +1186,7 @@ let tooManyRejected = false;
 try {
   validateDocument({
     ...fixture,
-    items: Array.from({ length: 201 }, () => fixture.items[0]),
+    items: Array.from({ length: 1001 }, () => fixture.items[0]),
   });
 } catch {
   tooManyRejected = true;

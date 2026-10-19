@@ -492,7 +492,7 @@ async function csvRows(page) {
       assert.equal(await panel.locator('[data-order-item]').first().locator('[data-order-key="tax"]').inputValue(), '');
     });
     await run('LABEL_REVIEW_METADATA_ORIGINAL_LABELS_AND_AMOUNTS_SURVIVE_REGISTRATION_CLOUD_ROUNDTRIP', async f => {
-      const labelReview = { status: 'completed', model: 'gpt-6-luna', reviewedRows: 1, changedRows: 1 };
+      const labelReview = { status: 'completed', model: 'claude-haiku-5-5', reviewedRows: 1, changedRows: 1 };
       const labels = { name: '양 파', spec: '국 산', unit: 'KG' };
       const doc = documentFixture({ items: [{ name: '양파', spec: '국산', qty: 2, unit: 'kg', price: 15000, supplyAmount: 30000, amt: 33000, tax: 3000, confidence: .95, warnings: [], originalLabels: labels, labelReview: { status: 'completed' } }] });
       f.enqueue(doc, { labelReview }); await f.a.locator('#invoice-files').setInputFiles(await photo(f.a, 'label-reviewed.png')); await f.idle();

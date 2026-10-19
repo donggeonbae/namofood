@@ -1,4 +1,11 @@
 // Amounts are computed here, not supplied by the model. No state/ledger writes.
+import {
+  GO_BASE,
+  GO_MODEL,
+  goHeaders,
+  goMessages,
+  responsesEnvelope,
+} from "../_shared/opencode-go.ts";
 type Row = Record<string, unknown>;
 export type TaxState = {
   settings?: Row;
@@ -421,7 +428,11 @@ export async function reviewTax(
   },
 ) {
   if (!options.apiKey) throw Error("tax_ai_not_configured");
-  if (options.baseUrl.replace(/\/$/, "") !== "https://opencode.ai/zen/go/v1") {
+  if (
+    ![GO_BASE, "https://opencode.ai/zen/go/v1"].includes(
+      options.baseUrl.replace(/\/$/, ""),
+    ) || options.model !== GO_MODEL
+  ) {
     throw Error("tax_ai_provider_not_allowed");
   }
   const input = {
@@ -433,17 +444,16 @@ export async function reviewTax(
   };
   // One provider request, no automatic retry/fallback per financial version.
   const response = await (options.fetcher || fetch)(
-    options.baseUrl.replace(/\/$/, "") + "/responses",
+    `${GO_BASE}/messages`,
     {
       method: "POST",
-      headers: {
+      headers: goHeaders({
         Authorization: "Bearer " + options.apiKey,
         "Content-Type": "application/json",
         "User-Agent": "namofood-tax/1.0",
         "x-opencode-session": "nmf-tax-" + crypto.randomUUID(),
-      },
-      body: JSON.stringify({
-        model: options.model,
+      }),
+      body: JSON.stringify(goMessages({
         instructions: TAX_AI_PROMPT,
         input: [{
           role: "user",
@@ -454,12 +464,8 @@ export async function reviewTax(
               JSON.stringify(input),
           }],
         }],
-        reasoning: { effort: "none" },
         max_output_tokens: 3500,
-        store: false,
-        stream: false,
-        text: { format: { type: "json_object" } },
-      }),
+      })),
       redirect: "error",
       signal: AbortSignal.timeout(65000),
     },
@@ -489,7 +495,7 @@ export async function reviewTax(
     }
     throw Error("tax_ai_http_" + response.status + detail);
   }
-  const result = await response.json();
+  const result = responsesEnvelope(await response.json());
   if (result.status !== "completed" || !Array.isArray(result.output)) {
     throw Error("tax_ai_incomplete");
   }
