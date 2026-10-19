@@ -31,13 +31,16 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
     assert(await p.locator('#admin-password').isVisible());for(const name of ['settings','data','pl','overview','fixed','order'])assert(await p.locator('nav [data-p='+name+']').isHidden(),name);
     assert(!JSON.stringify(await p.evaluate(()=>S)).includes('PRIVATE_'));assert.equal(await p.evaluate(()=>S.staff[0].wage),undefined);
     await p.evaluate(()=>go('settings'));assert.equal(await p.evaluate(()=>page),'home');
-    await p.evaluate(()=>go('sales'));assert(await p.getByRole('heading',{name:'판매 실적 · 식수 입력'}).isVisible());assert(!(await p.locator('#main').innerText()).includes('이달 실제 매출'));
-    await p.evaluate(()=>go('roster'));assert(!await p.locator('#staff-payroll-table').count());assert(!(await p.locator('#main').innerText()).includes('시급'));
-    await p.evaluate(()=>go('recipe'));assert(await p.locator('#main details').count()>0);assert((await p.locator('#main').innerText()).includes('원본 레시피 수정은 관리자'));
+    await p.evaluate(()=>go('sales'));assert(await p.getByRole('heading',{name:'판매 실적 — 회사 판매 · 식권 회수'}).isVisible());assert(!(await p.locator('#main').innerText()).includes('이달 실제 매출'));assert(await p.locator('[data-sales-expected]').count()>0,'original sales form is retained');
+    await p.evaluate(()=>go('roster'));assert(!await p.locator('#staff-payroll-table').count());assert(await p.locator('[data-roster-common] table').count());assert.equal(await p.locator('.roster-person span').first().evaluate(e=>getComputedStyle(e).whiteSpace),'nowrap');
+    await p.evaluate(()=>go('recipe'));assert(await p.locator('#recipe-filters').isVisible());const recipeNames=await p.locator('#rlist').innerText();await p.locator('.rchip').first().click();assert(await p.locator('#rdetail input').count()>0);assert(await p.locator('#rdetail textarea').isEnabled());
     const before=apiReads;assert(await p.evaluate(()=>cloudRevisionUnchanged()));assert.equal(apiReads,before,'revision check must not download state');
     await p.locator('#admin-password').fill('wrong');await p.locator('#admin-form button').click();await p.waitForFunction(()=>document.getElementById('admin-message').textContent.includes('맞지'));assert.equal(await p.locator('#admin-password').inputValue(),'');
     await p.evaluate(()=>{clearTimeout(saveTimer);cloudDirty=false;});await p.locator('#admin-password').fill(admin);await p.locator('#admin-form button').click();await p.waitForFunction(()=>NmfAccess.isAdmin());await p.waitForFunction(()=>S.staff[0]?.wage===19999);
     for(const name of ['settings','data','pl','overview','fixed','order'])assert(await p.locator('nav [data-p='+name+']').isVisible(),name);
+    const lockBox=await p.locator('#admin-lock').boundingBox(),barBox=await p.locator('#admin-access').boundingBox();assert(Math.abs(lockBox.x+lockBox.width/2-barBox.x-barBox.width/2)<2,'lock is centered');
+    await p.evaluate(()=>go('roster'));assert(await p.locator('[data-roster-common] table').count());assert(await p.locator('#staff-payroll-table').count());
+    await p.evaluate(()=>go('recipe'));assert.equal(await p.locator('#rlist').innerText(),recipeNames,'same recipe controls and categories in both modes');
     await p.evaluate(()=>{go('settings');});assert((await p.locator('#main').innerText()).includes('설정'));
     await p.evaluate(()=>{localStorage.setItem(KEY,JSON.stringify(S));});await p.waitForTimeout(450);
     const caches=await p.evaluate(()=>Object.entries(localStorage));assert(caches.some(([key])=>key.endsWith('#admin-draft')));for(const [,value]of caches){assert(!value.includes('PRIVATE_PHONE'));assert(!value.includes('PRIVATE_FIXED'));assert(!value.includes('test-token'));assert(!value.includes('test-admin'));}

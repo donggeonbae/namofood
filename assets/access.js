@@ -6,6 +6,7 @@
   const roots=['namofood_v2','namocafe_v1','namostore_v1'],roomFor={namofood_v2:'namofood',namocafe_v1:'namocafe',namostore_v1:'namostore'};
   const policy=globalThis.NmfAccessPolicy,pendingLegacy=new Map(),revisions=new Map(),privateDrafts=new Map();
   let token='',password='',expires=0,writeChain=Promise.resolve(),cachePending=0,cacheError='',expiryTimer;
+  let operationBase={};
   const endpoint='https://rycibsczsgbkgtwfxyim.supabase.co/functions/v1/nmf-access';
   function isAdmin(){return !!token&&Date.now()<expires;}
   for(const key of roots){const value=get.call(localStorage,key);if(value){try{const s=JSON.parse(value),publicValue=JSON.stringify(policy.project(s));if(value!==publicValue)pendingLegacy.set(key,value);set.call(localStorage,key,publicValue);}catch{pendingLegacy.set(key,value);remove.call(localStorage,key);}}}
@@ -71,6 +72,7 @@
     bar.querySelector('#admin-lock')?.addEventListener('click',()=>lock(false));
     for(const b of document.querySelectorAll('nav [data-p]'))b.hidden=!isAdmin()&&privatePages.has(b.dataset.p);
     document.documentElement.dataset.access=isAdmin()?'admin':'guest';
+    bar.classList.toggle('is-admin',isAdmin());
   }
   async function archiveLegacy(){
     for(const [key,raw]of pendingLegacy){
@@ -94,6 +96,7 @@
       const remote=await cloudFetch();if(!remote)throw Error('서버 자료를 찾지 못했습니다.');
       const pw=get.call(sessionStorage,'nmf_session_pw')||get.call(localStorage,'nmf_pw');
       S=normalize(Object.assign(defaultState(),JSON.parse(await decryptText(pw,remote.data))));
+      operationBase=policy.operations(S);
       cloudRemoteAt=remote.updated_at;cloudRemoteData=remote.data;cloudDirty=false;
       cloudMenuBase=captureCloudMenuBase(S);cloudStaffBase=captureCloudStaffBase(S);cloudConfigBase=captureCloudConfigBase(S);cloudOrderBase=captureCloudOrderBase(S);cloudCardBase=captureCloudCardBase(S);cloudSalesBase=captureCloudSalesBase(S);
       const draft=get.call(localStorage,KEY+'#admin-draft');
@@ -114,21 +117,82 @@
     // Clear all private lexical caches without persisting a login token.
     location.reload();
   }
-  function guestSales(){
-    if(APP==='store')return '<h1>매점 판매 실적</h1><div class="card"><p>상품별 결제·식권 정산 입력은 관리자 모드에서 이용해 주세요.</p></div>';
-    return '<h1>판매 실적 · 식수 입력</h1>'+periodPicker('sales')+periodDays('sales').map(d=>'<div class="card"><h2>'+esc(dateKeyAt(ym(),d))+'</h2><div class="grid2">'+(APP==='cafe'?'<label class="f">판매 잔수<input type="number" min="0" value="'+(salesGet(d,'cups')??'')+'" onchange="salesSet('+d+',\'cups\',this.value)"></label>':MEALS.map(me=>'<section><h3>'+me+'</h3><div class="row"><label class="f">예상 식수<input type="number" min="0" value="'+(S.menus[ym()]?.[d+'|'+me+'|n']??'')+'" placeholder="기본 '+menuCountAt(ym(),d,me)+'" onchange="salesExpectedSet('+d+','+jsarg(me)+',this.value)"></label><label class="f">회수 식권<input type="number" min="0" value="'+(salesGet(d,me)??'')+'" onchange="salesSet('+d+','+jsarg(me)+',this.value)"></label></div><div class="row">'+SALES_COUNT_CHANNELS.map(([k])=>salesCountField(d,k,'day',me)).join('')+'</div></section>').join(''))+'</div></div>').join('');
+  function scheduleHtml(){
+    rosterBulkSync();
+    const {off}=ymParts(),days=periodDays('roster'),mode=periodViews.roster.mode,people=rosterStaff();
+    const week=rosterBulk.activeWeek??Math.floor((off+Number(periodCurrent('roster').date.slice(8))-1)/7),active=rosterBulk.enabled;
+    const head=days.map(d=>'<th>'+((active&&rosterBulkActiveDay(d))?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+d+'일 전체 선택" onchange="selectRosterBulkDay('+d+')">':'')+d+'일<small>'+KDAY[(off+d-1)%7]+'</small></th>').join('');
+    const rows=people.map(e=>'<tr><td class="roster-person" title="'+esc(e.name)+'">'+((active)?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+esc(e.name)+' 주차 선택" onchange="selectRosterBulkRow('+jsarg(e.id)+','+week+')">':'')+'<span>'+esc(e.name||'이름 없음')+'</span></td>'+days.map(d=>cellHtml(e,d,(off+d-1)%7)).join('')+'</tr>').join('');
+    const count='<tr class="chk"><td class="roster-person">근무 인원</td>'+days.map(d=>'<td>'+people.filter(e=>isWork(rosterGet(e.id,d))).length+'</td>').join('')+'</tr>';
+    const weeks=Math.ceil((off+ymParts().days)/7);
+    return '<section class="card common-roster" data-roster-common><div class="row noprint roster-common-toolbar"><b>'+kmonth()+' 근무표</b><label class="f">일괄 입력 주차<select aria-label="일괄 입력 주차" onchange="toggleRosterBulk(true,+this.value)">'+Array.from({length:weeks},(_,w)=>'<option value="'+w+'" '+(w===week?'selected':'')+'>'+(w+1)+'주 · '+rosterBulkWeekRange(w)+'</option>').join('')+'</select></label><button class="btn small" onclick="toggleRosterBulk('+(!active)+','+week+')">'+(active?'일괄 입력 닫기':'여러 칸 선택 · 일괄 입력')+'</button></div>'+rosterBulkPanel(week)+'<div class="tbl"><table class="roster unified-roster '+(mode==='month'?'roster-monthly':'')+'" data-roster-mode="'+mode+'"><colgroup><col class="roster-person-col">'+days.map(()=>'<col>').join('')+'</colgroup><thead><tr><th class="roster-person">이름</th>'+head+'</tr></thead><tbody>'+rows+count+'</tbody></table></div></section>';
   }
-  function guestRoster(){
-    const {off}=ymParts();return '<h1>근무표</h1>'+periodPicker('roster')+'<div class="card"><div class="tbl"><table class="roster"><thead><tr><th>이름</th>'+periodDays('roster').map(d=>'<th>'+d+'일</th>').join('')+'</tr></thead><tbody>'+rosterStaff().map(e=>'<tr><td>'+esc(e.name)+'</td>'+periodDays('roster').map(d=>cellHtml(e,d,(off+d-1)%7)).join('')+'</tr>').join('')+'</tbody></table></div></div>';
+  function commonRoster(html){
+    const t=document.createElement('template');t.innerHTML=html;
+    const blocks=[...t.content.querySelectorAll('.roster-week-card')],replacement=document.createElement('div');replacement.innerHTML=scheduleHtml();
+    if(blocks.length){blocks[0].replaceWith(replacement);blocks.slice(1).forEach(el=>el.remove());}
+    return t.innerHTML;
   }
-  function guestRecipes(){
-    const query=recipeQ.trim().toLowerCase(),map=recipeMap();
-    return '<h1>레시피</h1><div class="card"><label class="f">음식·재료 검색<input id="rqq" value="'+esc(recipeQ)+'" onchange="recipeQ=this.value;render()" placeholder="검색어를 입력하고 Enter"></label><p class="hint">조리법·재료를 열람할 수 있습니다. 원본 레시피 수정은 관리자 모드에서 이용해 주세요.</p></div>'+Object.keys(map).filter(name=>!query||name.toLowerCase().includes(query)||map[name].some(r=>String(r.item).toLowerCase().includes(query))).sort((a,b)=>a.localeCompare(b,'ko')).map(name=>'<details class="card" '+(rSel===name?'open':'')+'><summary>'+esc(name)+'</summary><div class="tbl"><table><thead><tr><th>재료</th><th>1인 기준량</th></tr></thead><tbody>'+map[name].map(r=>'<tr><td>'+esc(r.item)+'</td><td>'+esc(r.qty)+' '+esc(r.unit)+'</td></tr>').join('')+'</tbody></table></div><p style="white-space:pre-wrap">'+esc(S.methods?.[name]||'')+'</p></details>').join('');
+  function removeMoney(html,currentPage){
+    const t=document.createElement('template');t.innerHTML=html;const root=t.content;
+    root.querySelectorAll('[data-admin-only],#food-ticket-ledger,[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
+    root.querySelectorAll('.kpi').forEach(el=>{if(/원|매출|인건비|급여|순익|수익|수당|사업자 부담|세금/.test(el.textContent))el.remove();});
+    root.querySelectorAll('table').forEach(table=>{
+      const header=table.tHead?.rows[table.tHead.rows.length-1];if(!header)return;
+      const count=header.cells.length,money=[...header.cells].flatMap((cell,i)=>(/금액|단가|판매가|가격|매출|원가|시급|수당|급여|지급|공제|실입금|연락|계좌/.test(cell.textContent)||/^(HOT|ICE)$/.test(cell.textContent.trim()))&&!/일 합계/.test(cell.textContent)?[i]:[]);
+      for(const row of table.rows)if(row.cells.length===count)for(const i of [...money].reverse())row.cells[i]?.remove();
+      const columns=[...table.querySelectorAll(':scope > colgroup > col')];for(const i of [...money].reverse())columns[i]?.remove();
+    });
+    root.querySelectorAll('input,select,textarea').forEach(el=>{
+      const action=[el.getAttribute('oninput'),el.getAttribute('onchange'),el.dataset.field].join(' '),label=el.closest('label');
+      if(/(?:wage|bonus|burden|deduct|tax|account|bank|phone|roleWage|staffPayment|payrollMethod|insured|ticketIssuePrice|ticketIssued)|(?:storeSaleSet\([^)]*,\s*['"](?:price|cost)['"])|(?:S\.prices)/i.test(action)||label&&/\(원\)|（원）|금액|매출|시급|수당|계좌|전화|연락처|이메일/.test(label.textContent)) (label||el.closest('td')||el).remove();
+    });
+    root.querySelectorAll('button,a').forEach(el=>{
+      const action=el.getAttribute('onclick')||'';
+      if(/salesExportXlsx|csvSales|storeSalesCsv|openStaffDetails|staffDeduction|staffPayment|staffPay|fixedDoc|foodTicket|downloadJSON/.test(action))el.remove();
+      if(privatePages.has((/go\(['"]([^'"]+)/.exec(action)||[])[1]))el.remove();
+    });
+    // Retain the same day/month cards and input controls; only money parts disappear.
+    root.querySelectorAll('.sales-meal-money').forEach(el=>{
+      const hint=el.nextElementSibling,total=hint?.querySelector('b');
+      if(hint?.classList.contains('hint')&&total)hint.replaceChildren(document.createTextNode('식수 입력 합계 '),total);
+    });
+    root.querySelectorAll('[data-sales-meal-comparison] span').forEach(el=>{if(/금액|회수액/.test(el.textContent))el.remove();});
+    root.querySelectorAll('[data-sales-day-total]').forEach(el=>{
+      const first=el.firstElementChild;if(first){const b=first.querySelector('b');if(b&&first.textContent.startsWith('회사 판매')){b.previousSibling?.remove();b.nextSibling?.remove();b.remove();}}
+      el.querySelectorAll('.hint,.sales-extra-fields,[data-sales-unassigned]').forEach(child=>child.remove());
+      [...el.children].filter(child=>/실제 매출/.test(child.textContent)).forEach(child=>child.remove());
+    });
+    if(currentPage==='roster'){
+      root.querySelector('#staff-payroll-table')?.closest('.card')?.remove();
+      root.querySelector('#staffArchive')?.remove();
+      // The ordinary staff directory keeps its familiar layout, without private controls.
+      root.querySelectorAll('.staff-detail-button,.staff-action button,[onclick*="staffAdd"],[onclick*="staffDel"],[onclick*="staffArchive"]').forEach(el=>el.remove());
+      root.querySelectorAll('#staff-directory-table input,#staff-directory-table select').forEach(el=>{el.disabled=true;el.title='직원 기본정보 변경은 관리자 전용입니다.';});
+    }
+    if(APP==='store'){
+      const form=root.querySelector('#store-add-form');if(form)form.innerHTML='<h2>새 상품 추가</h2><p class="hint">새 상품·가격 설정은 관리자 모드에서 합니다. 등록된 상품의 판매수량은 일반 모드에서도 입력할 수 있습니다.</p>';
+      root.querySelectorAll('[data-field="price"],[data-field="cost"]').forEach(el=>el.closest('td')?.remove());
+    }
+    root.querySelectorAll('[data-sales-extra],.sales-extra-entry').forEach(el=>(el.closest('label')||el).remove());
+    root.querySelectorAll('.pr').forEach(el=>el.remove());
+    root.querySelectorAll('.row > b,.row > span').forEach(el=>{if(/매출|금액|원가|단가/.test(el.textContent))el.remove();});
+    // Mixed footer cells have count totals and currency. Drop currency-only leaf nodes, not count inputs/cards.
+    const nodes=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),texts=[];while(nodes.nextNode())texts.push(nodes.currentNode);
+    for(const text of texts){if(/^[\s+−-]*[\d,.]+원[\s]*$/.test(text.textContent))text.parentElement?.remove();}
+    root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
+    return t.innerHTML;
   }
   window.NmfAccess={isAdmin,initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
+    operationBase=policy.operations(S);
+    const originalSave=save;save=function(){
+      const next=policy.operations(S);if(!cloudApplying){S.accessEdits||={};for(const key of new Set([...Object.keys(operationBase),...Object.keys(next)]))if(JSON.stringify(operationBase[key])!==JSON.stringify(next[key]))S.accessEdits[key]={at:new Date(Math.max(Date.now(),(Date.parse(S.accessEdits[key]?.at)||0)+1)).toISOString()};}
+      operationBase=next;return originalSave();
+    };
+    const originalApply=applyState;applyState=function(...args){const result=originalApply(...args);operationBase=policy.operations(S);return result;};
     cloudRevisionUnchanged=async function(){
       if(!cloudRemoteAt||!revisions.has(cloud.room))return false;
       const before=cloudRemoteAt;try{const r=await call({action:'rest',method:'GET',path:'/rest/v1/rpc/nmf_state_revision?room='+encodeURIComponent(cloud.room)});if(!r.ok)return false;const [row]=await r.json();return cloudRemoteAt===before&&Date.parse(row?.updated_at)===Date.parse(before)&&row.revision===revisions.get(cloud.room);}catch{return false;}
@@ -136,16 +200,11 @@
     go=function(p){return originalGo(!isAdmin()&&privatePages.has(p)?'home':p);};
     const originals={...PAGES};
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
-      if(isAdmin())return originals[p]();
-      if(privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
-      if(p==='home')return '<h1>'+BRAND+' 업무 화면</h1><div class="card"><p>식단·레시피·근무표·식수 입력을 이용할 수 있습니다. 금액·설정·백업은 관리자 전용입니다.</p><button class="btn" onclick="go(\'sales\')">식수 입력</button></div>';
-      if(p==='sales')return guestSales();if(p==='roster')return guestRoster();
-      if(APP==='store'&&['recipe','board'].includes(p))return '<h1>매점</h1><p>상품·가격 관리는 관리자 전용입니다.</p>';
-      if(p==='recipe')return guestRecipes();
-      if(['hyg','board'].includes(p))return '<p class="hint">기록 열람 화면입니다. 수정은 관리자 모드를 이용해 주세요.</p><fieldset disabled style="border:0;padding:0;min-width:0">'+originals[p]()+'</fieldset>';
-      return originals[p]();
+      if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
+      const html=p==='roster'?commonRoster(originals[p]()):originals[p]();
+      return isAdmin()?html:removeMoney(html,p);
     };
-    render=function(){paint();originalRender();if(!isAdmin())document.querySelectorAll('[data-menu-recipe-qty],[data-menu-recipe-item],[data-menu-recipe-unit],[data-menu-delete-ingredient]').forEach(el=>{el.disabled=true;el.title='원본 재료 수정은 관리자 전용입니다.';});if(isAdmin()&&page==='data'){
+    render=function(){paint();originalRender();if(isAdmin()&&page==='data'){
       const card=document.createElement('div');card.className='card';card.innerHTML='<h2>이 기기 관리자 임시저장</h2><p class="hint">자동으로 서버 자료를 덮어쓰지 않습니다. 필요하면 JSON으로 내려받아 비교하세요.</p><button class="btn" id="admin-draft-download">임시저장 내려받기</button>';
       card.querySelector('button').onclick=async()=>{const blob=get.call(localStorage,KEY+'#admin-draft');if(!blob)return toast('임시저장이 없습니다.');try{const raw=await decryptText(password,blob);const url=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='관리자_임시저장_'+todayKey()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{toast('임시저장을 열지 못했습니다.');}};document.getElementById('main').prepend(card);
     }};
@@ -153,9 +212,6 @@
       if(!isAdmin()){S.menuManualEdits||={};S.menuManualEdits[month]||={};S.menuManualEdits[month][`${d}|${meal}|${ci}`]={at:new Date().toISOString()};}
       return oldMenuSet(d,meal,ci,val,month);
     };
-    for(const name of ['rSet','menuIngredientAdd','menuIngredientDelete','setRecipeOrderMultiplier']){
-      const original=window[name];if(typeof original==='function')window[name]=function(...args){if(!isAdmin()){toast('원본 레시피·설정 수정은 관리자 모드를 이용해 주세요.');render();return false;}return original(...args);};
-    }
     paint();setTimeout(archiveLegacy,1000);
   }};
   addEventListener('beforeunload',event=>{if(cachePending||pendingLegacy.size||cacheError){event.preventDefault();event.returnValue='';}});

@@ -33,9 +33,16 @@ source = source.replace(boot_marker, boot)
 source = source.replace('</head>', '''<style>
 #admin-access{padding:8px 10px;border:1px solid #ffffff35;border-radius:6px;margin:0 0 10px;font-size:12px;min-width:0;max-width:100%;box-sizing:border-box;flex-shrink:0}
 #admin-access form{display:grid;grid-template-columns:auto minmax(45px,1fr) auto;gap:6px;align-items:center}
-#admin-access input{width:100%;min-width:0;padding:7px;font-size:13px;box-sizing:border-box}
+#admin-access input{width:100%;min-width:0;padding:7px;font-size:13px;box-sizing:border-box;background:#fff9d9!important;color:#172e45!important;-webkit-text-fill-color:#172e45!important;caret-color:#172e45}
+#admin-access input::placeholder{color:#65717c;opacity:1;-webkit-text-fill-color:#65717c}
 #admin-access .btn{padding:7px 9px;font-size:12px;white-space:nowrap;width:auto;min-width:0;margin:0}
 #admin-access small{display:block;overflow-wrap:anywhere;color:#ffdbac}
+#admin-access.is-admin{text-align:center}#admin-access.is-admin>span{display:block}#admin-access #admin-lock{display:flex;align-items:center;justify-content:center;margin:7px auto 0;color:#19324b;background:#fff}
+.common-roster .roster-common-toolbar{justify-content:space-between;align-items:center;margin-bottom:10px}.roster-common-toolbar .f{flex-direction:row;align-items:center;font-size:12px;gap:6px}.roster-common-toolbar select{font-size:12px;max-width:200px}
+.unified-roster{table-layout:fixed;width:100%}.unified-roster .roster-person-col{width:90px}.unified-roster .roster-person{white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;font-size:12px;text-align:left;padding:6px}.unified-roster .roster-person span{white-space:nowrap!important}
+.unified-roster th small{display:block;font-size:10px}.unified-roster.roster-monthly td.code{padding:5px 1px}.unified-roster.roster-monthly td.code small{font-size:10px;white-space:nowrap;letter-spacing:-.3px}.unified-roster.roster-monthly th{font-size:10px;padding:6px 1px}.unified-roster.roster-monthly th.roster-person{padding:6px;font-size:12px}
+#staff-payroll-table td:first-child{white-space:nowrap;word-break:normal;font-size:12px}#staff-payroll-table td:first-child button{font-size:12px;white-space:nowrap}
+@media screen and (max-width:900px){.common-roster .unified-roster.roster-monthly{min-width:1120px}.roster-common-toolbar .f{flex:1 1 200px}}
 nav [hidden]{display:none!important}
 .access-switch-stack{min-width:0;max-width:100%}
 @media screen and (max-width:900px){nav{align-items:center}.access-switch-stack{flex:0 0 228px;width:228px}nav .access-switch-stack .appsw{width:100%;margin:0 0 5px}#admin-access{width:100%;margin:0;padding:5px 7px}}

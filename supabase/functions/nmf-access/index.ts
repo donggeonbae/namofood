@@ -70,21 +70,16 @@ Deno.serve(async (request) => {
       const address = (request.headers.get("x-forwarded-for") || "unknown")
         .split(",")[0].trim();
       const bucket = await hmac(env("NMF_ADMIN_TOKEN_SECRET"), address);
-      const [globalAttempt] =
-        await sql`insert into namofood_private.admin_attempts(bucket,window_start,attempts) values ('global',now(),1)
-        on conflict(bucket) do update set attempts=case when admin_attempts.window_start<now()-interval '15 minutes' then 1 else admin_attempts.attempts+1 end,
-        window_start=case when admin_attempts.window_start<now()-interval '15 minutes' then now() else admin_attempts.window_start end returning attempts`;
-      if (Number(globalAttempt.attempts) > 40) {
-        return json({ error: "잠시 후 다시 시도해 주세요. (15분 제한)" }, 429);
-      }
       await sql`delete from namofood_private.admin_attempts where window_start<now()-interval '1 day'`;
-      // One atomic upsert prevents parallel attempts bypassing the limit. No password/IP logging.
+      // No failed-attempt lockout. Only debounce simultaneous repeated clicks.
       const [attempt] =
         await sql`insert into namofood_private.admin_attempts(bucket,window_start,attempts) values (${bucket},now(),1)
-        on conflict(bucket) do update set attempts=case when admin_attempts.window_start<now()-interval '15 minutes' then 1 else admin_attempts.attempts+1 end,
-        window_start=case when admin_attempts.window_start<now()-interval '15 minutes' then now() else admin_attempts.window_start end returning attempts`;
-      if (Number(attempt.attempts) > 8) {
-        return json({ error: "잠시 후 다시 시도해 주세요. (15분 제한)" }, 429);
+        on conflict(bucket) do update set attempts=1,window_start=now() where admin_attempts.window_start<now()-interval '1 second' returning attempts`;
+      if (!attempt) {
+        headers.set("Retry-After", "1");
+        return json({
+          error: "로그인 확인 중입니다. 잠시 후 다시 눌러 주세요.",
+        }, 429);
       }
       if (
         typeof body.password !== "string" || body.password.length > 128 ||

@@ -12,7 +12,8 @@ async function call(body,token){const raw=JSON.stringify(body),time=String(Date.
   }
   let roots=0;for(const room of ['namofood','namocafe','namostore']){
     const r=await call({action:'rest',method:'GET',path:'/rest/v1/namofood_state?id=eq.'+room});assert.equal(r.status,200,'guest state');const rows=await r.json();assert(rows[0]?.source_revision);const guest=decrypt(rows[0].data);
-    for(const field of ['orders','purch','prices','cardTransactions','staffPayments','staffDeductions','storeSales','storeStockImports'])assert(!Object.hasOwn(guest,field),'guest leaked '+field);
+    for(const field of ['orders','purch','prices','cardTransactions','staffPayments','staffDeductions'])assert(!Object.hasOwn(guest,field),'guest leaked '+field);
+    for(const row of [...Object.values(guest.storeProducts||{}),...Object.values(guest.storeSales||{}),...Object.values(guest.storeStockImports||{})])for(const field of ['price','cost','amt','unitPrice','total','vat','vendor','supplyAmount'])assert(!Object.hasOwn(row,field),'guest monetary field '+field);
     for(const person of [...guest.staff,...guest.staffArchive])for(const field of ['wage','bonus','phone','bank','account'])assert(!Object.hasOwn(person,field),'guest staff '+field);
     assert(!Object.hasOwn(guest.settings,'fixed'));assert(!Object.hasOwn(guest.settings,'wage'));roots++;
     const privateRead=await call({action:'rest',method:'GET',path:'/rest/v1/namofood_state?id=eq.'+encodeURIComponent(room+'#fixed-documents')});assert.equal(privateRead.status,403,'private docs denied');
