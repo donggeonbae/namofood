@@ -5,7 +5,7 @@
   const pick = (x, keys) => Object.fromEntries(keys.filter(k => x && Object.hasOwn(x,k)).map(k=>[k,clone(x[k])]));
   const meals = ['조식','중식','석식','야식'];
   const safeKey = k => !['__proto__','constructor','prototype'].includes(k);
-  const salesKey = k => /^([1-9]|[12]\d|3[01])\|(?:(?:cashCount|cardCount|creditCount)\|)?(?:조식|중식|석식|야식)$/.test(k) || /^([1-9]|[12]\d|3[01])\|cups$/.test(k);
+  const salesKey = k => /^([1-9]|[12]\d|3[01])\|(?:(?:cashCount|cardCount|creditCount)\|)?(?:조식|중식|석식|야식)$/.test(k) || /^([1-9]|[12]\d|3[01])\|(?:cups|rev|other|ticketIssued|ticketIssuePrice|ticketBuyer|ticketCompany(?:Name|Qty|Price|Deleted)\|[a-zA-Z0-9_-]{1,64})$/.test(k);
   const rosterKey = k => /^[a-zA-Z0-9_-]{1,100}\|([1-9]|[12]\d|3[01])$/.test(k);
   function initializeBreakDefaults(s){
     s.settings||={};if(s.settings.defaultBreakZeroInitialized)return s;
@@ -20,9 +20,15 @@
   }
   const recipeFields=['comp','menu','item','qty','unit','storage','loss','form','method','allergy'];
   const productFields=['id','name','category','unit','at','deleted','sourceIdentity','sourceSpec'];
-  const saleFields=['id','date','name','category','unit','qty','tickets','ticketQty','cardQty','cashQty','paymentSplit','deleted','at'];
+  const saleFields=['id','date','name','category','unit','qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'];
   const priced=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
+  const priceConfigured=v=>Object.hasOwn(v,'price')?priced(v.price):v.priceConfigured===true;
   const stockFields=['id','orderNo','date','name','spec','unit','qty','storeProductId','storeUnitsPerPack','at','deleted'];
+  const orderFields=['id','date','vendor','invoiceNo','note','ocr','rawText','subtotal','tax','total','previousBalance','balanceTotal','warnings','invoicePhoto','invoiceFile'];
+  const orderItemFields=['id','name','spec','qty','unit','price','supplyAmount','tax','amt','warnings','confidence','labelReview','sourceRefs','storeProductId','storeUnitsPerPack','storeExcluded'];
+  const ocrFields=['by','model','processedAt','registeredAt','confirmedAt','autoRegistered','imageSha256','fileName','sourceFileHash','sheetName','sourceKey','sourceRefs','sourceFileComplete','labelReview','duplicateCheckedIds','duplicateApprovedAt','duplicateReviewPending','referenceOnly','referenceAt','referenceReason','ledgerMaster','ledgerDaily','balanceEvidence','coveredByLedgerId','sourceAudit'];
+  const orderView=o=>({...pick(o,orderFields),items:(o.items||[]).map(i=>pick(i,orderItemFields)),...(o.ocrMeta?{ocrMeta:pick(o.ocrMeta,ocrFields)}:{}),...(o.coupang?{coupang:pick(o.coupang,['orderNo','stockLinked','importedAt','partial','sourceItemCount','sourceTotal'])}:{})});
+  const orderMap=s=>Object.fromEntries(Object.entries(s.orders||{}).filter(([m,rows])=>/^20\d{2}-(0[1-9]|1[0-2])$/.test(m)&&Array.isArray(rows)).map(([m,rows])=>[m,rows.map(orderView)]));
   function stockView(s){
     const out={},targets={},orders=Object.values(s.orders||{}).flat().filter(o=>o?.coupang&&!s.orderEdits?.[o.id]?.deleted&&!o.ocrMeta?.referenceOnly),linked=new Set(orders.filter(o=>o.coupang.stockLinked).map(o=>o.coupang.orderNo));
     for(const [id,row]of Object.entries(s.storeStockImports||{}))if(safeKey(id)&&!linked.has(row.orderNo))out[id]=pick(row,stockFields);
@@ -45,6 +51,10 @@
     for(const kind of ['daily','temp','keep','receive'])result['hyg:'+kind]=clone(s.hyg?.[kind]||[]);
     result.board=boardView(s);
     result.recipeAllowance=s.settings?.recipeOrderMultiplier??2;
+    result.ticketConfig=pick(s.settings?.ticketLedger||{},['startDate','opening','buyer','supplier','unitPrice']);
+    for(const person of [...(s.staff||[]),...(s.staffArchive||[])])if(safeKey(person.id))result['staff:'+person.id]=pick(person,['name','role','def','off']);
+    for(const [item,value]of Object.entries(s.prices||{}))if(safeKey(item))result['purchasePrice:'+item]=pick(value,['price','vendor']);
+    for(const month of new Set([...Object.keys(s.orderAdj||{}),...Object.keys(s.extraOrders||{})]))if(/^20\d{2}-\d{2}$/.test(month))result['purchaseCalc:'+month]={adjustments:clone(s.orderAdj?.[month]||{}),extras:clone(s.extraOrders?.[month]||[])};
     return result;
   }
   function maps(x, accept, value = v=>clone(v)) {
@@ -59,24 +69,50 @@
   function project(s) {
     const settings=pick(s.settings||{},['shifts','staffRoles','recipeOrderMultiplier','printMeals','defaultBreakMinutes','defaultBreakZeroInitialized']);
     settings.meals=Object.fromEntries(meals.map(m=>[m,pick(s.settings?.meals?.[m]||{},['count'])]));
+    settings.ticketLedger=pick(s.settings?.ticketLedger||{},['startDate','opening','buyer','supplier','unitPrice']);
     // Archive contact/payroll fields, purchasing, taxes and corporate ticket sales never cross this boundary.
-    const staff = a => (a||[]).map(e=>({...pick(e,['id','name','role','off','archivedAt']),...(e.def?{def:pick(e.def,['s','e','b'])}:{})}));
+    const staff = a => (a||[]).map(e=>({...pick(e,['id','name','role','off','archivedAt','historyNames']),...(e.def?{def:pick(e.def,['s','e','b'])}:{})}));
     const out=pick(s,['month','updatedAt','view','menus','menuManualEdits','menuExtraSlots','menuExtraEdits','menuRetirements','methods','hyg','cafeSeeded','recipeAsk','recipeResolutions','sources','accessEdits']);
     out.recipeMeta=Object.fromEntries(Object.entries(s.recipeMeta||{}).filter(([name])=>safeKey(name)).map(([name,v])=>[name,pick(v,['by','updated','cookingProfile'])]));
     out.board=boardView(s);
-    out.storeProducts=Object.fromEntries(Object.entries(s.storeProducts||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,productFields),priceConfigured:priced(v.price)}]));
-    out.storeSales=Object.fromEntries(Object.entries(s.storeSales||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,saleFields),priceConfigured:priced(v.price)}]));
+    out.orders=orderMap(s);out.orderEdits=Object.fromEntries(Object.entries(s.orderEdits||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['at','deleted','origin'])]));
+    out.prices=Object.fromEntries(Object.entries(s.prices||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['price','vendor'])]));
+    Object.assign(out,pick(s,['orderAdj','extraOrders']));
+    out.storeProducts=Object.fromEntries(Object.entries(s.storeProducts||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,productFields),priceConfigured:priceConfigured(v)}]));
+    out.storeSales=Object.fromEntries(Object.entries(s.storeSales||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,saleFields),priceConfigured:priceConfigured(v)}]));
     out.storeStockImports=stockView(s).rows;
     Object.assign(out,{settings,staff:staff(s.staff),staffArchive:staff(s.staffArchive),
+      staffOrder:s.staffOrder?pick(s.staffOrder,['at','ids']):undefined,
       recipes:(s.recipes||[]).map(r=>pick(r,recipeFields)),
       roster:maps(s.roster,rosterKey,v=>v&&typeof v==='object'?pick(v,['s','e','b']):v),rosterEdits:maps(s.rosterEdits,rosterKey,v=>pick(v,['at','deleted'])),
       sales:maps(s.sales,salesKey),salesEdits:maps(s.salesEdits,salesKey,v=>pick(v,['at']))});
+    out.staffEdits=Object.fromEntries(Object.entries(s.staffEdits||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['at','status','listed'])]));
+    out.staffFieldEdits=Object.fromEntries(Object.entries(s.staffFieldEdits||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['name','role','historyNames'])]));
+    out.staffPayments=maps(s.staffPayments,k=>safeKey(k),v=>pick(v,['paid','at','paidAt','basis']));
     return initializeBreakDefaults(out);
   }
   function mergeGuest(full, incoming) {
     const out=initializeBreakDefaults(clone(full)), staffIds=new Set([...(full.staff||[]),...(full.staffArchive||[])].map(e=>e.id));
     const count = v => Number.isSafeInteger(v)&&v>=0&&v<=1000000;
     const clock = v => typeof v?.at==='string'&&Number.isFinite(Date.parse(v.at))&&Date.parse(v.at)<=Date.now()+300000;
+    const staffMap=new Map([...(out.staff||[]),...(out.staffArchive||[])].map(e=>[e.id,e]));out.staffEdits||={};out.staffFieldEdits||={};out.accessEdits||={};
+    for(const person of [...(incoming.staff||[]),...(incoming.staffArchive||[])]){
+      const id=person.id;if(typeof id!=='string'||!id||id.length>100||!safeKey(id))continue;
+      const old=staffMap.get(id),status=incoming.staffEdits?.[id],statusNew=clock(status)&&['active','archive'].includes(status.status)&&Date.parse(status.at)>Date.parse(out.staffEdits[id]?.at||'1970-01-01'),edit=incoming.accessEdits?.['staff:'+id],fieldsNew=clock(edit)&&Date.parse(edit.at)>Date.parse(out.accessEdits['staff:'+id]?.at||'1970-01-01');
+      if(!old&&!statusNew||old&&!statusNew&&!fieldsNew)continue;
+      const next={...old,id};if(!old||fieldsNew){
+        if(typeof person.name!=='string'||person.name.length>100||typeof person.role!=='string'||person.role.length>100||!person.def||!['s','e'].every(k=>/^([01]\d|2[0-3]):[0-5]\d$/.test(person.def[k]))||!Number.isInteger(person.def.b)||person.def.b<0||person.def.b>1440||!Array.isArray(person.off)||person.off.some(n=>!Number.isInteger(n)||n<0||n>6))throw Error('invalid_staff_operation');
+        Object.assign(next,pick(person,['name','role','off']));next.def=pick(person.def,['s','e','b']);if(old?.name&&old.name!==next.name)next.historyNames=[...new Set([...(old.historyNames||[]),old.name])];
+        if(fieldsNew)out.accessEdits['staff:'+id]={at:edit.at};
+        for(const field of ['name','role','historyNames']){const fieldEdit=incoming.staffFieldEdits?.[id]?.[field];if(clock(fieldEdit)){out.staffFieldEdits[id]||={};out.staffFieldEdits[id][field]={at:fieldEdit.at};}}
+      }
+      if(statusNew){out.staffEdits[id]=pick(status,['at','status','listed']);if(status.status==='archive'){next.archivedAt=status.at;if(next.wage==null&&next.archivedWage==null)next.archivedWage=out.settings.roleWages?.[next.role]??out.settings.wage;}else{if(next.wage==null&&next.archivedWage!=null)next.wage=next.archivedWage;delete next.archivedAt;delete next.archivedWage;}}
+      const archived=(out.staffEdits[id]?.status||((out.staffArchive||[]).some(e=>e.id===id)?'archive':'active'))==='archive';out.staff=(out.staff||[]).filter(e=>e.id!==id);out.staffArchive=(out.staffArchive||[]).filter(e=>e.id!==id);(archived?out.staffArchive:out.staff).push(next);staffMap.set(id,next);staffIds.add(id);
+    }
+    out.staffPayments||={};for(const [month,records]of Object.entries(incoming.staffPayments||{}))if(/^20\d{2}-(0[1-9]|1[0-2])$/.test(month))for(const [id,record]of Object.entries(records||{})){
+      if(!staffIds.has(id)||!clock(record)||typeof record.paid!=='boolean'||Date.parse(record.at)<=Date.parse(out.staffPayments[month]?.[id]?.at||'1970-01-01'))continue;
+      out.staffPayments[month]||={};out.staffPayments[month][id]={...out.staffPayments[month][id],paid:record.paid,at:record.at,paidAt:record.paid?record.at:null,basis:'manual-check-v1'};
+    }
     function merge(field, edits, keyOK, valueOK) {
       const cells=maps(incoming[field],keyOK), changes=maps(incoming[edits],keyOK);
       out[field]||={};out[edits]||={};
@@ -89,7 +125,7 @@
         out[edits][month][key]={at:edit.at,...(field==='roster'?{deleted:!has}:{})};
       }
     }
-    merge('sales','salesEdits',salesKey,count);
+    merge('sales','salesEdits',salesKey,(v,k)=>/\|(?:ticketBuyer|ticketCompanyName\|[a-zA-Z0-9_-]+)$/.test(k)?typeof v==='string'&&v.length<=100:/\|(?:rev|other|ticketIssuePrice|ticketCompanyPrice\|[a-zA-Z0-9_-]+)$/.test(k)?Number.isSafeInteger(v)&&v>=0:count(v));
     merge('roster','rosterEdits',k=>rosterKey(k)&&staffIds.has(k.split('|')[0]),v=>
       ['', '휴','연차','병가'].includes(v)||(v&&typeof v==='object'&&Object.keys(v).every(k=>['s','e','b'].includes(k))&&
       /^([01]\d|2[0-3]):[0-5]\d$/.test(v.s)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v.e)&&Number.isInteger(v.b)&&v.b>=0&&v.b<=1440));
@@ -113,11 +149,36 @@
         out.hyg||={};out.hyg[kind]=clone(rows);
       }else if(key==='recipeAllowance'){
         const n=ops.recipeAllowance;if(typeof n!=='number'||!Number.isFinite(n)||n<1||n>10)throw Error('invalid_recipe_allowance');out.settings.recipeOrderMultiplier=n;
+      }else if(key==='ticketConfig'){
+        const v=ops.ticketConfig;if(['opening','unitPrice'].some(k=>v[k]!=null&&(!Number.isSafeInteger(v[k])||v[k]<0))||['buyer','supplier'].some(k=>v[k]!=null&&(typeof v[k]!=='string'||v[k].length>100))||v.startDate!=null&&!/^20\d{2}-\d{2}-\d{2}$/.test(v.startDate))throw Error('invalid_ticket_config');out.settings.ticketLedger={...out.settings.ticketLedger,...v};
+      }else if(key.startsWith('purchasePrice:')){
+        const item=key.slice(14),v=ops[key];if(!item||item.length>300||!safeKey(item)||!v||v.price!=null&&(typeof v.price!=='number'||!Number.isFinite(v.price)||v.price<0)||v.vendor!=null&&(typeof v.vendor!=='string'||v.vendor.length>300))throw Error('invalid_purchase_price');out.prices||={};out.prices[item]={...out.prices[item],...v};
+      }else if(key.startsWith('purchaseCalc:')&&/^20\d{2}-\d{2}$/.test(key.slice(13))){
+        const month=key.slice(13),v=ops[key];if(!v||!Array.isArray(v.extras)||v.extras.length>10000||Object.entries(v.adjustments).some(([name,n])=>!safeKey(name)||typeof n!=='number'||!Number.isFinite(n))||v.extras.some(x=>['qty','price'].some(k=>x[k]!=null&&(typeof x[k]!=='number'||!Number.isFinite(x[k])||x[k]<0))))throw Error('invalid_purchase_calculation');out.orderAdj||={};out.extraOrders||={};out.orderAdj[month]=clone(v.adjustments);out.extraOrders[month]=v.extras.map(x=>pick(x,['item','qty','unit','price','vendor','note']));
       }else if(key==='board'){
         out.board||={};Object.assign(out.board,pick(ops.board,['title','sub','note','hideUnpriced','order']));out.board.items||={};
         for(const [name,value]of Object.entries(ops.board.items)){out.board.items[name]={...out.board.items[name],...pick(value,['on','desc'])};}
       }else continue;
       out.accessEdits[key]={at:edit.at};
+    }
+    // Procurement is shared operational data. Only its explicit fields can change;
+    // hidden card links, payroll, taxes and unrelated invoices stay on the server.
+    out.orders||={};out.orderEdits||={};
+    const incomingOrders=new Map(Object.values(orderMap(incoming)).flat().map(o=>[o.id,o]));
+    for(const [id,edit]of Object.entries(incoming.orderEdits||{})){
+      if(!safeKey(id)||!id||id.length>200||!clock(edit))continue;
+      const previous=out.orderEdits[id],found=Object.entries(out.orders).filter(([,rows])=>Array.isArray(rows)).flatMap(([month,rows])=>rows.filter(o=>o.id===id).map(o=>({month,order:o}))),old=found[0]?.order;
+      if(Date.parse(edit.at)<=Date.parse(previous?.at||'1970-01-01')||['ocr','coupang'].includes(edit.origin)&&previous&&(previous.deleted||!['ocr','coupang'].includes(previous.origin)))continue;
+      const next=incomingOrders.get(id);
+      if(!edit.deleted){
+        if(!next||next.id!==id||!/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(next.date)||!Array.isArray(next.items)||next.items.length>10000||JSON.stringify(next).length>2*1024*1024||['subtotal','tax','total','previousBalance','balanceTotal'].some(k=>next[k]!=null&&(typeof next[k]!=='number'||!Number.isFinite(next[k])||next[k]<0))||next.items.some(i=>['price','supplyAmount','tax','amt'].some(k=>i[k]!=null&&(typeof i[k]!=='number'||!Number.isFinite(i[k])||i[k]<0))||i.qty!=null&&!(typeof i.qty==='string'&&i.qty.length<=200)&&!(typeof i.qty==='number'&&Number.isFinite(i.qty)&&i.qty>=0)))throw Error('invalid_invoice');
+      }
+      for(const {month}of found)out.orders[month]=out.orders[month].filter(o=>o.id!==id);
+      if(!edit.deleted){
+        const order={...old};for(const key of [...orderFields,'items','ocrMeta','coupang'])delete order[key];Object.assign(order,next);
+        const month=next.date.slice(0,7);(out.orders[month]||=[]).push(order);
+      }
+      out.orderEdits[id]=pick(edit,['at','deleted','origin']);
     }
     out.storeProducts||={};
     for(const [id,p]of Object.entries(incoming.storeProducts||{})){
@@ -130,10 +191,10 @@
       if(!safeKey(key)||!r||!clock(r)||!/^20\d{2}-\d{2}-\d{2}$/.test(r.date)||key!==r.date+'|'+r.id)continue;
       const old=out.storeSales[key],product=out.storeProducts[r.id];if(!old&&!product||old&&Date.parse(r.at)<=Date.parse(old.at||'1970-01-01'))continue;
       if(!count(r.qty)||r.tickets!=null&&!count(r.tickets))throw Error('invalid_store_quantity');
-      if(r.paymentSplit&&(['ticketQty','cardQty','cashQty'].some(k=>!count(r[k]))||r.qty!==r.ticketQty+r.cardQty+r.cashQty||!r.ticketQty&&r.tickets>0))throw Error('invalid_store_channels');
+      if(r.paymentSplit&&(['ticketQty','cardQty','cashQty'].some(k=>!count(r[k]))||!count(r.creditQty??0)||r.qty!==r.ticketQty+r.cardQty+r.cashQty+(r.creditQty??0)||!r.ticketQty&&r.tickets>0))throw Error('invalid_store_channels');
       const base=old||{id:r.id,date:r.date,name:product.name,category:product.category,unit:product.unit,price:product.price,cost:product.cost};
       if(!priced(base.price))throw Error('store_price_needs_admin');
-      out.storeSales[key]={...base,...pick(r,['qty','tickets','ticketQty','cardQty','cashQty','paymentSplit','deleted','at'])};
+      out.storeSales[key]={...base,...pick(r,['qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'])};
     }
     const stock=stockView(out);out.storeStockImports||={};
     for(const [id,row]of Object.entries(incoming.storeStockImports||{})){

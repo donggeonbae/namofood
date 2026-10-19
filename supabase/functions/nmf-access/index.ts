@@ -8,6 +8,12 @@ import {
   passwordValid,
 } from "../_shared/admin-auth.ts";
 import "../../../assets/access-policy.js";
+import {
+  invoiceFileReferenced,
+  operationalDocumentKind,
+  ticketFiles,
+  validateOperationalBlob,
+} from "../_shared/operational-documents.ts";
 const policy = (globalThis as unknown as {
   NmfAccessPolicy: {
     project: (s: Record<string, unknown>) => Record<string, unknown>;
@@ -144,7 +150,22 @@ Deno.serve(async (request) => {
       }
       return json({ error: "forbidden" }, 403);
     }
-    if (!admin && id !== root) return json({ error: "admin_required" }, 403);
+    const documentKind = id !== root ? operationalDocumentKind(root, id) : "";
+    if (!admin && id !== root && !documentKind) {
+      return json({ error: "admin_required" }, 403);
+    }
+    if (!admin && documentKind === "legacy-ticket-file") {
+      const [index] = await readState(
+        "namofood_state",
+        root + "#ticket-documents",
+      );
+      if (
+        !index ||
+        !ticketFiles(JSON.parse(await decryptText(pw, String(index.data))))
+          .some((f) => id.endsWith("#" + f.hash))
+      ) return json({ error: "admin_required" }, 403);
+      if (method !== "GET") return json({ error: "admin_required" }, 403);
+    }
     if (method === "GET") {
       const fields = (url.searchParams.get("select") || "data,updated_at")
         .split(",");
@@ -161,10 +182,24 @@ Deno.serve(async (request) => {
         );
       }
       const rows = await readState("namofood_state", id);
+      if (
+        !admin && rows.length &&
+        ["invoice-photo", "invoice-file"].includes(documentKind)
+      ) {
+        const [state] = await readState("namofood_state", root);
+        if (
+          !state ||
+          !invoiceFileReferenced(
+            JSON.parse(await decryptText(pw, String(state.data))),
+            documentKind,
+            id.split("#").at(-1)!,
+          )
+        ) return json({ error: "document_not_linked" }, 403);
+      }
       for (const row of rows) {
         row.source_revision = await revision(String(row.data));
       }
-      if (!admin) {
+      if (!admin && id === root) {
         for (const row of rows) {
           row.data = await encryptText(
             pw,
@@ -207,6 +242,38 @@ Deno.serve(async (request) => {
         body.prefer.includes("resolution=ignore-duplicates")
       ) return [];
       let cipher = rowBody.data;
+      if (!admin && documentKind) {
+        const payload = JSON.parse(await decryptText(pw, cipher));
+        if (documentKind === "ticket-index") {
+          const files = ticketFiles(payload),
+            old = existing
+              ? ticketFiles(
+                JSON.parse(await decryptText(pw, String(existing.data))),
+              )
+              : [];
+          for (const file of files) {
+            if (!old.some((f) => f.hash === file.hash)) {
+              const [blob] =
+                await tx`select data from public.namofood_state where id=${
+                  root + "#ticket-document#" + file.hash
+                }`;
+              if (!blob) throw Error("ticket_file_missing");
+              const saved = JSON.parse(
+                await decryptText(pw, String(blob.data)),
+              );
+              if (
+                saved.mime !== file.mime ||
+                atob(saved.bytes).length !== file.size
+              ) throw Error("ticket_file_mismatch");
+            }
+          }
+        } else {
+          if (method !== "POST" || existing) return [];
+          await validateOperationalBlob(payload, id, documentKind);
+        }
+        await tx`insert into public.namofood_state(id,data,updated_at)values(${id},${cipher},${rowBody.updated_at}) on conflict(id)do update set data=excluded.data,updated_at=excluded.updated_at`;
+        return [{ id, updated_at: rowBody.updated_at }];
+      }
       if (!admin) {
         if (!existing) throw Error("guest_cannot_create_room");
         const full = JSON.parse(await decryptText(pw, String(existing.data))),

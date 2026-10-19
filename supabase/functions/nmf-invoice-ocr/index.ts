@@ -89,9 +89,6 @@ export function createHandler(dependencies: Dependencies = {}) {
         );
       }
       const declaredLength = request.headers.get("content-length");
-      if (env("NMF_ADMIN_HASH") && !await adminAuthorized(request, env)) {
-        return json({ ok: false, error: "관리자 인증이 필요합니다." }, 403);
-      }
       if (declaredLength && Number(declaredLength) > BODY_LIMIT) {
         throw new OcrError("body_too_large", 413, "사진 요청이 너무 큽니다.");
       }
@@ -178,6 +175,16 @@ export function createHandler(dependencies: Dependencies = {}) {
           400,
           "사진 요청 형식이 올바르지 않습니다.",
         );
+      }
+      // Procurement OCR is operational. Card OCR still needs an admin session.
+      if (
+        body.documentType === "card" && env("NMF_ADMIN_HASH") &&
+        !await adminAuthorized(request, env)
+      ) {
+        return json({
+          ok: false,
+          error: "카드내역은 관리자 인증이 필요합니다.",
+        }, 403);
       }
       for (const [nonce, expires] of seen) {
         if (expires <= now()) seen.delete(nonce);

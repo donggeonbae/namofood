@@ -4,7 +4,8 @@ const {project,mergeGuest}=globalThis.NmfAccessPolicy;
 const state={settings:{fixed:[['PRIVATE_FIXED',999]],wage:12345,meals:{중식:{count:100,price:9999}}},staff:[{id:'a',name:'직원',wage:777,phone:'PRIVATE_PHONE',account:'PRIVATE_BANK'}],staffArchive:[{id:'b',name:'보관',bonus:999}],orders:{secret:111},staffPayments:{private:true},staffDeductions:{private:true},ticketLedger:{private:true},sales:{'2026-10':{'1|ticketIssued':999,'1|ticketBuyer':'PRIVATE_BUYER','1|중식':20,'1|cashCount|중식':3,'1|other':123}},roster:{'2026-10':{'a|1':{s:'09:00',e:'18:00',b:60},'a|adj':999}},recipes:[{menu:'국',item:'물',qty:100,price:888}],menus:{'2026-10':{'1|중식|n':100}},menuManualEdits:{},rosterEdits:{},salesEdits:{}};
 state.settings.defaultBreakZeroInitialized=true;state.settings.defaultBreakMinutes=0;
 const publicState=project(state),serialized=JSON.stringify(publicState);
-for(const secret of ['PRIVATE','12345','9999','777','888','orders','staffPayments','staffDeductions','ticketIssued','bonus'])assert(!serialized.includes(secret),secret);
+for(const secret of ['PRIVATE_FIXED','PRIVATE_PHONE','PRIVATE_BANK','12345','9999','777','888','staffDeductions','bonus'])assert(!serialized.includes(secret),secret);
+assert.equal(publicState.sales['2026-10']['1|ticketBuyer'],'PRIVATE_BUYER','company counterparties are explicitly shared');
 assert.equal(publicState.sales['2026-10']['1|중식'],20);assert.equal(publicState.settings.meals.중식.count,100);
 const incoming=structuredClone(publicState),at=new Date().toISOString();
 incoming.settings.fixed=[];incoming.staff[0].wage=0;incoming.orders={};incoming.sales['2026-10']['1|중식']=0;incoming.salesEdits={'2026-10':{'1|중식':{at},'1|ticketIssued':{at}}};
@@ -19,6 +20,7 @@ const stale=structuredClone(incoming);stale.salesEdits['2026-10']['1|중식'].at
 console.log('ACCESS_POLICY_DEFAULT_DENY_PRIVATE_FIELDS_SAFE_GUEST_MERGE_ZERO_ROSTER_COUNTS_VALIDATION_STALE_OK');
 const full=structuredClone(state);full.storeProducts={cola:{id:'cola',name:'콜라',category:'음료',unit:'캔',price:2000,cost:900,at:'2026-01-01',deleted:false}};full.storeSales={};full.board={title:'매점',items:{콜라:{on:true,desc:'음료',price:2000}}};
 const draft=project(full);assert(!Object.hasOwn(draft.storeProducts.cola,'price'));assert(!Object.hasOwn(draft.storeProducts.cola,'cost'));assert.equal(draft.storeProducts.cola.priceConfigured,true);
+assert.equal(project(draft).storeProducts.cola.priceConfigured,true,'re-projecting a public cache preserves configured status without revealing the price');
 draft.recipes[0].qty=205;draft.methods={국:'대형솥 조리'};draft.accessEdits={'recipe:국':{at},'hyg:daily':{at},board:{at}};draft.hyg={daily:[{date:'2026-10-19',who:'담당자',items:['○'],note:'정상'}]};draft.board.title='새 제목';draft.board.items.콜라.price=1;
 draft.storeSales['2026-10-19|cola']={id:'cola',date:'2026-10-19',qty:10,ticketQty:5,cardQty:3,cashQty:2,tickets:1,paymentSplit:true,price:1,cost:1,at};
 const saved=mergeGuest(full,draft);assert.equal(saved.recipes[0].qty,205);assert.equal(saved.methods.국,'대형솥 조리');assert.equal(saved.hyg.daily.length,1);assert.equal(saved.board.title,'새 제목');assert.equal(saved.board.items.콜라.price,2000);

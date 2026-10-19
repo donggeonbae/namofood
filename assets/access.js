@@ -63,7 +63,39 @@
     }
     return rawFetch(input,init);
   };
-  const privatePages=new Set(['order','pl','overview','fixed','settings','data']);
+  const privatePages=new Set(['pl','overview','fixed','settings','data']);
+  let salesTab='sales';
+  function salesTabsHtml(){return '<div class="tabs noprint" role="tablist" aria-label="판매 업무"><button role="tab" data-sales-tab="sales" aria-selected="'+(salesTab==='sales')+'" class="'+(salesTab==='sales'?'on':'')+'" onclick="NmfAccess.showSalesTab(\'sales\')">판매실적</button><button role="tab" data-sales-tab="ticket" aria-selected="'+(salesTab==='ticket')+'" class="'+(salesTab==='ticket'?'on':'')+'" onclick="NmfAccess.showSalesTab(\'ticket\')">식권</button></div>';}
+  function sharedSalesHtml(original){
+    if(APP==='cafe')return cafeDailySalesHtml();
+    if(APP==='store')return storeChannelSalesHtml(original());
+    if(APP!=='food')return original();
+    if(salesTab==='ticket')return '<h1>식권</h1>'+salesTabsHtml()+periodPicker('sales')+foodTicketLedgerHtml(periodCurrent('sales').date);
+    const t=document.createElement('template');t.innerHTML=original();t.content.querySelectorAll('#food-ticket-ledger,#food-ticket-documents').forEach(el=>el.remove());t.content.querySelector('h1')?.insertAdjacentHTML('afterend',salesTabsHtml());return t.innerHTML;
+  }
+  const storeChannels=[['ticketQty','식권'],['cardQty','카드'],['cashQty','현금'],['creditQty','당일 외상']];
+  function storeChannelSalesHtml(html){
+    const t=document.createElement('template');t.innerHTML=html;const date=periodCurrent('sales').date,day=Number(date.slice(8));
+    for(const tr of t.content.querySelectorAll('[data-store-sale]')){
+      const id=tr.dataset.storeSale,sale=S.storeSales[date+'|'+id],old=sale&&!sale.deleted?sale:null,disabled=old&&!old.paymentSplit&&old.qty>0;
+      const editButton=tr.querySelector('[data-store-payment-open]');if(editButton)editButton.textContent=old?.paymentSplit?'결제별 수량 수정':'결제별 입력';
+      if(S.storeProducts[id]?.priceConfigured)tr.querySelectorAll('small').forEach(el=>{if(el.textContent.includes('판매가 설정 필요'))el.remove();});
+      tr.cells[0].insertAdjacentHTML('beforeend','<div class="store-channel-grid">'+storeChannels.map(([key,label])=>'<label class="f">'+label+'(개)<input type="number" min="0" step="1" data-store-channel="'+key+'" data-product-id="'+esc(id)+'" value="'+(old?.paymentSplit?old[key]??0:'')+'" placeholder="0" '+(disabled?'disabled title="기존 미분류 기록은 결제별 수량 수정에서 전환해 주세요."':'')+' oninput="NmfAccess.setStoreChannel('+day+','+jsarg(id)+','+jsarg(key)+',this)" onchange="render()"></label>').join('')+'</div>');
+    }return t.innerHTML;
+  }
+  function setStoreChannel(day,id,key,el){
+    if(!storeChannels.some(([k])=>k===key))return false;const raw=el.value.replaceAll(',','').trim(),n=raw===''?0:Number(raw);if(!Number.isSafeInteger(n)||n<0){el.setCustomValidity('0 이상의 상품 개수를 입력하세요.');return false;}el.setCustomValidity('');
+    const date=dateKeyAt(ym(),day),k=date+'|'+id,p=S.storeProducts[id],old=S.storeSales[k];if(!p&&!old)return false;if(old&&!old.paymentSplit&&old.qty>0)return false;
+    const priced=old?.price??p?.price;if(priced==null&&!(old?.priceConfigured||p?.priceConfigured)){toast('관리자에게 상품 판매가 설정을 요청해 주세요.');return false;}
+    const row={...(old||{id,date,name:p.name,category:p.category,unit:p.unit,price:priced,cost:p.cost}),...Object.fromEntries(storeChannels.map(([key])=>[key,old?.paymentSplit?old[key]??0:0])),[key]:n};
+    if(!row.ticketQty&&row.tickets>0){toast('실제로 받은 식권 장수를 먼저 비워 주세요.');return false;}
+    row.qty=storeChannels.reduce((sum,[key])=>sum+row[key],0);row.paymentSplit=true;row.deleted=false;row.at=storeStamp(old);S.storeSales[k]=row;save();return true;
+  }
+  function cafeDailySalesHtml(){
+    const date=periodCurrent('sales').date,d=Number(date.slice(8)),field=(day,key,label)=>'<label class="f">'+label+'<input type="text" inputmode="numeric" data-cafe-amount="'+key+'" data-sales-day-number="'+day+'" value="'+esc(_fmtNum(salesGet(day,key)))+'" placeholder="미입력" onchange="NmfAccess.setCafeAmount('+day+',\''+key+'\',this)"></label>';
+    const rows=periodDays('sales').map(day=>'<tr><td>'+esc(dateKeyAt(ym(),day))+'</td><td>'+field(day,'rev','당일 매출(원)')+'</td><td>'+field(day,'other','기타 매출(원)')+'</td>'+(isAdmin()?'<td class="num">'+won(dayRevenue(day))+'</td>':'')+'</tr>').join('');
+    return '<h1>카페 판매 실적</h1><p class="sub">포스기에서 확인한 날짜별 매출 금액을 입력하세요. 판매 잔수는 입력하지 않습니다. 기타 매출은 포스기 매출에 포함되지 않은 금액만 적어 주세요.</p>'+periodPicker('sales')+'<section class="card" data-cafe-daily><h2>'+esc(date)+' 매출 입력</h2><div class="row">'+field(d,'rev','당일 매출(원)')+field(d,'other','기타 매출(원)')+'</div></section>'+(isAdmin()?'<section class="card" data-cafe-month-summary><h2>'+kmonth()+' 월간 매출</h2><b>'+won(salesSummary().revenue)+'</b></section>':'')+'<section class="card"><h2>날짜별 입력</h2><div class="tbl"><table><thead><tr><th>날짜</th><th>당일 매출(원)</th><th>기타 매출(원)</th>'+(isAdmin()?'<th>일 합계</th>':'')+'</tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+  }
   function paint(){
     const bar=document.getElementById('admin-access');if(!bar)return;
     if(isAdmin())bar.innerHTML='<span>관리자 모드</span><button type="button" class="btn small" id="admin-lock">잠그기</button>';
@@ -135,15 +167,24 @@
   }
   function removeMoney(html,currentPage){
     const t=document.createElement('template');t.innerHTML=html;const root=t.content;
-    root.querySelectorAll('[data-admin-only],#food-ticket-ledger,[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
+    if(currentPage==='order'){
+      root.querySelector('#invoice-monthly-summary')?.remove();root.querySelector('[data-order-view="card"]')?.remove();
+      root.querySelectorAll('.kpi').forEach(el=>{if(/금액|식재비|미수|공급가|세액/.test(el.textContent))el.remove();});
+      return t.innerHTML;
+    }
+    if(APP==='cafe'&&currentPage==='sales')return html;
+    const retained=[];for(const el of root.querySelectorAll('#food-ticket-ledger,#food-ticket-documents')){const marker=document.createComment('shared-ticket-operations');el.replaceWith(marker);retained.push([marker,el]);}
+    root.querySelectorAll('input').forEach(el=>{if(el.hasAttribute('data-sales-other')||/salesSet\([^)]*,\s*['"]other['"]/.test((el.getAttribute('oninput')||'')+' '+(el.getAttribute('onchange')||'')))el.dataset.publicEntry='other';});
+    root.querySelectorAll('[data-admin-only],[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
     root.querySelectorAll('.kpi').forEach(el=>{if(/원|매출|인건비|급여|순익|수익|수당|사업자 부담|세금/.test(el.textContent))el.remove();});
     root.querySelectorAll('table').forEach(table=>{
       const header=table.tHead?.rows[table.tHead.rows.length-1];if(!header)return;
-      const count=header.cells.length,money=[...header.cells].flatMap((cell,i)=>(/금액|단가|판매가|가격|매출|원가|시급|수당|급여|지급|공제|실입금|연락|계좌/.test(cell.textContent)||/^(HOT|ICE)$/.test(cell.textContent.trim()))&&!/일 합계/.test(cell.textContent)?[i]:[]);
+      const count=header.cells.length,money=[...header.cells].flatMap((cell,i)=>(/금액|단가|판매가|가격|매출|원가|시급|수당|급여|지급|공제|실입금|연락|계좌/.test(cell.textContent)||/^(HOT|ICE)$/.test(cell.textContent.trim()))&&!/일 합계|기타.*매출|지급·관리/.test(cell.textContent)?[i]:[]);
       for(const row of table.rows)if(row.cells.length===count)for(const i of [...money].reverse())row.cells[i]?.remove();
       const columns=[...table.querySelectorAll(':scope > colgroup > col')];for(const i of [...money].reverse())columns[i]?.remove();
     });
     root.querySelectorAll('input,select,textarea').forEach(el=>{
+      if(el.hasAttribute('data-public-entry')||el.hasAttribute('data-staff-paid'))return;
       const action=[el.getAttribute('oninput'),el.getAttribute('onchange'),el.dataset.field].join(' '),label=el.closest('label');
       if(/(?:wage|bonus|burden|deduct|tax|account|bank|phone|roleWage|staffPayment|payrollMethod|insured|ticketIssuePrice|ticketIssued)|(?:storeSaleSet\([^)]*,\s*['"](?:price|cost)['"])|(?:S\.prices)/i.test(action)||label&&/\(원\)|（원）|금액|매출|시급|수당|계좌|전화|연락처|이메일/.test(label.textContent)) (label||el.closest('td')||el).remove();
     });
@@ -160,33 +201,43 @@
     root.querySelectorAll('[data-sales-meal-comparison] span').forEach(el=>{if(/금액|회수액/.test(el.textContent))el.remove();});
     root.querySelectorAll('[data-sales-day-total]').forEach(el=>{
       const first=el.firstElementChild;if(first){const b=first.querySelector('b');if(b&&first.textContent.startsWith('회사 판매')){b.previousSibling?.remove();b.nextSibling?.remove();b.remove();}}
-      el.querySelectorAll('.hint,.sales-extra-fields,[data-sales-unassigned]').forEach(child=>child.remove());
+      el.querySelectorAll('.hint,[data-sales-unassigned]').forEach(child=>child.remove());
       [...el.children].filter(child=>/실제 매출/.test(child.textContent)).forEach(child=>child.remove());
     });
     if(currentPage==='roster'){
       root.querySelector('#staff-payroll-table')?.closest('.card')?.remove();
-      root.querySelector('#staffArchive')?.remove();
-      // The ordinary staff directory keeps its familiar layout, without private controls.
-      root.querySelectorAll('.staff-detail-button,.staff-action button,[onclick*="staffAdd"],[onclick*="staffDel"],[onclick*="staffArchive"]').forEach(el=>el.remove());
-      root.querySelectorAll('#staff-directory-table input,#staff-directory-table select').forEach(el=>{el.disabled=true;el.title='직원 기본정보 변경은 관리자 전용입니다.';});
+      // Directory operations remain shared; wage/contact/payroll documents stay private.
+      root.querySelectorAll('.staff-detail-button,.staff-order-controls,.staff-insured').forEach(el=>el.remove());
     }
     if(APP==='store'){
       const form=root.querySelector('#store-add-form');if(form)form.innerHTML='<h2>새 상품 추가</h2><p class="hint">새 상품·가격 설정은 관리자 모드에서 합니다. 등록된 상품의 판매수량은 일반 모드에서도 입력할 수 있습니다.</p>';
       root.querySelectorAll('[data-field="price"],[data-field="cost"]').forEach(el=>el.closest('td')?.remove());
     }
-    root.querySelectorAll('[data-sales-extra],.sales-extra-entry').forEach(el=>(el.closest('label')||el).remove());
+    root.querySelectorAll('[data-sales-extra]:not([data-sales-other])').forEach(el=>(el.closest('label')||el).remove());
     root.querySelectorAll('.pr').forEach(el=>el.remove());
     root.querySelectorAll('.row > b,.row > span').forEach(el=>{if(/매출|금액|원가|단가/.test(el.textContent))el.remove();});
     // Mixed footer cells have count totals and currency. Drop currency-only leaf nodes, not count inputs/cards.
     const nodes=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),texts=[];while(nodes.nextNode())texts.push(nodes.currentNode);
     for(const text of texts){if(/^[\s+−-]*[\d,.]+원[\s]*$/.test(text.textContent))text.parentElement?.remove();}
+    for(const [marker,el]of retained)marker.replaceWith(el);
     root.querySelectorAll('.grid2,.grid3,.row').forEach(el=>{if(!el.children.length&&!el.textContent.trim())el.remove();});
     return t.innerHTML;
   }
-  window.NmfAccess={isAdmin,initialize(){
+  window.NmfAccess={isAdmin,setStoreChannel,showSalesTab(tab){salesTab=tab==='ticket'?'ticket':'sales';go('sales');},setCafeAmount(day,key,el){const raw=el.value.replaceAll(',','').trim();if(!['rev','other'].includes(key)||raw!==''&&(!/^\d+$/.test(raw)||!Number.isSafeInteger(+raw))){el.setCustomValidity('0 이상의 원 단위 금액을 입력하세요.');return false;}el.setCustomValidity('');salesSet(day,key,raw);render();return true;},initialize(){
     const bar=document.createElement('div');bar.id='admin-access';bar.className='noprint';
     const switches=document.querySelector('.appsw'),stack=document.createElement('div');stack.className='access-switch-stack noprint';switches.before(stack);stack.append(switches,bar);
     const originalGo=go,originalRender=render;
+    const originalTicketScope=foodTicketUiScope;foodTicketUiScope=function(){const before=foodTicketUi.scope,result=originalTicketScope();if(before!==foodTicketUi.scope)foodTicketUi.settingsOpen=true;return result;};foodTicketUi.settingsOpen=true;
+    const originalStorePayment=storePaymentOpen;storePaymentOpen=function(day,id){originalStorePayment(day,id);const dialog=document.getElementById('store-payment-dialog');if(!dialog)return;const old=S.storeSales[dateKeyAt(ym(),day)+'|'+id],tickets=dialog.querySelector('[data-store-payment=tickets]')?.closest('label');tickets?.insertAdjacentHTML('beforebegin','<label class="f">당일 외상으로 판매한 상품 수<input data-store-payment="creditQty" type="number" min="0" step="1" value="'+(old?.creditQty??'')+'" placeholder="0"></label>');dialog.querySelector('p.hint:last-of-type').textContent='총 판매 수량 = 식권·카드·현금·외상 상품 수 합계. 카드·현금·외상은 당시 판매가 기준으로 매출에 포함합니다. 실제 받은 식권 장수는 따로 입력하며, 식권 회수에 현금·카드·외상 수량은 포함하지 않습니다.';};
+    const originalPaidCurrent=staffPaymentCurrent;staffPaymentCurrent=function(row,month=ym()){const record=staffPayment(row.e.id,month);return record?.basis==='manual-check-v1'?!!record.paid:originalPaidCurrent(row,month);};
+    const originalSetPaid=setStaffPaid;setStaffPaid=function(id,paid,month=ym()){
+      const row=laborRows().find(r=>r.e.id===id);if(isAdmin()&&row&&staffNetPay(row,month).ready)return originalSetPaid(id,paid,month);
+      if(month!==ym()||!findStaff(id))return;const previous=staffPayment(id,month),at=new Date(Math.max(Date.now(),(Date.parse(previous?.at)||0)+1)).toISOString();S.staffPayments||={};S.staffPayments[month]||={};S.staffPayments[month][id]={paid:!!paid,basis:'manual-check-v1',at,paidAt:paid?at:null};save();render();
+    };
+    const originalArchivePayment=staffArchivePaymentHtml;staffArchivePaymentHtml=function(e,row){if(isAdmin()&&row&&staffNetPay(row).ready)return originalArchivePayment(e,row);return '<label class="payroll-paid"><input type="checkbox" data-staff-paid="'+esc(e.id)+'" '+(staffPayment(e.id)?.paid?'checked':'')+' onchange="setStaffPaid('+jsarg(e.id)+',this.checked)">'+kmonth()+' 지급 완료</label>';};
+    const originalRosterCsv=csvRoster;csvRoster=function(){if(isAdmin())return originalRosterCsv();const days=periodDays('roster');csv('근무표_'+ym(),[['이름',...days.map(d=>d+'일')],...rosterStaff().map(e=>[e.name,...days.map(d=>{const c=rosterGet(e.id,d);return isWork(c)?c.s+'~'+c.e+' (휴게 '+c.b+'분)':c||'';})])]);};
+    for(const name of ['invoiceMonthlySummaryHtml','invoicePaymentHtml','paymentAiPanelHtml','coupangPanelHtml']){const original=window[name];window[name]=function(...args){return isAdmin()?original(...args):'';};}
+    for(const name of ['paymentAiSchedule','coupangResume']){const original=window[name];window[name]=function(...args){if(isAdmin())return original(...args);};}
     operationBase=policy.operations(S);
     const originalSave=save;save=function(){
       const next=policy.operations(S);if(!cloudApplying){S.accessEdits||={};for(const key of new Set([...Object.keys(operationBase),...Object.keys(next)]))if(JSON.stringify(operationBase[key])!==JSON.stringify(next[key]))S.accessEdits[key]={at:new Date(Math.max(Date.now(),(Date.parse(S.accessEdits[key]?.at)||0)+1)).toISOString()};}
@@ -201,7 +252,8 @@
     const originals={...PAGES};
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
       if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
-      const html=p==='roster'?commonRoster(originals[p]()):originals[p]();
+      if(p==='order'&&!isAdmin()&&orderView==='card')orderView='sheet';
+      const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):originals[p]();
       return isAdmin()?html:removeMoney(html,p);
     };
     render=function(){paint();originalRender();if(isAdmin()&&page==='data'){
