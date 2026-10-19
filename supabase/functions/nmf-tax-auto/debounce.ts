@@ -19,6 +19,14 @@ export async function financeHash(state: TaxState): Promise<string> {
     { price?: unknown }
   >;
   const pricing = {
+    ...(state.settings?.ticketLedger &&
+        (state.settings.ticketLedger as Record<string, unknown>).unitPrice !=
+          null
+      ? {
+        companyTicketUnitPrice:
+          (state.settings.ticketLedger as Record<string, unknown>).unitPrice,
+      }
+      : {}),
     tickets: state.settings?.tickets || {},
     mealPrices: Object.fromEntries(
       ["조식", "중식", "석식", "야식"].map(
