@@ -172,8 +172,8 @@ async function verifyWidth(browser, width) {
   await openWeek(page, 4); await assertActiveWeek(page, 4, [26, 27, 28, 29, 30, 31], "last October week is trimmed to month end");
   await page.getByRole("button", { name: "이 주 전체 선택/해제", exact: true }).click();
   await assertSelection(page, groupKeys([26, 27, 28, 29, 30, 31]), "month end excludes padding and next-month dates");
-  const monthInput = page.locator('input[type="month"]'); await monthInput.fill("2026-11"); await monthInput.blur();
-  assert.equal(await page.evaluate(() => S.month), "2026-11", "real month input changes the displayed month");
+  const dateInput = page.getByLabel('근무표 기준 날짜'); await dateInput.fill("2026-11-01"); await dateInput.blur();
+  assert.equal(await page.evaluate(() => S.month), "2026-11", "current period date input changes the displayed month");
   assert.deepEqual(await selectedKeys(page), [], "month change clears selection");
   assert.equal(await page.locator("#rosterBulkPanel").count(), 0, "month change closes the old week editor");
   assert.deepEqual(await protectedData(page), beforeSwitch, "month navigation cannot mutate staff/history/markers");

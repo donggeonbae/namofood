@@ -135,16 +135,34 @@
     // Clear all private lexical caches without persisting a login token.
     location.reload();
   }
+  function rosterMonthLayout(){
+    const main=document.getElementById('main'),style=getComputedStyle(main),mobile=innerWidth<=900,person=innerWidth<=600?64:88;
+    const width=main.clientWidth-parseFloat(style.paddingLeft)-parseFloat(style.paddingRight)-(mobile?26:38),columns=Math.floor((width-person)/30);
+    return columns>=ymParts().days?'full':columns>=16?'halves':'weeks';
+  }
   function scheduleHtml(){
     rosterBulkSync();
     const {off}=ymParts(),days=periodDays('roster'),mode=periodViews.roster.mode,people=rosterStaff();
     const week=rosterBulk.activeWeek??Math.floor((off+Number(periodCurrent('roster').date.slice(8))-1)/7),active=rosterBulk.enabled;
-    const head=days.map(d=>'<th>'+((active&&rosterBulkActiveDay(d))?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+d+'일 전체 선택" onchange="selectRosterBulkDay('+d+')">':'')+d+'일<small>'+KDAY[(off+d-1)%7]+'</small></th>').join('');
-    const rows=people.map(e=>'<tr><td class="roster-person" title="'+esc(e.name)+'">'+((active)?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+esc(e.name)+' 주차 선택" onchange="selectRosterBulkRow('+jsarg(e.id)+','+week+')">':'')+'<span>'+esc(e.name||'이름 없음')+'</span></td>'+days.map(d=>cellHtml(e,d,(off+d-1)%7)).join('')+'</tr>').join('');
-    const count='<tr class="chk"><td class="roster-person">근무 인원</td>'+days.map(d=>'<td>'+people.filter(e=>isWork(rosterGet(e.id,d))).length+'</td>').join('')+'</tr>';
+    const layout=mode==='month'?rosterMonthLayout():'full',groups=layout==='halves'?[days.slice(0,15),days.slice(15)]:layout==='weeks'?Array.from({length:Math.ceil((off+days.length)/7)},(_,w)=>Array.from({length:7},(_,k)=>{const d=w*7+k-off+1;return d>=1&&d<=days.length?d:null;})):[days];
+    const tables=groups.map(group=>{
+      const visible=group.filter(Boolean),groupActive=active&&visible.some(rosterBulkActiveDay);
+      const head=group.map((d,k)=>d?'<th scope="col">'+((active&&rosterBulkActiveDay(d))?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+d+'일 전체 선택" '+(people.length&&people.every(e=>rosterBulk.selected.has(rosterBulkKey(e.id,d)))?'checked':'')+' onchange="selectRosterBulkDay('+d+')">':'')+d+'일<small>'+KDAY[(off+d-1)%7]+'</small></th>':'<th aria-label="이 달 날짜 없음">'+KDAY[k]+'</th>').join('');
+      const rows=people.map(e=>'<tr><td class="roster-person" title="'+esc(e.name)+'">'+(groupActive?'<input class="roster-bulk-group noprint" type="checkbox" aria-label="'+esc(e.name)+' 주차 선택" '+(rosterBulkWeekDays(week).every(d=>rosterBulk.selected.has(rosterBulkKey(e.id,d)))?'checked':'')+' onchange="selectRosterBulkRow('+jsarg(e.id)+','+week+')">':'')+'<span>'+esc(e.name||'이름 없음')+'</span></td>'+group.map(d=>d?cellHtml(e,d,(off+d-1)%7):'<td class="roster-outside" aria-label="이 달 날짜 없음"></td>').join('')+'</tr>').join('');
+      const count='<tr class="chk"><td class="roster-person">근무 인원</td>'+group.map(d=>'<td>'+(d?people.filter(e=>isWork(rosterGet(e.id,d))).length:'')+'</td>').join('')+'</tr>';
+      return '<div class="tbl"><table class="roster unified-roster '+(mode==='month'?'roster-monthly':'')+'" data-roster-mode="'+mode+'" aria-label="'+kmonth()+' '+visible[0]+'일부터 '+visible.at(-1)+'일까지 근무표">'+(groups.length>1?'<caption>'+visible[0]+'일 ~ '+visible.at(-1)+'일</caption>':'')+'<colgroup><col class="roster-person-col">'+group.map(()=>'<col>').join('')+'</colgroup><thead><tr><th class="roster-person" scope="col">이름</th>'+head+'</tr></thead><tbody>'+rows+count+'</tbody></table></div>';
+    }).join('');
     const weeks=Math.ceil((off+ymParts().days)/7);
-    return '<section class="card common-roster" data-roster-common><div class="row noprint roster-common-toolbar"><b>'+kmonth()+' 근무표</b><label class="f">일괄 입력 주차<select aria-label="일괄 입력 주차" onchange="toggleRosterBulk(true,+this.value)">'+Array.from({length:weeks},(_,w)=>'<option value="'+w+'" '+(w===week?'selected':'')+'>'+(w+1)+'주 · '+rosterBulkWeekRange(w)+'</option>').join('')+'</select></label><button class="btn small" onclick="toggleRosterBulk('+(!active)+','+week+')">'+(active?'일괄 입력 닫기':'여러 칸 선택 · 일괄 입력')+'</button></div>'+rosterBulkPanel(week)+'<div class="tbl"><table class="roster unified-roster '+(mode==='month'?'roster-monthly':'')+'" data-roster-mode="'+mode+'"><colgroup><col class="roster-person-col">'+days.map(()=>'<col>').join('')+'</colgroup><thead><tr><th class="roster-person">이름</th>'+head+'</tr></thead><tbody>'+rows+count+'</tbody></table></div></section>';
+    return '<section class="card common-roster" data-roster-common data-roster-layout="'+layout+'"><div class="row noprint roster-common-toolbar"><b>'+kmonth()+' 근무표</b><label class="f">일괄 입력 주차<select aria-label="일괄 입력 주차" onchange="toggleRosterBulk(true,+this.value)">'+Array.from({length:weeks},(_,w)=>'<option value="'+w+'" '+(w===week?'selected':'')+'>'+(w+1)+'주 · '+rosterBulkWeekRange(w)+'</option>').join('')+'</select></label><button class="btn small" onclick="toggleRosterBulk('+(!active)+','+week+')">'+(active?'일괄 입력 닫기':'여러 칸 선택 · 일괄 입력')+'</button></div><p class="hint roster-time-legend">윗줄 출근 · 아랫줄 퇴근 · 24시간 표기'+(layout!=='full'?' · 화면 너비에 맞춰 월간 전체를 구간별로 표시':'')+'</p>'+rosterBulkPanel(week)+'<div class="roster-tables">'+tables+'</div></section>';
   }
+  let rosterResizeTimer;
+  function rosterResize(){clearTimeout(rosterResizeTimer);rosterResizeTimer=setTimeout(()=>{
+    const root=document.querySelector('[data-roster-common]'),focused=document.activeElement;
+    if(page!=='roster'||periodViews.roster.mode!=='month'||!root||root.dataset.rosterLayout===rosterMonthLayout())return;
+    if(focused&&document.getElementById('main').contains(focused)&&focused.matches('input,select,textarea')||document.getElementById('codepick')?.style.display==='flex')return;
+    rosterBulkRender();
+  },100);}
+  addEventListener('resize',rosterResize);document.addEventListener('focusout',rosterResize);
   function commonRoster(html){
     const t=document.createElement('template');t.innerHTML=html;
     const blocks=[...t.content.querySelectorAll('.roster-week-card')],replacement=document.createElement('div');replacement.innerHTML=scheduleHtml();

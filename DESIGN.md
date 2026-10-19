@@ -147,6 +147,7 @@
 
 ## Responsive behavior
 
+- Monthly roster (2026-10-20): keep complete 24-hour start/end times on separate lines, omitting the decorative tilde in the monthly grid. Never clip times or shrink them until adjacent dates collide. Use the full month on sufficiently wide content, two chronological ranges on mid-size desktops, and calendar-week sections on narrow content, retaining every date exactly once and the selected month mode. Use the same layout for guest/admin roles; preserve weekly bulk selection, the time editor and saved shifts on resize. No monthly minimum width that forces horizontal scrolling. Day/week modes retain their existing semantics.
 - Test widths: 320, 390, 600, 768, 900, 1024, 1280 and 1440px.
 - Directory: fixed proportional desktop columns; employee cards below 620px without clipping or horizontal overflow.
 - Weekly bulk controls: wrap within the week card; apply remains close to the count and time inputs.
@@ -155,6 +156,7 @@
 
 ## Interaction states
 
+- Purchase routing feedback (2026-10-20): show the actual cross-location move count beside selection controls. Disable no-op moves with a local explanation. Validation failures stay next to the clicked receipt's button with an alert and focus, not only above the full list. A successful receipt leaves the current review list; failed receipts and selections remain. Preserve total/line reconciliation, original evidence and explicit confirmation; never invent a split allocation to bypass a failure.
 - Loading: keep existing cloud-sync behavior; this feature adds no network dependency.
 - Empty: explain empty staff or selection; apply disabled with zero selected cells.
 - Error: explain invalid times; previous-day copy skips missing, leave or invalid shifts.
