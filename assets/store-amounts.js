@@ -41,6 +41,7 @@
       .store-catalog-table th:nth-child(2){width:9%}.store-catalog-table th:nth-child(3){width:5%}
       .store-catalog-stock strong,.store-catalog-stock small{display:block}.store-catalog-stock strong{font-size:13px}.store-catalog-stock small{font-size:10px;color:#526272}
       .store-catalog-table td{padding:5px;vertical-align:top;min-width:0;overflow-wrap:anywhere}
+      .store-catalog-table th,.store-catalog-table td,.store-catalog-table input{text-align:center!important}
       .store-catalog-table input{width:100%;min-width:0;min-height:28px;padding:4px;font-size:13px;border-radius:4px}
       .store-catalog-table td[data-label=단위]{width:48px}.store-catalog-table [data-field=cost]{text-align:right}
       .store-catalog-table .btn.small{min-height:26px;padding:3px 6px;font-size:11px;margin:2px 0}
