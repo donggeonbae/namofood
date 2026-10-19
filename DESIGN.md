@@ -142,6 +142,7 @@
 
 ## Implementation constraints
 
+- Reviewed period-ledger basis (2026-10-19): partition only source-verified rows into their actual transaction dates and account. Daily sums, source coverage and grand totals must reconcile before an operator-authorized migration. Archive only explicitly matched daily statements; preserve photos, tables, dated balance evidence, and unrelated or incomplete accounts. Parent pages retain reversible field-correction audits and do not add financial costs again. Link each derived daily table to its parent source pages. The top duplicate-exclusion warning uses native details, initially collapsed with counts, retaining expansion only locally across renders. Archived balances remain dated snapshots; later ledger transactions without a balance keep the latest balance unresolved, not invented. No recurring provider calls or schema changes.
 - Framework: existing single HTML app and native CSS/JavaScript, distributed through the encrypted loader.
 - Tokens: existing CSS variables and controls only.
 - Performance: selection state is ephemeral; no extra polling or external libraries.
