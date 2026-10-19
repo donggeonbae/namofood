@@ -82,6 +82,10 @@ async function fixture(browser) {
     state.orderEdits = {}; state.cardTransactions = { '2026-09': [{ id: seedId, ...{ date: '2026-09-25', time: '09:00', merchant: '보존할 카드기록', amount: 500, status: 'approved', cardLabel: '검증카드', last4: '1234', approvalNo: 'C-OLD', installment: '', note: '보존', warnings: [] } }] }; state.cardEdits = {};
     state.fixedMonthly = { '2026-09': [['보존할 고정비', 123456]], '2026-10': [['보존할 고정비', 123456]] };
     state.menus = { '2026-09': { '30|중식|2': '수동 식단 보존' } }; state.recipes = []; state.recipeAsk = {}; state.staff = [{ id: 'staff-protected', name: '보존 직원', role: '조리', wage: 15000, def: { s: '09:00', e: '18:00', b: 60 }, off: [] }]; state.roster = { '2026-09': { 'staff-protected|2': { s: '09:00', e: '18:00', b: 60 } } }; state.rosterEdits = { '2026-09': {} }; state.view.printMeals = [...MEALS];
+    // Cloud merge initializes these current-schema empty maps. Include them in
+    // the baseline so the strict protected-domain equality still detects real
+    // edits, rather than mistaking schema initialization for lost business data.
+    state.recipeResolutions = {}; state.salesEdits = {};
     S = normalize(state); localStorage.setItem(KEY, JSON.stringify(S)); orderView = 'card'; go('order'); return structuredClone(S);
   }, seedId);
   const put = async (state, at = '2026-10-01T00:00:00.000Z') => { remote = { id: 'namofood', data: await a.evaluate(async ({ state, password }) => encryptText(password, JSON.stringify(state)), { state, password }), updated_at: at }; };
