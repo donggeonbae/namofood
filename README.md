@@ -1,149 +1,114 @@
 # Namofood
 
-### 1019-21 일반 업무 입력 범위
+Namofood manages daily operations for a factory canteen, cafe, and store: meal plans, recipes, purchasing, staff schedules, sales, meal tickets, and financial reporting.
 
-발주집계는 일반 모드에서도 사진·엑셀 등록, 품목·단가·금액 수정, 원본 대조가 가능합니다.
-월간 발주·미수 요약, 카드내역·AI 카드 연결, 손익·통합손익·고정비·설정·백업은 관리자 전용입니다.
-푸드 왼쪽 메뉴에서 판매실적 바로 아래 독립 **식권** 탭을 사용합니다. 회사별 판매/단가/기초 설정·명세서와 날짜별 기존 거래 기록을 모아두며 회사 설정은 처음 펼쳐집니다.
-기타매출은 모든 사업장에서 입력하며, 카페는 잔수 대신 당일 포스 매출 금액과 기타매출을 입력합니다(포스 자동 연결은 아직 아님).
-직원 이름·역할·기본 근무·정기휴무·추가/보관/복귀/명단 삭제는 일반 모드에서도 저장합니다.
-직원 순서는 관리자가 정한 순서를 공유하고, 급여·수당·공제·연락/계좌·급여 원본 서류는 공개하지 않습니다.
-보관 직원 지급 완료는 금액 없는 수동 확인으로도 체크할 수 있으며, 실제 임금·기존 근무·지급 금액은 덮어쓰지 않습니다.
-매점은 식권/카드/현금/외상 상품 개수를 직접 입력합니다. 외상도 당시 판매가로 매출에 포함하고 실제 받은 식권 장수와 분리합니다.
-새 식권 파일은 별도 `#ticket-document#` 공간, 기존 식권 파일은 해당 식권 목록에서 확인된 것만 열람합니다.
-검증: `test_guest_business_policy.cjs`, `test_guest_staff_policy.cjs`, `test_guest_business_access.cjs`,
-`test_guest_store_sales.cjs`, `test_operational_documents.ts`. 서버는 허용 항목만 최신 원본에 병합합니다.
-아래 1019-18/20 설명의 더 좁았던 발주/직원/회사판매 제한은 이 절로 대체합니다.
+Switch between **Food**, **Cafe**, and **Store** at the top left. Their records are stored separately under the Supabase state IDs `namofood`, `namocafe`, and `namostore`.
 
-### 관리자·일반 화면 분리 (1019-18)
+## Access and data safety
 
-1019-20 화면 정리: 관리자/일반 모드는 같은 기존 화면·레시피 필터·재료 편집기를 사용하며,
-일반 모드에서는 금액·급여·민감정보 영역만 제거합니다. 홈/판매를 별도 간소화 화면으로 바꾸지 않습니다.
-근무표는 두 모드 모두 하나의 일/주/월 표로 통일하고 월간 이름은 줄바꿈하지 않습니다.
-직원별 인건비·직원 정보 관리 기능은 관리자 전용으로 유지합니다. 로그인 글자색을 명시하고
-잠그기 버튼을 중앙에 둡니다. 로그인 실패 횟수에 따른 15분 잠금은 없애고 중복 클릭 1초 간격만 둡니다.
+The GitHub Pages repository is public, but the application body in `index.html` is encrypted with **AES-256-GCM** and decrypted in the browser. The shared unlocking password is not sent to the server. Separate server-side administrator authentication controls access to financial and sensitive records.
 
-매점 일반 모드에서도 원래 판매 표와 식권/카드/현금 상품 수·받은 식권 입력을 사용합니다.
-서버는 수량만 갱신하고 실제 당시 판매가·매입단가는 보존해 매출을 계산합니다. 금액은 일반 응답에
-포함하지 않습니다. 재고에는 금액 없는 품목·입고수·묶음 연결 정보만 제공합니다.
-레시피·조리법·위생·메뉴판 설명의 일반 사용자 수정은 운영 항목별 시각으로 병합하며,
-급여·세금·발주 금액을 덮어쓰지 않습니다. 검증: `test_guest_store_sales.cjs`, `test_access_policy.cjs`.
+- Keep passwords, signing keys, tokens, and the plaintext application out of commits.
+- Use a shared password of at least 12 characters; short passwords are vulnerable to offline guessing.
+- Do not enable password remembering or register a trusted device on a shared computer.
+- Photos submitted for recognition are sent to the configured AI provider. Check its data-handling policy and redact unnecessary personal information first.
+- AI output and tax estimates require human review. The app does not file tax returns, issue tax invoices, or establish eligibility for tax deductions.
 
-기본 휴게시간은 새 직원/새 근무/기본 채우기/일괄 입력 모두 0분입니다. 기존에 저장한 근무의
-휴게시간은 그대로 유지하고, 옛 근무코드는 종전 휴게시간으로 먼저 변환한 뒤 기본값을 바꿉니다.
-초기화 이후 명시적으로 변경한 직원별 기본 휴게시간도 유지합니다.
+## Daily use
 
-푸드/카페/매점 버튼 바로 아래에서 관리자 인증을 받습니다. 설정·백업·발주·손익·통합손익·고정비와
-급여/연락처/계좌/회사 식권 판매·금액 자료는 관리자 전용입니다. 새로고침·사업장 전환·재접속하면
-다시 잠깁니다. 로그인은 최대 4시간이며 관리자 비밀번호·토큰은 브라우저 저장소에 기억하지 않습니다.
-일반 화면에는 식단·레시피 편집, 근무시간, 예상/회수·현금/카드/외상 식수 입력을 제공합니다.
-매점 결제별 수량 입력은 일반 모드에서도 이용하며 가격 설정·원본 증빙/발주는 관리자 모드에서 이용합니다.
+1. Unlock the application and select Food, Cafe, or Store.
+2. Enter operational records in the relevant tab. Food has a separate **Tickets** tab directly below Sales.
+3. Check the shared-save indicator after editing.
+4. Authenticate as an administrator below the business switcher to view financial summaries, payroll, settings, and backups.
 
-`nmf-access`가 서버에서 권한을 확인하고 일반 사용자에게는 명시적으로 허용한 운영 필드만 반환합니다.
-일반 사용자의 저장은 서버 원본에 허용된 식수·근무시간·식단 칸만 병합하며 급여·발주·설정을 덮어쓰지
-못합니다. 문서/백업·세금 결과·카드 연결·OCR·쿠팡 앱 요청에도 관리자 권한이 필요합니다.
-자동 조리법/세금 작업과 쿠팡 연결 프로그램의 별도 서버 인증은 유지합니다.
+### Standard and administrator modes
 
-기기 일반 캐시는 공개 필드만 담고, 관리자 임시저장은 인증 후 서버에서 받은 고강도 키로 암호화합니다.
-6자리 관리자 비밀번호 자체를 오프라인 암호화 키로 쓰지 않습니다. 이전 기기의 전체 캐시·카드 초안은
-관리자용 `@local-draft-*` 서버 백업으로 보관하고 일반 캐시에서 제거합니다. 전송 실패 시 창 닫기 경고가
-나오며 임시저장은 관리자 백업 화면에서 내려받을 수 있습니다. 이미 내려받았거나 이전 버전에서
-노출됐던 사본을 소급 회수할 수는 없습니다. 원본 사업 자료를 삭제하거나 전체 공용 암호를 변경하지 않습니다.
+The operational access rules introduced in **1019-21** supersede the narrower purchasing, staff, and company-ticket restrictions documented for 1019-18/20.
 
-배포 순서: 비밀값(해시·서명 키) → 비공개 시도 제한 테이블 → `nmf-access`/관련 함수 → 암호화 웹앱 →
-공개 테이블 직접 접근 차단 SQL. 비밀값·평문 앱·인증 토큰은 커밋하지 않습니다. 실패 시 공개 권한을
-다시 열지 말고 기존 자료를 보존한 채 접근 함수를 수리합니다.
-검증: `test_access_policy.cjs`, `test_admin_access.cjs`, `test_access_live.cjs`, `admin-auth_test.ts`.
+| Area | Standard mode |
+| --- | --- |
+| Purchasing | Upload photos and spreadsheets; edit items, unit prices, and amounts; compare originals |
+| Food tickets | Company sales, unit prices, opening balances, statements, and existing daily transactions |
+| Sales | Enter operational counts and other sales for each business |
+| Cafe | Enter daily POS revenue and other sales instead of cup counts; automatic POS integration is not implemented |
+| Staff | Edit names, roles, default shifts, and regular days off; add/archive/restore/remove roster entries; retain the shared administrator-defined order |
+| Archived staff | Manually mark payment complete without displaying an amount or overwriting wages, shifts, or payment amounts |
+| Private areas | Monthly purchasing and outstanding-balance summaries, card records/AI matching, profit, consolidated profit, fixed costs, settings, backups, and sensitive payroll details remain administrator-only |
 
-### 쿠팡 목록 정리·매점 결제별 수량
+The two modes share the existing screens, recipe filters, ingredient editor, and day/week/month schedule. Standard mode hides restricted fields rather than replacing Home or Sales with a simplified interface. Monthly staff names do not wrap.
 
-쿠팡 가져온 목록 아래 접힌 날짜별 선택 삭제에서 날짜를 골라 검토 목록만 제거합니다.
-실제 쿠팡 주문·등록된 발주·재고·판매는 유지하고, 재조회나 다른 기기의 오래된 목록으로 되살리지 않습니다.
-매점 판매는 식권/카드/현금으로 팔린 **상품 개수**와 실제 받은 **식권 장수**를 분리합니다.
-식권 1장은 10,000원이고 카드/현금 매출은 당시 판매가 기준입니다. 기존 미분류 자료는 자동 배분하지
-않으며 전환 시 확인합니다. 받은 장수 미입력은 판매가 참고 금액일 뿐 실제 식권 회수 수로 추정하지 않습니다.
-발주 상품은 판매 화면을 열면 상품 목록에 자동 추가됩니다. 박스 매입가를 낱개 판매가로 추측하지 않으며
-최초 판매가·판매 단위는 상품 관리에서 정합니다. 중복/삭제 상품을 다시 추가하지 않습니다.
-검증: `test_coupang_date_removal.cjs`, `test_store_payment_channels.cjs`.
+The administrator login has explicit text colors and a centered lock button. The old 15-minute failed-login lockout is removed; repeated clicks have a one-second interval. Refreshing, switching businesses, or reconnecting relocks administrator mode. Sessions last at most four hours, and administrator passwords/tokens are not remembered in browser storage.
 
-각 명세서의 **명세서 삭제**는 해당 발주 내역·합계를 제거합니다. 보관용 원장은 원본 보관 항목만
-삭제하며 연결된 날짜별 집계는 유지합니다. **사진 첨부 삭제 / 엑셀 첨부 삭제**는 해당 원본 연결만
-제거하고 정리표·금액은 유지합니다. 고정비·식권 명세서·급여 이체 서류함에도 삭제 버튼이 있습니다.
-모두 확인 후 처리하며 서류함 삭제는 비용·판매·지급 완료 표시를 바꾸지 않습니다.
-공유 중일 수 있는 암호화 원본은 서버에 보존합니다(영구 삭제 아님). 실제 자료를 임의로 삭제하지 않습니다.
-검증: `node tools/test_document_deletion.cjs`.
+`nmf-access` authorizes requests on the server. Standard saves merge only allowed operational fields into the latest state; they cannot overwrite restricted payroll, tax, or settings. Recipe, cooking-method, hygiene, and menu-description edits merge by their operational edit timestamps. Separate server authentication for scheduled recipe/tax work and the Coupang connector remains in place.
 
-푸드 재료 필요량은 **기준 레시피 × 예상 식수 × 손질 손실 보정 × 발주 여유 2배**로 계산합니다.
-하루 재료표·레시피 상세·발주 필요량의 접힌 `발주 여유`에서 1~10배로 바꿀 수 있으며,
-같은 설정이 기기 간 동기화됩니다. 쌀·새 재료도 포함하고, 1인분 원본·식수·실제 발주/손익은
-변경하지 않습니다. 수동 추가/조정은 배수를 곱한 뒤 더합니다. 기준량과 배수를 화면·CSV에
-함께 표시하고 조리용 인쇄/PDF에도 같은 수량을 사용합니다. 카페·매점에는 적용하지 않습니다.
-검증: `node tools/test_recipe_order_allowance.cjs`.
+Standard device caches contain only public fields. Administrator drafts are encrypted with a high-entropy key received after authentication, never with the six-digit administrator password itself. Legacy full-state caches and card drafts are preserved as administrator-only `@local-draft-*` server backups before removal from the public cache. Failed uploads trigger a close-window warning; drafts remain downloadable from administrator backups. Previously downloaded or exposed copies cannot be recalled.
 
-공장 구내식당 **나모푸드**, **나모카페**, **나모매점**의 관리 웹앱입니다. 왼쪽 위 스위치로
-푸드/카페/매점을 전환하며, 데이터는 따로 저장됩니다(Supabase 행 `namofood` /
-`namocafe` / `namostore`). 이 저장소는 GitHub Pages로 공개되지만, `index.html` 안의 앱 본문은
-**AES-256-GCM으로 암호화**되어 있어 비밀번호를 아는 사람만 브라우저 안에서 열 수
-있습니다. 비밀번호는 서버로 전송되지 않습니다.
+Access rollout order: secret hashes/signing keys, private attempt-limit table, `nmf-access` and related functions, encrypted web app, then SQL blocking direct public-table access. If deployment fails, preserve records and repair the access functions rather than reopening public access.
 
-## 구성
+Checks: `test_guest_business_policy.cjs`, `test_guest_staff_policy.cjs`, `test_guest_business_access.cjs`, `test_guest_store_sales.cjs`, `test_operational_documents.ts`, `test_access_policy.cjs`, `test_admin_access.cjs`, `test_access_live.cjs`, and `admin-auth_test.ts` under their existing tool/function directories.
 
-푸드·카페는 고정비 바로 아래에 손익 → 통합 매출·손익을 배치합니다. 매점도 같은 순서지만 고정비 메뉴는 숨깁니다. 메뉴 이동으로 원본 자료를 변경하지 않습니다. 검증: `node tools/test_navigation_order.cjs` (푸드·카페·매점, PC/모바일, 메뉴 이동·자료 보존).
+### Navigation and business boundaries
 
-2026-10-19 추가 요청: 매점은 인건비·고정비·소모품을 손익에서 제외하며 기존 자료는 삭제하지 않습니다. 고정비 메뉴도 숨기고 설정은 입력형 세금 참고 계산만 제공합니다. 푸드·카페 계산은 유지합니다. 검증: `node tools/test_store_simple_profit_tax.cjs` (매입만 차감, 자료 보존, 부가세·누진소득세 계산, 입력 저장/복원, PC/모바일). 실제 세무 신고·세금계산서 발급·공제 자격 판정은 하지 않으며 전체 사업소득과 적격 증빙은 직접 확인해야 합니다.
+Food and Cafe place **Profit → Consolidated Revenue & Profit** immediately below Fixed Costs. Store hides Staff/Schedules and Fixed Costs; after Sales it shows Profit, Consolidated Revenue & Profit, and Settings. Moving menus does not alter records.
 
-### 푸드 회사 식권 판매·회수 (1019-15)
+Store profit excludes labor, fixed costs, and supplies while preserving any existing records. Settings shows tax-reference calculations rather than hourly-pay and insurance settings. Food and Cafe calculations are unchanged. Checks: `node tools/test_navigation_order.cjs`, `node tools/test_store_simple_profit_tax.cjs`.
 
-- 판매 실적 상단의 간결한 영역에서 회사 판매 장수, 끼니별 회수 합계와 미회수 잔량을 구분합니다. 판매 없는 날은 `0` 입력: 판매액 0원, 회수 실적은 별도 유지. 판매 빈칸만 과거 호환용 회수액을 적용합니다. 회사가 몰아서 구매해도 판매·회수를 같은 날 맞출 필요는 없습니다.
-- 회사명은 날짜별로 저장하고, 같은 날 여러 회사에 판매하면 접힌 회사별 입력에서 추가합니다. 각 장수 × 당시 단가를 합산하며 기본 회사명 변경이 이미 지정한 날짜를 바꾸지 않습니다. 추가 회사가 있으면 상단 합계는 읽기 전용이고 상세에서 수정합니다. 회사명/장수/단가/삭제 표시는 필드별 시각으로 동기화합니다.
-- 미회수 잔량은 기초(기본 0장) + 누적 회사 판매 − 푸드 회수 − 매점 회수이며 월을 넘어 이어집니다. 현금·카드·외상은 회수에 넣지 않습니다. 매점은 실제 받은 식권만 연결하고 회사 발행/판매량을 따로 만들지 않습니다. 매점이 미연결·실패하면 전체 잔량은 미확인, 푸드만의 참고 잔량은 별도 표시합니다. 암호화 원본은 처음/변경 때만 읽고 Food 판매·손익에서만 5초 변경 시각 확인을 합니다. 입력 중인 초안은 갱신으로 덮어쓰지 않습니다.
-- 판매 실적·명세서·서버 세금·판매 보고서는 회사 판매 기준을 유지합니다. 통합 매출·손익은 매점 자체 식권 정산 실적을 유지하되, 회사 판매가 입력된 날짜(0장 포함)만 합계에서 그 정산액을 한 번 제외합니다. 회사 판매 빈칸인 과거 회수 대체일은 매점 실적을 유지합니다. 과거 판매 빈칸의 회수 대체 금액은 임시 호환 기준이므로 실제 회사 판매 이력을 입력하세요.
-- 푸드 손익은 기본적으로 푸드 회수 식권 + 현금·카드·외상·기타 기준입니다. `누적 미회수 식권 잔액 포함 · 참고`를 체크하면 기초부터 현재까지 잔량 × 명시된 평가단가를 현재와 한 달 예상에 각각 한 번만 더하며, 일평균으로 늘리지 않습니다. 미회수 잔량이 음수·미확인이면 추가 계산은 보류하고 기본 회수 손익을 유지합니다. 음수 수량은 경고로 남기되 음수 매출로 차감하지 않습니다. 이 체크·평가단가는 로컬 표시 상태일 뿐 원장/세금/명세서를 수정하지 않습니다. 과거 달 잔량과 단가 추정이 포함된 참고 시나리오이고 확정 매출·현금잔고가 아닙니다. 비용 비율은 미회수 환산액을 빼고 계산합니다.
-- 명세서는 선택 회사의 장수·단가만으로 PDF를 생성·암호화 보관한 뒤 열람·출력하거나 받은 원본을 첨부합니다. 원본/목록은 기존 서류 저장소의 별도 식권 목록으로 분리하며 필요할 때만 읽습니다. 파일 등록은 매출·수량을 변경하지 않으며 세금계산서를 발급하지 않습니다. 회사별 입력·단가·기초·상세 안내는 기본 접힘입니다. 현금/카드/외상 라벨은 두 줄 높이를 동일하게 예약해 입력칸을 맞춥니다.
-- 검증: `node tools/test_ticket_companies_store.cjs`, `node tools/test_food_ticket_store_sync.cjs`, `node tools/test_profit_ticket_basis.cjs`, `node tools/test_food_ticket_ledger.cjs`, `deno run tools/test_tax_company_tickets.ts`, `node tools/test_sales_report.cjs` — 회사/날짜 분리, 단가별 합계·명세서, 삭제/동기화, 실제 암호화 매점 읽기/변경 확인/초안 보존/조회 중단, 기본 회수 및 미회수 1회 가산, 원본 불변, 320–1440px 배치.
+Store starts with empty product, staff, and fixed-cost lists. Product Management supports names, free-form categories, units, selling prices, optional purchase prices, and deletion. Daily sales preserve the name and price at the time of sale, so later product edits/deletions do not rewrite history. Edit historical quantities/prices on the relevant date; clearing a quantity removes that sale. Price lists, day/week/month navigation, CSV, purchases, cards, and backups are supported. Timestamps and deletion markers prevent stale devices from overwriting or reviving records. Check: `node tools/test_store.cjs`.
 
-### 매점 식권 정산·입고 비교 (1019-5)
+## Food tickets, sales, and profit
 
-- PC 푸드/카페/매점 전환은 세 버튼을 한 줄로 고정합니다. 매점 근무표·고정비 메뉴는 숨기며 기존 자료는 삭제하지 않습니다. 푸드·카페는 고정비 아래 손익 → 통합 매출·손익을 배치하고, 매점은 판매 실적 다음 손익 → 통합 매출·손익 → 설정입니다.
-- 매점 판매 실적의 `받은 식권(장)`은 1장 10,000원 고정입니다. 빈칸은 기존 수량×판매가, 입력한 장수(0 포함)는 식권 정산 매출로 대체합니다. 판매가 기준 금액/차이를 함께 표시하며 합산하지 않습니다. 판매 수량은 물리적 수량 그대로입니다. 손익·통합 비교·CSV·서버 저장도 같은 정산값을 사용합니다. 푸드 식권 판매에 자동 추가하지 않습니다.
-- 발주 집계 → 쿠팡 주문 가져오기 → 품목 선택 → `선택 품목을 재고로 가져오기`는 별도 재고 자료만 저장합니다. 판매하지 않는 물건은 재고에서 제외하고 다시 포함할 수 있습니다. 실제 쿠팡 주문, 카드결제, 발주 비용은 바꾸지 않습니다. 재가져오기/정렬 변경/오래 열린 기기가 제외 품목을 부활시키지 않도록 안정된 품목 키와 수정시각을 사용합니다.
-- 판매 실적 → `쿠팡 입고·판매·남은 수량`에서 상품과 주문 1묶음당 판매 단위 수를 직접 연결합니다. 예: 24캔×2묶음 = 48캔. 날짜까지 확인 입고에서 누적 판매를 빼며, 미연결·수량/묶음 미확인은 확정 재고로 표시하지 않습니다. 기초재고·타업체 입고·폐기/반품을 포함한 실물재고는 아닙니다. 주문일을 사용하므로 실제 입고일과 다를 수 있습니다.
-- `쿠팡 증빙·거래명세서 출력 안내`는 공식 PC 발급 경로와 국세청 공제 확인 링크를 제공합니다. 앱 발주표 출력은 관리용이며 세금계산서·카드전표 발급이나 세무 공제 신청이 아닙니다. 원본 쿠팡 새 탭은 별도 로그인이 필요할 수 있습니다.
-- 맥미니 로그인 창 열기 버튼을 제거했습니다. 웹 로그인은 선택한 입력칸 종류를 표시하고, 보이는 작성칸에서 내용을 확인한 뒤 `입력하기`로 전송합니다. 비밀번호 기본 숨김/직접 보기, 다음 칸 이동, 입력 확인 응답을 제공합니다. 입력 대상이 바뀌면 거부하고 작성 내용은 저장하지 않습니다. 첫 기기 승인과 5분 제한은 유지합니다.
-- 확인 명령: `node tools/test_store_stock_tickets.cjs`, `node tools/test_store_cloud.cjs`, `node tools/test_store.cjs`, `node tools/test_overview.cjs`, `node tools/test_coupang_ui.cjs`, `node tools/test_coupang_web_login.cjs`, `node --test tools/test_coupang_remote.mjs`. 실제 매점 계정으로 재로그인 후 재고 가져오기는 사용자가 진행해야 하며 다른 계정의 개인 주문은 자동 등록하지 않았습니다. 실기기 iOS 키보드와 모든 추가인증 화면은 미검증입니다.
+### Company sales and ticket returns
 
-**통합 매출·손익**은 어느 사업장에서도 열 수 있는 읽기 전용 월별 비교입니다. 세 사업장의 입력 매출·실제 발주비·세전손익·손익률을 비교합니다. 푸드·카페는 근무표 인건비·고정비·소모품을 반영하지만 매점은 매출 − 발주비만 반영하며 나머지는 ‘계산 제외’로 표시합니다. 현재 사업장은 이 기기 입력, 나머지는 서버 저장 자료이며 최초 진입/명시 새로고침에서만 조회합니다. 원 단위 반올림한 표시 금액을 합산하며 원장·급여 원본은 변경하지 않습니다. 세금/월말 예상/재고평가/내부거래 제거는 포함하지 않고, 누락·실패는 0원 대신 미확인과 부분합으로 표시합니다. 다른 사업장 데이터에 기본 식단·직원 샘플을 채워 넣지 않습니다. 검증: `node tools/test_overview.cjs`.
+Company ticket sales and tickets returned by diners are separate:
 
-매점은 빈 상품·직원·고정비 목록으로 시작합니다. **상품 관리**에서 상품명·자유 분류·단위·판매가·선택 매입단가를 추가/수정/삭제하고, **판매 실적**에서 날짜별 판매 수량을 입력합니다. 판매 당시 이름·가격을 별도 보관하므로 현재 상품 변경/삭제로 과거 매출은 바뀌지 않습니다. 과거 판매 수량·가격은 해당 날짜에서 수정하거나 수량을 비워 제거할 수 있습니다. 가격표, 일/주/월 이동, CSV, 발주·카드·백업을 지원합니다. 매점 근무표·고정비 메뉴는 숨기지만 기존 자료는 보존합니다. 설정에는 시급·보험 설정 대신 입력형 부가세·종합소득세 참고 계산만 표시합니다. 매점 손익은 입력 월 전체 매출 − 발주 금액이며 인건비·고정비·소모품·재고평가/세금 자동 추정은 제외합니다. 상품·판매는 수정 시각과 삭제 표식으로 오래 열린 기기의 덮어쓰기/부활을 막습니다. 검증: `node tools/test_store.cjs`.
+- Enter `0` on a day with no company sale. Zero means zero sales; only a blank uses historical return-based revenue compatibility. Bulk purchases do not have to match daily returns.
+- Save company names by date. A collapsed company editor supports multiple companies on one day, each with its own quantity and historical price. Changing the default company does not rename earlier transactions. With multiple companies, edit details rather than the read-only top total.
+- Opening unreturned quantity defaults to zero. The running balance is **opening quantity + company sales − Food returns − Store returns**, carried across months. Cash, card, and credit meals are excluded.
+- Store contributes only tickets actually received; it does not issue or sell company tickets. If Store cannot be read, show an unknown combined balance and a separate Food-only reference balance.
+- Company, quantity, price, and deletion fields synchronize with individual edit timestamps. Read encrypted Store state initially and on changes; Food Sales/Profit checks revisions every five seconds without overwriting active drafts.
 
-| 파일             | 설명                                                          |
-| ---------------- | ------------------------------------------------------------- |
-| `index.html`     | 잠금 페이지 + 암호화된 앱 (비밀번호 입력 → 브라우저에서 해제) |
-| `encrypt_app.py` | 앱을 새 비밀번호로 다시 암호화하는 도구                       |
+Sales, statements, server tax calculations, and sales reports retain the company-sales basis. Consolidated reporting keeps Store ticket-settlement performance but removes that settlement amount once from combined revenue on dates with explicit company sales, including zero. Historical blank-sale fallback dates retain Store performance. Enter the actual company sales history to replace this compatibility estimate.
 
-## 데이터 함께 쓰기 (Supabase)
+Food Profit defaults to returned Food tickets plus cash, card, credit, and other sales. The optional **Include cumulative unreturned-ticket balance · reference** adds the running quantity times an explicitly stated valuation price once to both current and monthly projected profit; it is never multiplied by the daily average. Negative or unknown balances defer this addition without changing the base profit. Negative quantities remain warnings, not negative revenue deductions. The checkbox and valuation price are local display settings, not ledger, tax, or statement edits. This is a historical valuation scenario, not confirmed revenue or available cash; cost ratios exclude this adjustment.
 
-앱의 데이터(식단·근무표·판매 실적·위생 기록 등)는 **Supabase 표**에 현재 상태
-1줄 + 날짜별 기록(`namofood@YYYY-MM-DD`, 최대 1년)으로 홈페이지 비밀번호로
-**암호화되어** 저장됩니다. 누가 고치든 3초 뒤 저장되고, 다른 기기는 5초마다(또는
-화면을 다시 볼 때) 변경 정보를 확인합니다. 변경이 없으면 전체 데이터를 다시
-받지 않습니다. 첫 실행·수동 불러오기·실제 변경이 있을 때만 전체 상태를 받습니다.
-`nmf_state_revision`은 변경 시각과 암호문 SHA-256만 반환하는 읽기 전용 함수입니다.
-같은 시각에 서로 다른 암호문이 저장돼도 구별합니다. 함수가 없거나 응답에 문제가
-있으면 기존 전체 조회로 대체하고 1분 후 경량 조회를 재시도합니다. 사용자 지정
-표는 기존 전체 조회를 유지하며, 저장 직전 전체 조회·CAS 충돌 보호는 그대로입니다.
-함수는 `supabase/migrations/20261011133500_nmf_state_revision.sql`로 설치하며
-기존 표 접근 권한·RLS를 따릅니다. 운영 데이터나 행 접근 정책을 바꾸지 않습니다.
-검증: `node tools/test_cloud_egress.cjs` (가상 서버의 실제 두 브라우저·전송 바이트 비교).
+Company statements use only the selected company's quantities and prices. Generate a PDF, store it encrypted, then view/print it, or attach an externally received original. Ticket files use a separate list and load on demand. New files use `#ticket-document#`; legacy files open only after verification against the ticket list. Attaching a file does not change sales or issue a tax invoice. Cash/card/credit labels reserve equal two-line height to align inputs.
 
-인쇄 끼니·보기 옵션과 일반 설정은 마지막 동기화 값과 비교해 **실제로 고친 항목만**
-저장에 반영합니다. 다른 기기의 최신 식수·단가·비율 등을 오래 켜 둔 화면의 값으로
-되돌리지 않으며, 서로 다른 세부 항목의 수정은 합칩니다. 역할·시급은 기존 편집 시각
-규칙을 유지합니다. 저장 중의 추가 입력과 불러오는 도중 시작한 입력도 보호합니다.
-짧은 간격이나 같은 시각의 다른 저장은 암호화 데이터까지 비교해 구별합니다.
-검증: `node tools/test_cloud_settings_sync.cjs` (서로 분리된 두 브라우저·암호화 충돌 검사).
+Checks: `node tools/test_ticket_companies_store.cjs`, `node tools/test_food_ticket_store_sync.cjs`, `node tools/test_profit_ticket_basis.cjs`, `node tools/test_food_ticket_ledger.cjs`, `deno run tools/test_tax_company_tickets.ts`, and `node tools/test_sales_report.cjs`. These cover company/date separation, price-specific statements, deletion/sync, encrypted Store reads, draft preservation, one-time balance valuation, unchanged originals, and 320–1440px layouts.
 
-Supabase 프로젝트의 SQL Editor에서 한 번 실행:
+### Store payment channels and stock
+
+Store separates product units sold by ticket/card/cash from the number of tickets actually received. One ticket is fixed at KRW 10,000. Card/cash revenue uses the historical selling price. A blank received-ticket quantity uses the legacy quantity-times-price reference; an explicit quantity, including zero, replaces it with ticket settlement revenue. Both values and their difference are shown without adding them together. Physical units sold remain unchanged. Profit, consolidated comparisons, CSV, and saved state use the same settlement basis; nothing is automatically added to Food company-ticket sales.
+
+Standard Store mode retains operational sales inputs. The server preserves historical selling/purchase prices when quantities change; standard responses omit restricted amounts. Inventory responses contain product names, received quantities, and pack links without private values. Legacy unclassified sales are not silently allocated; received-ticket counts are not guessed from selling prices.
+
+Purchased items are added to the sales product list when Sales opens. Product Management sets the initial selling price and sales unit; a box purchase price is never assumed to be a per-unit selling price. Duplicate or deleted products are not re-created.
+
+In **Coupang receipts, sales, and remaining quantity**, link an ordered pack to a product and enter sales units per pack: for example, 24 cans × 2 packs = 48 cans. Confirmed receipts through the selected date minus cumulative sales give the reference remainder. Unlinked products or unknown quantities/pack sizes are not confirmed stock. Opening inventory, other suppliers, waste, and returns are outside this comparison; order dates may differ from receipt dates.
+
+Imported non-sale items can be excluded and restored. Stable item keys and edit times prevent re-imports, sorting, or stale devices from reviving exclusions. Neither actual Coupang orders nor card payments are changed. The collapsed date-based removal section deletes only the imported review list, preserving registered purchases, inventory, and sales.
+
+Checks: `node tools/test_coupang_date_removal.cjs`, `node tools/test_store_payment_channels.cjs`, `node tools/test_store_stock_tickets.cjs`, `node tools/test_store_cloud.cjs`, and `node tools/test_store.cjs`.
+
+### Consolidated revenue and profit
+
+This read-only monthly view compares the three businesses' recorded revenue, actual purchase costs, pre-tax profit, and margins. Food/Cafe include schedule-based labor, fixed costs, and supplies; Store uses revenue minus purchases and marks other costs as excluded.
+
+The active business uses current device inputs; other businesses use saved server records loaded on entry or explicit refresh. Displayed whole-won amounts are summed. Missing/failed reads show unknown values and partial totals rather than zero. No sample staff or menus are inserted into another business. The comparison does not mutate ledgers/payroll, and excludes tax, month-end forecasts, inventory valuation, and other inter-business eliminations beyond the ticket rule above. Check: `node tools/test_overview.cjs`.
+
+## Shared state and synchronization
+
+Meal plans, shifts, sales, hygiene records, and other app state are encrypted with the shared application password. Supabase stores one current-state row and dated backups such as `namofood@YYYY-MM-DD`, retained for up to one year. Edits save after three seconds. Other devices check for changes every five seconds or when the page becomes active.
+
+`nmf_state_revision` returns only the update time and ciphertext SHA-256. Full state downloads occur on first load, manual reload, or a real change. Different ciphertexts with identical timestamps remain distinguishable. A missing/broken revision function falls back to full reads and retries lightweight checking after one minute. Custom tables keep full reads; pre-save reads and compare-and-swap (CAS) protection remain.
+
+The revision function is installed by `supabase/migrations/20261011133500_nmf_state_revision.sql` and follows existing table grants/RLS without changing operational rows or access policies. Check: `node tools/test_cloud_egress.cjs`, which compares real browser traffic against a simulated server.
+
+Print-meal selections, display options, and general settings save only fields changed from the last synchronized value. Stale screens cannot revert another device's headcounts, prices, or ratios. Independent field edits merge; role/pay edit timestamps remain authoritative. Edits made while saving/loading are protected, and ciphertext comparison distinguishes close or identical save timestamps. Check: `node tools/test_cloud_settings_sync.cjs`.
+
+<details>
+<summary>Historical shared-table bootstrap (not the current access policy)</summary>
+
+The original setup used the SQL below in the Supabase SQL Editor. **Do not apply these anonymous-write policies to a deployment protected by `nmf-access`.** The administrator rollout above subsequently blocks direct public-table access. This reference preserves the original setup context; encryption alone does not prevent deletion or overwrites.
 
 ```sql
 create table if not exists public.namofood_state (
@@ -152,94 +117,141 @@ create table if not exists public.namofood_state (
   updated_at timestamptz not null default now()
 );
 alter table public.namofood_state enable row level security;
-create policy "namofood anon read"  on public.namofood_state for select to anon using (true);
+create policy "namofood anon read" on public.namofood_state for select to anon using (true);
 create policy "namofood anon write" on public.namofood_state for insert to anon with check (true);
 create policy "namofood anon update" on public.namofood_state for update to anon using (true) with check (true);
--- (선택) 1년 지난 날짜별 기록을 앱이 자동 정리할 수 있게 하려면:
+-- Optional historical policy for cleanup of dated backups:
 create policy "namofood anon delete old" on public.namofood_state for delete to anon using (id like 'namofood@%');
 ```
 
-그다음 앱의 **저장 · 백업 → 함께 쓰기**에 프로젝트 URL과 anon 키를
-넣습니다(빌드에 미리 넣어 두면 입력 불필요). 표에는 암호문만 들어가므로 anon
-키가 노출되어도 내용은 읽을 수 없습니다. 단, 표를 지우거나 덮어쓰는 것은 막지
-못하니 백업 파일을 가끔 받아 두세요.
+The original **Save / Backup → Shared storage** setup accepted a project URL and anon key unless supplied by the build. Keep backups even when state is encrypted.
 
-## 쿠팡 완료 주문 가져오기 · 맥미니 연결
+</details>
 
-### 웹앱 안에서 쿠팡 로그인
+## Purchasing: invoices and spreadsheets
 
-**매점 → 발주 집계 → 쿠팡 로그인**은 웹앱 내부 대화상자에서 맥미니의 실제 쿠팡
-로그인 탭을 조작합니다. 쿠팡을 단순 iframe으로 열거나 다른 기기의 로그인 쿠키를
-복사하지 않습니다. 처음 쓰는 브라우저는 웹앱과 맥미니 승인 창의 10자리 확인번호를
-대조해 맥미니에서 직접 허용해야 합니다. 기본 선택과 시간 초과는 거절입니다.
-한 번 승인한 브라우저는 90일 이내 다시 로그인할 때 맥미니에서 승인할 필요가 없습니다.
-이는 **기기 단위 승인**이며 직원별 사용자 계정/RBAC가 아닙니다. 공용 PC는 등록하지
-마세요. `이 기기 승인 지우기`는 브라우저의 개인키를 지워 재승인이 필요하게 합니다.
+### Recognition and review
 
-브라우저의 내보낼 수 없는 ECDH 개인키는 해당 브라우저 IndexedDB에만 보관합니다.
-맥미니는 `devices.json`(0600)에 직접 승인한 공개키만 기록합니다. 서버의 승인 응답만
-위조해도 맥미니의 승인 목록에 없으면 제어할 수 없습니다. 세션마다 새 키를 만들고
-ECDH/HKDF/AES-GCM으로 화면·입력을 암호화합니다. Supabase Realtime의 임의 256비트
-주제에서는 암호문만 전송하고, 재생/DB 저장은 사용하지 않습니다. DB 작업표에는
-암호화한 공개키·기기 증명·접속 메타데이터만 저장합니다. 비밀번호·인증번호·쿠키·
-키 입력·로그인 화면을 DB, 로그, AI로 보내 저장하지 않습니다. 서비스 키나 로컬 CDP
-포트도 웹 클라이언트에 공개하지 않습니다. 별도 공개 포트·터널·Browserless 계정은
-필요하지 않습니다.
+In Purchasing, upload up to eight JPG/PNG/WebP photos. `nmf-invoice-ocr` reads the table and reviews product labels before automatically registering each valid extraction. Suspected duplicates require confirmation first. Review/edit dates, suppliers, statement numbers, item names, specifications, quantities, units, unit prices, supply amounts, VAT, totals, current delivery amounts, prior unpaid balances, and inclusive balances.
 
-로그인 뷰어는 전용으로 만든 **한 탭**만 다룹니다. 다른 탭·주소창·파일·클립보드
-자동 읽기는 노출하지 않습니다. 쿠팡 로그인/완료 확인 경로만 이동할 수 있고 구매·
-장바구니·결제·취소 요청은 막습니다. 외부 팝업이 필요한 인증 방식은 맥미니에서 직접
-진행해야 할 수 있습니다. 세션은 최대 5분, 무응답 연결은 20초 후 종료합니다. 화면은
-실제로 열려 있을 때만 변경분을 초당 최대 1장 전달합니다. 로그인 중에만 추가 실시간
-전송량이 발생하며 상시 녹화나 전체 데이터 동기화는 없습니다. 로그인 완료는 실제
-주문목록 및 로그아웃 표시를 확인한 뒤에만 알립니다. 주문 발주 등록은 별도 선택입니다.
+- Preserve unreadable values as blanks. Quantity × price, item-total, and supply-plus-tax mismatches produce review messages rather than invented corrections.
+- Recipient/buyer labels such as “Namofood, attention” are not suppliers. Accept a supplier only when the source identifies one unambiguous supplier name. Multiple names, missing names, business numbers alone, or account-holder names alone leave the supplier blank for review.
+- For statements showing prior unpaid balance, current transaction amount, and their combined total, count **only the current transaction** in purchases. Carry-forward balances remain separate reference information.
+- Preserve item-level taxable/exempt amounts. Blank VAT stays blank and is not itself a special note. Keep other uncertainty warnings, genuine mismatches, and manually written notes.
 
-서버 비밀값 `NMF_COUPANG_WEB_LOGIN_DISABLED=1`로 새 기기 등록/웹 로그인 요청만
-중지할 수 있습니다(기존 주문 조회 유지). 활성 뷰어는 최대 5분 뒤 종료하거나 연결
-프로그램을 정상 재시작하면 즉시 닫힙니다. Chrome 로그인 자체는 삭제하지 않습니다.
+Quantities, prices, amounts, balances, and ingredient requirements use thousands separators in the screen and print views. Editing preserves decimals, negative values, long numbers, and the cursor without changing stored values, calculations, or CSV numbers. Dates, invoice numbers, specifications, and units are not formatted as money.
 
-검증: `node --test tools/test_coupang_remote.mjs`,
-`deno run --deny-env --deny-net tools/test_coupang_remote_handler.ts`,
-`node tools/test_coupang_web_login.cjs`. 암호화·재전송/변조·미승인 기기·다른 탭 보존·
-이전 세션 응답 격리·원격 키 입력·완료 확인·모바일 폭·원장 무변경을 검사합니다.
-테스트 로그인과 승인 목록은 격리된 임시 환경이며 운영자 승인을 자동 클릭하지 않습니다.
-기존 공유 암호의 강도와 웹앱 전체 보안 감사, 실제 iOS Safari/외부 본인인증의 모든
-경우를 보증하는 검사는 아닙니다. 기존 의존성 `npm audit --omit=dev`는 취약점 0건입니다.
+The top monthly summary always covers the selected month, even when a date, week, invoice, or card tab is selected. It excludes card records and transactions awaiting duplicate confirmation. Statement-level supply/tax totals take precedence; absent totals are summed only when all corresponding item amounts are known. Unknown VAT is not zero.
 
-**매점 → 발주 집계 → 쿠팡 주문 가져오기**에서 조회 기간(최대 93일)을 고르고
-버튼을 누릅니다. 맥미니의 전용 Chrome 프로필에서 완료 주문을 읽고,
-OpenCode Go GPT-6 Luna가 품목·규격·수량·실제 금액을 정리합니다. 확인 목록에서
-맨 위 전체·날짜별 선택으로 품목을 제외하거나 수정한 뒤
-**선택 품목 발주·재고 함께 등록**을 누르면 한 번에 발주·재고·손익에 반영됩니다.
-미연결 상품은 판매 상품과 묶음 수를 확인해야 잔여 수량을 확정합니다.
-등록 성공 후 이번 확인 목록은 선택 해제한 품목까지 비우며 실제 쿠팡 주문은 삭제하지
-않습니다. 처리 완료 표시는 암호화 공유 상태에 저장되어 과거 결과가 다시 뜨지 않습니다.
-검증/기기 저장 실패 시에는 발주와 완료 표시를 함께 되돌리고 확인 목록을 유지합니다.
-일시적인 결과 조회 실패는 2–30초 간격으로 자동 재확인하고, 최대 15분 후 안내합니다.
-이때 새 가져오기나 AI 작업을 중복 요청하지 않습니다. 완료 목록은 자동으로 표시하며
-탭 복귀와 새로고침에서도 보관된 작업 ID로 자동 확인을 이어갑니다.
-쿠팡 구매·결제·취소는 자동화하지 않습니다. 비밀번호 입력·추가 인증은 맥미니의
-쿠팡 공식 창에서 직접 완료합니다. 로그인 만료와 접근 차단은 오류로 표시합니다.
-실제로 로그인되지 않은 상태를 연결 완료로 표시하지 않습니다.
+The inclusive outstanding reference balance counts the latest statement per supplier once for the month. Missing latest balances, conflicting same-day balances, absent dates, or missing suppliers remain review items; this is not a payment-settlement ledger. Date-specific prints omit the full-month reference summary.
 
-`connectors/coupang`은 외부 포트를 열지 않는 별도 연결 프로그램입니다. 맥미니가
-서명된 Supabase 작업 큐를 확인하며, 전용 Chrome 프로필은
-`~/Library/Application Support/Namofood/Coupang/chrome-profile`에만 있습니다.
-쿠키·비밀번호를 웹앱·Supabase·AI에 보내지 않습니다. 원래 Chrome 프로필은 읽거나
-변경하지 않습니다. 일반 Chrome을 전용 프로필로 실행하며 제어 연결은 127.0.0.1
-임시 포트에만 연결합니다. 외부 IP에 Chrome 제어 포트를 공개하지 않습니다.
-정리용 주문 텍스트에서 이메일·연락처와 표시된 배송지 필드를
-제외하며, 서버에는 정리 결과만 별도 강한 키로 AES-GCM 암호화합니다. 24시간 내의
-결과만 다시 조회할 수 있으며, 오래된 암호문은 다음 가져오기 요청에서 정리합니다.
-작업 ID는 해당 브라우저의 sessionStorage에 남겨 자동 확인으로 이어갈 수 있습니다.
+Progress shows **prepare → recognize → register**, using completed stages and elapsed recognition time rather than a fabricated recognition percentage. Completion, registration, failure, and duplicate exclusion are counted separately. Registration completion and shared-save completion are distinct.
 
-매점 설정의 세금 참고는 판매·식권·기타매출과 등록 발주를 오늘까지 자동 합산합니다.
-전부 10% 과세라는 가정과 발주 기재세액을 구분하며 세액 빈칸을 채우거나 공제를 확정하지
-않습니다. 연간 소득세는 그해 입력 누계의 단순 시나리오이며 월 실적을 12배 하지 않습니다.
-누락된 발주 금액이 있으면 소득세 시나리오는 계산 보류합니다. 재고/실제 경비/다른 소득/
-공제·감면·기납부액 미반영을 표시하고, 직접 조건 계산은 보조 접힌 패널에 보존합니다.
+Uncertainty and amount mismatches do not block registration; editable multiline notes and separate recognition/arithmetic warnings remain. Exact photos are deduplicated. Same supplier/statement number, or near-identical same-supplier/date item lists, trigger a comparison with choices to open the existing invoice, register a distinct transaction, or cancel. Matching dates alone do not block registration.
 
-설치(최초 `npm ci --ignore-scripts`, Node 24 이상·Google Chrome 필요):
+Explicit distinct-transaction approvals synchronize to the server. A final duplicate check runs before shared save, including concurrent registrations from other devices. Unconfirmed candidates are excluded from totals, CSV, and server saves. Records are placed in their transaction month.
+
+Monthly/weekly calendars show daily invoice counts and delivery amounts. Selecting a date opens that date's invoice tab; whole-period view clears the date filter. Weeks span seven days across month boundaries. CSV and print respect the date/period selection and include all selected records, not just the current page. Arrow/Home/End navigation works on tabs; mobile tabs wrap. Printing restores the previous selection/collapse state afterward.
+
+CSV includes specifications, VAT, and totals and guards against spreadsheet-formula execution. Numeric input text shrinks to fit long values without hiding digits or rounding them. Stable invoice/item IDs preserve the correct edit target when another device reorders a table. New OCR cannot overwrite manual edits/deletion markers, and an explicit backup restore applies the selected purchase list.
+
+Recognition sends photos to OpenCode's image model. Do not log photos or raw OCR text. Registration does not mean comparison with the original is complete. Source-file retention depends on the intake path: encrypted saved spreadsheet sources are documented below; older photo-intake records may not retain an original.
+
+Checks: `node tools/test_invoice_number_format.cjs`, `deno run --deny-env --deny-net tools/test_invoice_supplier.ts`, `deno run tools/test_invoice_ocr.ts`, and `node tools/test_invoice_ocr_ui.cjs`.
+
+### Spreadsheet and period-ledger intake
+
+See [Invoice spreadsheet intake](assets/README-invoice-files.md) for local XLSX/XLS/CSV/TSV parsing, encrypted originals, and the side-by-side source viewer.
+
+Recognized line-ledger layouts contain date/transaction number, item/specification, quantity, unit price, supply amount, VAT, total, counterparty, and description columns, plus a company/period heading. Read their original cells directly and group by date and transaction number. Never allocate one daily subtotal to multiple same-day transactions. Identify the supplier from the company heading and distinguish it from buyer columns.
+
+The general limit is **1,000 items**, with **500 characters each** for item names and specifications. Separate file/cell/row safety limits remain. Preserve unpriced items, negative returns, and blank VAT, and check subtotals/grand totals.
+
+Period ledgers carry `sourceAudit.sourceType=period-ledger` and are stored as references excluded from duplicate aggregation. Intake does not automatically delete existing invoices, change amounts, or switch the accounting basis. Checks: `deno run tools/test_invoice_ledger.ts`, `node tools/verify_invoice_ledger_files.cjs <ledger.xlsx>`.
+
+### AI provider and request boundary
+
+Use the selected **OpenCode Go** plan and **Claude Haiku 5.5**, model `claude-haiku-5-5`, at `https://opencode.ai/inference/go/anthropic/v1/messages`. This model also serves recipe generation, recommendations, tax review, card matching, and Coupang organization; references to GPT-6 Luna or Zen in earlier operating notes describe previous configurations.
+
+The shared app secret is `NMF_PW`. Provider keys are resolved from `NMF_INVOICE_API_KEY`, then `OPENCODE_GO_API_KEY`, then legacy `OPENCODE_API_KEY`. Keep their values outside source control.
+
+Photo recognition uses native image input and distinguishes completed, refused, and truncated output. A second text-only pass reviews item names/specifications/units. It cannot change amounts, dates, suppliers, raw OCR, numeric/package specifications, or guess missing units. Preserve valid recognition if label review fails; display original labels and complete/partial/failed status. At most two calls share the request deadline, without automatic retry.
+
+Do not send OpenAI-only `store` or `reasoning` options to Anthropic Messages. `NMF_INVOICE_MODEL`, if set, must be `claude-haiku-5-5`; `NMF_INVOICE_BASE_URL` accepts only the Go endpoint. `NMF_INVOICE_TIMEOUT_MS` defaults to 100 seconds and is capped at 120 seconds. Use the actual app identity in User-Agent and a signed-request-based session ID for each photo conversation.
+
+Go's published usage is oriented toward coding agents; generic web-app OCR support is not guaranteed. Surface key/subscription/limit errors without disguising the use case or switching to paid Zen calls. Provider retention policies apply separately.
+
+Server connection checks establish configuration presence only. Real recognition is needed to establish provider authentication and extraction accuracy. Requests use a 60-second HMAC including the full-body SHA-256, and validate allowed origins, real file types, the 8MB image limit, replay, and concurrency. No public Storage or additional database permissions are introduced.
+
+`tools/verify_invoice_photo.cjs` processes only operator-selected originals passed through `NMF_INVOICE_PHOTOS`, with `NMF_PW` supplied securely in the environment. It compares item counts/totals without registering purchases or writing business data. Set `NMF_EXPECTED_OCR_MODEL=claude-haiku-5-5` and `NMF_EXPECTED_OCR_PLAN=go` to verify configuration before sending photos.
+
+After deployment, `node tools/test_live_invoice_status.cjs` checks the encrypted page and signed status endpoint without photos, provider calls, or operational writes. Offline OCR tests use synthetic statements.
+
+### Card transaction photos
+
+**Purchasing → Card records** is separate from invoices. Upload up to eight JPG/PNG/WebP card-statement photos/screenshots to the authenticated `documentType:"card"` branch of `nmf-invoice-ocr`. It uses one provider call per photo, with no retry or paid fallback.
+
+Progress shows prepare, recognize, then review/register. Review payment date, 24-hour time, merchant, KRW amount, authorization/cancellation, card label, last four digits, approval number, installments, and notes before registering selected transactions. Unknown dates/amounts are not replaced with today/zero. Missing required fields or ambiguous authorization/cancellation must be corrected first. Non-KRW transactions are unsupported.
+
+Authorizations and cancellations are distinct positive-amount records; totals show authorized, cancelled, and net amounts. Exact photo rows are not re-registered. Similar approval numbers or date/time/merchant/amount/card combinations start unselected and require confirmation as distinct transactions. Concurrent duplicates are checked before save. Card amounts are never automatically added again to invoice totals, ingredient requirements, or profit.
+
+The view provides calendars, merchant/card/note search, authorization/cancellation filters, 20-record pages, collapse/expand, editing/deletion, CSV, and print. Exports cover the entire filtered period. Invoice and card views share the order: date calendar, period summary, then upload.
+
+Card photos/raw OCR are not retained in app/server storage. Both client/server filter full/partial card numbers, accounts, contacts, CVCs, and passwords; only the last four digits are allowed. Pre-registration results can remain on-device without the photo. Registered `cardTransactions`/`cardEdits` join encrypted state and dated backups. Explicit deletion markers prevent resurrection; older states lacking card fields cannot erase card records. Compare with the original manually.
+
+### Removing documents
+
+Invoice deletion removes that purchase and its totals. Deleting an archived ledger removes only its original archive entry, retaining linked daily aggregates. Removing a photo/spreadsheet attachment removes its source link without changing the extracted table or amounts.
+
+Fixed-cost, ticket-statement, and payroll-transfer document libraries also support confirmed deletion. Removing a document does not change costs, sales, or paid status. Shared encrypted originals may be retained on the server rather than permanently deleted. Check: `node tools/test_document_deletion.cjs`.
+
+## Coupang completed-order connector
+
+### Web-app login
+
+**Store → Purchasing → Coupang login** controls one dedicated Coupang login tab on the Mac mini from an in-app dialog. It does not iframe Coupang or copy another device's cookies.
+
+For a new browser, compare the ten-digit confirmation code in the web app and Mac mini approval window, then approve on the Mac mini. Default/timeouts deny access. Approved browsers can reconnect for 90 days. This is device approval, not per-employee accounts/RBAC. Clearing approval removes the browser's private key and requires a new approval.
+
+The browser keeps a non-exportable ECDH private key only in IndexedDB. The Mac mini records directly approved public keys in a mode-0600 `devices.json`; a forged server approval cannot override that local list. Fresh session keys use ECDH/HKDF/AES-GCM for screens and input. Supabase Realtime carries only ciphertext on random 256-bit topics, without recording or database playback. Job rows contain encrypted public keys, device proof, and connection metadata.
+
+Do not persist passwords, verification codes, cookies, keystrokes, or login screens to the database/logs/AI. Service credentials and the local Chrome debugging port are not exposed to the web client. No separate public port, tunnel, or Browserless account is required.
+
+The viewer exposes only its dedicated tab, not other tabs, the address bar, files, or automatic clipboard reads. Navigation is limited to login/completion checks; purchase/cart/payment/cancellation requests are blocked. External-popup authentication may require direct Mac mini interaction.
+
+Sessions last at most five minutes; unresponsive connections close after 20 seconds. While the viewer is open, changed frames are sent at most once per second. There is no continuous recording/full-state sync. Login is reported complete only after real order-list and logout markers are confirmed; registering orders remains a separate choice.
+
+The viewer identifies the focused input, lets users review a visible draft and send it explicitly, masks passwords by default with an optional reveal, supports next-field navigation, and acknowledges input. A changed input target rejects the submission. Draft input is not saved. The obsolete “open Mac mini login window” button is removed.
+
+`NMF_COUPANG_WEB_LOGIN_DISABLED=1` stops new device registration/web-login requests while keeping order reads. Active sessions end within five minutes or immediately after a normal connector restart. Chrome login is preserved.
+
+Checks: `node --test tools/test_coupang_remote.mjs`, `deno run --deny-env --deny-net tools/test_coupang_remote_handler.ts`, and `node tools/test_coupang_web_login.cjs`. Isolated tests cover encryption, replay/tampering, unapproved devices, other-tab preservation, old-session isolation, remote input, completion, mobile width, and unchanged ledgers. They do not auto-approve production devices, audit the entire app, or guarantee every physical iOS/external-verification flow. An earlier dependency check reported zero findings from `npm audit --omit=dev`; recheck dependencies before relying on that historical result.
+
+### Importing and reviewing orders
+
+Select up to 93 days in **Store → Purchasing → Import Coupang orders**. The dedicated Mac mini Chrome profile reads completed orders; OpenCode Go organizes items, specifications, quantities, and actual amounts.
+
+Use the top select-all/date controls to review, exclude, or edit items, then register selected purchases and inventory together. Confirm product links and pack sizes before treating remainders as stock. Successful registration clears the entire current review list, including unselected items, without deleting actual Coupang orders. Completion markers synchronize in encrypted shared state so old results do not reappear.
+
+If validation/local save fails, roll back registration and completion together and retain the review list. Temporary status failures retry at 2–30-second intervals for at most 15 minutes without duplicating imports/AI jobs. Results appear automatically; tab return/reload resumes from the saved job ID.
+
+No purchases, payments, or cancellations are automated. Users complete credentials/additional verification on the official Coupang page, including through the dedicated viewer. Expired sessions and access blocks remain errors, never successful connections.
+
+`connectors/coupang` polls a signed Supabase job queue without opening an external port. Its Chrome profile is isolated at `~/Library/Application Support/Namofood/Coupang/chrome-profile`. It does not read/change the normal Chrome profile or send cookies/passwords to the app, Supabase, or AI. Ordinary Chrome connects through a temporary 127.0.0.1 debugging port only.
+
+Order text sent for organization excludes email/contact/address fields and payment-method areas. Results use AES-GCM with a separate strong key and are readable for 24 hours; old ciphertext is cleaned on a subsequent import. Only order numbers, completion state, items, and total payments are submitted. The browser keeps a job ID in sessionStorage to resume checking.
+
+Private tables `namofood_private.coupang_jobs` and `coupang_connector` have RLS and block direct `anon`/`authenticated` access. The app uses password-based HMAC; the Mac mini uses a separate connector-key HMAC. Signed bodies/roles and expiring execution leases prevent cross-job completion and duplicate AI calls. Repeated requests return existing work; status reads do not download the full ledger.
+
+Each order number maps to a stable purchase ID. Imports never overwrite/revive orders already registered, edited, or deleted. Partial registration sums only verified selected-item amounts without inventing shipping/discount allocation; edit further through the existing purchase. Unknown VAT/unit prices/quantities remain blank.
+
+One run reads at most ten list pages and 60 order details; reaching a limit produces a partial-results warning. Prefer a uniquely identified source total tied to the same order number/detail URL. Missing AI total evidence must not trigger an invented item sum; conflicting or cross-order totals are not auto-corrected. Revalidate changed Coupang layouts against authorized read-only account results.
+
+The evidence/statement-printing guide links official desktop issuance routes and National Tax Service deduction guidance. App purchase prints are management reports, not tax invoices/card slips or deduction applications. Opening official Coupang pages may require another sign-in.
+
+### Installation and rollback
+
+Requires Node 24+, Google Chrome, and an initial `npm ci --ignore-scripts` inside `connectors/coupang`.
 
 ```sh
 cd connectors/coupang
@@ -247,453 +259,167 @@ node install.mjs --provision
 launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.namofood.coupang.plist"
 ```
 
-설치기는 저장소 밖 0600 설정 파일에 임의의 256비트 연결 키를 만들고, 표준입력으로
-Supabase의 `NMF_COUPANG_WORKER_TOKEN`에 등록합니다. 명령행·출력에 키를 넣지 않습니다.
-실행 파일은 Application Support로 복사하므로 문서 폴더 권한이나 이후 Git 편집에
-의존하지 않습니다. 사용자 로그인 시 자동 실행되며 전원 종료·로그아웃·절전·통신
-중단 시 웹앱에 오프라인으로 표시됩니다. 시작 상태는 쿠팡 로그인 여부와 별개입니다.
-전용 Chrome은 연결 프로그램 재시작과 분리해 유지하고, 다음 실행에서 해당 로컬
-프로필·프로세스를 확인한 뒤 다시 연결합니다. 쿠팡의 자동로그인도 직접 체크하세요.
-계정 보안 정책으로 세션이 만료되면 공식 창에서 다시 인증해야 합니다.
+The installer creates a random 256-bit connector key in a mode-0600 configuration outside the repo and provisions `NMF_COUPANG_WORKER_TOKEN` through standard input, never command arguments/output. Executables are copied to Application Support so later Git edits/document-folder permissions do not control the installed worker.
 
-중지·되돌리기:
+The worker starts at user login and appears offline during shutdown, logout, sleep, or network failure. Worker startup is separate from Coupang authentication. Dedicated Chrome survives worker restarts; the next worker verifies the local profile/process before reconnecting. Users must select Coupang's automatic-login option themselves and reauthenticate when account security policy expires a session.
+
+Stop the worker:
 
 ```sh
 launchctl bootout gui/$(id -u)/com.namofood.coupang
 ```
 
-중지해도 기존 발주와 전용 Chrome 로그인은 삭제하지 않습니다. 로컬 파일을 지울 때는
-로그인 프로필과 연결 설정을 구분해서 직접 정리하세요. 연결 키 변경은 서버 비밀값과
-로컬 설정을 함께 갱신해야 합니다. 웹앱 비밀번호를 아는 사용자가 매점 주문 가져오기를
-요청할 수 있으므로 공유 비밀번호와 맥미니 사용자 계정을 안전하게 관리하세요.
+Stopping preserves registered purchases and Chrome login. If removing local files, handle the profile and connector configuration separately. Rotate server/local connector keys together. Protect the shared app password and Mac mini account.
 
-작업 표는 `namofood_private.coupang_jobs` / `coupang_connector`이며 RLS를 켜고
-`anon`·`authenticated`의 직접 권한을 차단합니다. 앱은 기존 비밀번호 HMAC, 맥미니는
-별도 연결 키 HMAC을 사용합니다. 원문 본문·호출 역할을 서명하고, 실행 임대 토큰과
-만료를 검사해 다른 작업의 완료 응답이나 중복 AI 실행을 막습니다. 반복 요청은 기존
-작업을 돌려주고, 진행 상태 조회는 전체 원장을 내려받지 않습니다.
+Protocol/browser/UI checks: `node --test tools/test_coupang_protocol.mjs`, `node --test tools/test_coupang_browser.mjs`, `node tools/test_coupang_read.cjs`, `deno run --deny-env --deny-net tools/test_coupang_handler.ts`, `node tools/test_coupang_ui.cjs`, plus Store/ledger merge regressions.
 
-같은 주문번호는 하나의 고정 발주 ID로 저장합니다. 이미 등록·수정·삭제한 주문은
-새 가져오기로 덮어쓰거나 되살리지 않습니다. 주문 일부를 등록하면 확인된 품목 금액만
-합산하며 배송비·할인을 임의 배분하지 않습니다. 일부 등록한 주문의 추가 편집은 기존
-발주에서 합니다. 부가세·단가·수량 미확인은 빈칸으로 유지합니다. 한 번에 최대 10개
-목록 페이지와 최대 60개 주문 상세를 읽고 한도에 걸리면 일부 조회 경고를 표시합니다. 상세의
-주문번호·완료 상태·품목·총 결제금액만 보내며 배송지·결제수단 영역은 제외합니다. 쿠팡 양식이 달라지면
-실제 계정의 읽기 전용 결과로 재검증해야 합니다.
+<details>
+<summary>Historical connector verification and known gaps</summary>
 
-검증: `node --test tools/test_coupang_protocol.mjs`,
-`node --test tools/test_coupang_browser.mjs`, `node tools/test_coupang_read.cjs`,
-`deno run --deny-env --deny-net tools/test_coupang_handler.ts`,
-`node tools/test_coupang_ui.cjs`와 기존 매점·원장 병합 회귀 검사.
-배포 기준 `9404387`과 이번 변경 모두에서 기존 카드 이력 검사 5건은
-`recipeResolutions`·`salesEdits` 초기화 필드의 전체 상태 비교 불일치로 실패합니다.
-이번 작업에서 그 테스트의 판정 조건이나 카드 동작은 변경하지 않았습니다.
-OpenCode Go의 실제 GPT-6 Luna 호출·JSON 검증·결과 암호화는 격리 테스트로 통과했습니다.
-지원되지 않는 `text.format:json_object` 옵션은 보내지 않으며 결과 구조와 원문 근거는
-서버에서 검증합니다. 격리 테스트 작업은 즉시 삭제했고 원장에는 기록하지 않았습니다.
-주문 총액은 해당 주문번호·상세 URL에 연결된 원문의 `총 결제금액`이 하나로 확인되면
-그 값을 우선 사용합니다. AI가 총액 근거를 누락해도 품목 금액을 임의 합산하지 않으며,
-원문 총액이 여러 개이거나 다른 주문의 금액이면 자동 보정하지 않습니다.
-2026-10-19 전용 Chrome 로그인 후 실제 웹앱 → 작업 큐 → 주문 상세/페이지 조회 →
-OpenCode Go 정리 → 암호화 결과 → 새 클라이언트 상태 복구까지 통과했습니다.
-검증된 2026년 10월 완료 주문은 12건·14품목이며 발주 원장 쓰기는 0건입니다.
-다른 일반 탭이 열려 있어도 쿠팡 주문목록 탭을 우선 재사용하고 다른 사이트를
-덮어쓰지 않습니다. 실제 계정에 개인 주문이 섞일 수 있어 등록 전 품목 확인이 필요합니다.
+Earlier isolated OpenCode Go GPT-6 Luna tests exercised provider calls, JSON validation, and encrypted results without business-ledger writes; temporary jobs were removed. Unsupported `text.format:json_object` was not sent. Source evidence and result structures were validated server-side.
 
-## 카드내역 사진 정리 (발주집계)
+The operating notes record a 2026-10-19 end-to-end check from the web app through queue, order details/pages, AI organization, encrypted results, and fresh-client recovery: 12 completed October orders and 14 items, with zero purchase-ledger writes. Order tabs were reused without overwriting unrelated tabs. These are historical observations, not proof that the current account is authenticated or that every imported item belongs to the business.
 
-**발주 집계 → 카드내역**은 거래명세서와 분리된 결제 기록 공간입니다.
-카드사 화면 캡처·카드 이용내역 사진(JPG·PNG·WebP, 최대 8장)을 올리면
-기존 인증된 `nmf-invoice-ocr` 서버의 `documentType:"card"` 분기로 읽습니다.
-같은 OpenCode Go GPT-6 Luna를 사용하되 사진당 1회만 호출하며 재시도·유료 전환은
-하지 않습니다. 사진 준비 → 내역 인식 → 확인 후 등록을 진행 바로 표시합니다.
-결제일·24시간제 시간·가맹점·원화 금액·승인/취소·카드 이름·끝 4자리·승인번호·
-할부·특이사항을 확인하고 **선택한 내역 등록**을 눌러 저장합니다.
-판독 불명 날짜·금액을 오늘 날짜나 0으로 채우지 않습니다. 필수 정보가 없거나
-승인/취소가 불명확하면 수정 전에는 등록되지 않습니다. 원화 외 거래는 지원하지 않습니다.
+At baseline `9404387` and the associated change, five existing card-history checks failed whole-state comparisons involving `recipeResolutions`/`salesEdits` initialization. Those test expectations/card behaviors were not changed in that connector work. Physical iOS keyboards and every additional-verification screen remained unverified.
 
-승인과 취소는 별도 기록으로 보관하며 취소는 합계에서 차감합니다. 저장 금액은 양수이고
-승인액·취소액·승인−취소 합계를 구분합니다. 같은 사진의 같은 행은 다시 등록하지 않고,
-비슷한 승인번호 또는 날짜·시간·가맹점·금액·카드 내역은 기본 선택하지 않습니다.
-별도 거래로 등록하려면 확인해야 하며 다른 PC가 먼저 저장한 중복도 저장 전에 확인합니다.
-카드 금액을 명세서 합계·식단 발주 필요량·손익에 자동으로 더하지 않습니다.
-날짜별 달력·가맹점/카드/메모 검색·승인/취소 필터·20건 페이지·접어 펼치기·수정·삭제,
-별도 CSV와 인쇄를 제공합니다. 인쇄·CSV는 페이지를 넘어 현재 기간/필터의 모든 내역을 포함합니다.
-명세서와 카드내역 모두 날짜별 달력 → 선택 기간 요약 → 사진 올리기 순서로 표시합니다.
+</details>
 
-사진과 OCR 원문은 앱·서버에 저장하지 않으며 전체/부분 카드번호·계좌·연락처·
-CVC·비밀번호는 서버와 화면 양쪽에서 걸러냅니다. 카드 끝 4자리만 허용합니다.
-사진 처리 시 제공업체로 전송되므로 업로드 전에 불필요한 개인정보를 가리는 것이 좋습니다.
-인식 결과는 등록 전 기기에 사진 없이 보관하여 새로고침 후 확인을 이어갈 수 있습니다.
-등록한 `cardTransactions`와 `cardEdits`는 기존 암호화 상태·날짜별 백업에 저장합니다.
-명시 삭제 표식으로 오래 열린 PC의 부활을 막고, 카드 필드가 없는 이전 앱의 저장·백업만으로
-카드내역을 삭제하지 않습니다. 원본과의 대조는 사용자가 확인해야 합니다.
+### Store tax reference
 
-## 거래명세서 사진 정리 (발주집계)
+Store Settings automatically combines recorded sales, ticket settlement, other sales, and registered purchases through today. It distinguishes an all-sales-taxed-at-10% scenario from VAT actually recorded on invoices. Blank VAT is not filled and input-tax eligibility is not established.
 
-수량·단가·공급가·세액·합계·미수금과 식단 필요량의 숫자는 화면과 인쇄에서
-천 단위 쉼표로 표시합니다. 입력 중에도 소수·음수·긴 숫자와 커서를 보존하며,
-저장·계산·CSV의 원래 수치값은 바꾸지 않습니다. 날짜·명세서 번호·규격·단위는
-금액처럼 재서식하지 않습니다. 회귀: `node tools/test_invoice_number_format.cjs`.
+Annual income tax is a simple scenario based on entered year-to-date records, not one month multiplied by 12. Missing purchase amounts defer the scenario. Inventory, actual deductible expenses, other income, deductions/credits, and prepaid taxes are not fully represented. A collapsed manual-conditions calculator remains available.
 
-**발주 집계 → 사진 찍기 / 올리기**에서 JPG·PNG·WebP를 최대 8장씩 올립니다.
-브라우저의 단순 글자·숫자 파서 대신 `nmf-invoice-ocr` 서버가 표를 읽습니다.
-사진마다 표 인식과 품목 AI 검수가 끝나면 바로 발주로 등록합니다.
-이미 등록한 거래와 비슷한 경우만 먼저 비교 창에서 확인하며,
-거래일·공급업체·명세서 번호·품목·규격·수량·단위·
-단가·공급가액·부가세·합계·공급가 합계·이번 납품액·이전 미수금·미수 포함 합계를
-확인·수정할 수 있습니다. 읽지 못한 값은 추측하지
-않으며 수량×단가, 품목 합계, 공급가+세액이 맞지 않으면 확인 안내를 표시합니다.
-`나모푸드 貴中`·`귀중`·`공급받는자`는 구매자·수신자이며 공급업체로 쓰지 않습니다.
-사진에서 공급자 상호와 원문 근거를 구분해 검증하고, 실제 공급자 후보가 하나일
-때만 채택합니다. 복수 상호·누락·번호나 예금주만 있는 경우는 거래처를 비우고
-확인 안내를 남깁니다. 회귀: `deno run --deny-env --deny-net tools/test_invoice_supplier.ts`.
-금액을 임의로 재계산하지 않고 명세서의 실제 금액을 보존합니다. 한마음푸드 양식처럼
-하단에 ① 이전 미수금, ② 이번 거래액, ①+② 합계가 함께 있으면 **발주 집계는 ②만**
-사용하고 이월 미수금은 참고 정보로 별도 보관합니다. 과세·면세 품목이 섞여 있어도
-행별 공급가액·부가세·합계를 분리하며 빈 세액을 임의로 계산해 채우지 않습니다.
-빈 부가세 자체는 특이사항에 넣지 않습니다. 다른 값의 불확실성이나 실제 금액
-불일치는 유지하고, 직접 작성한 기존 메모를 지우지 않습니다.
+## Recipes and meal planning
 
-발주 집계 맨 위에는 선택한 월 전체의 납품액·공급가·세액·명세서 건수·거래 업체를
-항상 표시합니다. 날짜·주간·개별 명세서·카드 탭을 선택해도 이 월 요약은 줄어들지
-않으며, 카드내역과 중복 확인 대기 거래는 제외합니다. 공급가·세액은 명세서 합계를
-우선하고, 합계가 없을 때는 모든 품목의 해당 금액이 확인된 경우에만 합산합니다.
-빈 세액을 0으로 추정하지 않고 미확인 건수를 따로 안내합니다.
-미수 포함 잔액은 해당 월의 업체별 최신 명세서에 기재된 잔액을 한 번씩만 합산한
-참고 금액입니다. 최신 잔액 미기재·동일 날짜 서로 다른 잔액·거래일 또는 업체 미입력은
-확인 대상으로 제외하며, 별도 지급·정산 장부를 뜻하지 않습니다. 날짜별 인쇄에는
-월 전체 참고 요약을 넣지 않아 선택 범위 합계와 혼동하지 않도록 합니다.
+### Manual meal operation
 
-사진 준비 → 표 인식 → 발주 등록을 진행 바로 표시합니다. 진행률은 완료한 단계 기준이며
-서버 인식 중에는 경과 시간을 표시하고, 알 수 없는 인식 비율을 추정하지 않습니다.
-사진별 완료·등록·실패·중복 제외 수를 구분하고, 등록 완료와 함께 쓰기 저장 완료는
-구분합니다. 함께 쓰기 저장 상태는 기존 상단 저장 표시에서 확인합니다.
-인식 불확실·금액 불일치 등은 등록을 막지 않고
-**특이사항 · 메모**에 남깁니다. 특이사항은 여러 줄로 언제든 수정할 수 있고 입력 중에도
-자동 저장됩니다. 원본 인식 경고와 금액 검산 안내도 별도로 유지합니다.
-같은 사진은 중복 등록을 막습니다. 동일 업체·명세서 번호, 또는 같은 업체·날짜에
-품목 수와 대부분의 품목명·수량·합계가 거의 같은 거래는 비교 창에서
-**기존 명세서 열기 / 다른 거래로 별도 등록 / 이번 사진 등록 취소**를 고릅니다.
-날짜만 같은 거래는 막지 않습니다. 별도 거래 승인 기록은 서버에 함께 저장합니다.
-다른 PC가 먼저 등록한 경우도 함께 쓰기 저장 직전에 다시 확인하며, 확인 전에는
-의심되는 새 거래를 집계·CSV·서버 저장에서 제외합니다.
-거래일의 월에 저장하고 해당 월을 보여줍니다. CSV에는 규격·세액·합계도 포함하며
-문자열 수식 실행을 차단합니다. 발주 내역은 기존 식단 필요량·재고·손익과 별도입니다.
-월간·주간 달력에서 날짜별 건수와 납품액을 보고 날짜를 눌러 해당 명세서 탭을
-선택해 펼쳐 봅니다. 주간은 월을 넘겨도 7일 모두 표시합니다. 기간 전체 보기로
-날짜 선택을 해제할 수 있고 CSV·인쇄도 선택 날짜 또는 전체 기간을 사용합니다.
-방향키·Home·End로
-탭을 이동할 수 있고 모바일에서도 탭이 줄바꿈됩니다. 인쇄에는 선택 범위의 모든
-명세서가 포함되며, 인쇄 후에는 원래 선택·접힘 상태로 돌아옵니다.
-수량·단가·세액·합계 입력은 긴 숫자에 맞춰 글자 크기를 자동 조절하고 숫자 스피너와
-불필요한 여백을 없앱니다. 금액을 줄여 표시하거나 임의로 반올림해 입력하지 않습니다.
-등록한 발주는 기존 암호화 상태·백업에 보관되고, 기기별 다른 발주와 명시 삭제 기록은
-병합합니다. 같은 사진을 오래 열린 다른 PC가 다시 등록해도 기존 수동 수정과
-명시 삭제는 새 OCR로 덮어쓰지 않습니다. 명세서·품목마다 고정 ID로 편집하여 다른 기기가 표를 재정렬해도 잘못된
-거래/품목을 수정하지 않습니다. 선택한 백업의 명시 복원은 해당 발주 목록을 적용합니다.
+Automatic meal-plan generation ended at the operator's request on **2026-10-08**. Daily generation and 15-minute retry schedules are disabled. Even authenticated requests return `disabled:true` and zero generated/saved meals. `force`, `retry`, `preview`, and environment variables cannot re-enable it. Run history/backups remain; automatic missing-recipe filling operates separately.
 
-사진은 처리할 때 OpenCode의 이미지 모델로 전송됩니다. 앱 서버에는 사진·OCR 원문
-로그를 저장하지 않습니다. 원본 사진은 보관하지 않고, 인식한 텍스트·금액·특이사항은
-자동 등록한 발주에 암호화 저장합니다. 자동 등록은 원본 대조 완료로 표시하지 않습니다.
-제공업체의 데이터 처리 정책은
-별도로 적용됩니다. 실제 거래 자료의 인식값은 반드시 원본과 대조해야 합니다.
+Each KRW 10,000 meal has default white rice, soup, three substantial mains (meat, fish/seafood, and another main), and two vegetable sides, with flexible additions/removals. Breakfast, lunch, dinner, and late-night service are supported. Soup, vegetables, or dessert must not replace a substantial main.
 
-행별 거래처원장은 `일자-No. / 품목명(규격) / 수량 / 단가 / 공급가액 / 부가세 / 합계 / 거래처명 / 적요` 열과 회사명·기간 제목을 확인하면 원본 셀로 직접 읽습니다.
-날짜·거래번호별로 나누며 같은 날짜의 여러 거래에 일별 소계를 중복 배정하지 않습니다.
-공급업체는 회사명 제목에서 확인하고 구매자 열과 구분합니다. 일반 품목 수 한도는 1,000개,
-품목명·규격은 각각 500자입니다(파일·셀·행 크기 안전 한도는 별도 유지).
-금액 없는 품목·반품 음수·빈 세액을 보존하고 소계·총합계와 대조합니다.
-원장 출처는 `sourceAudit.sourceType=period-ledger`로 전달해 앱에서 참고 보관·중복 합산 제외합니다.
-기존 명세서의 삭제·금액 변경·원장 기준 전환은 자동으로 하지 않습니다.
-검사: `deno run tools/test_invoice_ledger.ts`, `node tools/verify_invoice_ledger_files.cjs <원장.xlsx>`.
+The [meal-composition manual](docs/menu-composition-manual.md) is derived from verified human-edited historical meals rather than treating AI drafts as authoritative. Choose the main ingredient first, then cooking method. Existing cells do not move/disappear merely because categories or layouts change; only explicitly applied meals change.
 
-서버 비밀값은 기존 `NMF_PW`와 OCR 전용 `NMF_INVOICE_API_KEY`,
-`OPENCODE_GO_API_KEY`, 기존 `OPENCODE_API_KEY` 순서로 확인합니다.
-사용자가 선택한 **Go 플랜**으로만 요청합니다. 기본 모델은 이미지 입력 지원 모델
-**Claude Haiku 5.5 (`claude-haiku-5-5`)**이며, 엔드포인트는
-`https://opencode.ai/inference/go/anthropic/v1/messages`입니다. 사진은 원본 이미지 입력으로 보내고,
-JSON을 추출하며 완료·거절·출력 중단 상태를 구분합니다. 인식 이후 같은 모델에
-품목명·규격·단위만 텍스트로 보내 실제 2차 검수를 합니다. 두 번째 응답은 숫자·금액·
-날짜·거래처·OCR 원문을 바꿀 수 없고, 숫자·포장규격·규격 단위 변경이나 빈 단위
-추측은 반영하지 않습니다. 최초 표기와 완료·일부 완료·실패 상태를 앱에서 볼 수 있습니다.
-검수가 실패해도 유효한 표 인식 내역은 유지합니다. 사진당 최대 2회 호출이며
-두 호출이 기존 전체 시간 제한을 공유하고 자동 재시도하지 않습니다.
-Anthropic Messages에는 OpenAI 전용 `store`·`reasoning` 옵션을 보내지 않습니다.
-제공업체의 별도 보관 정책은 그대로 적용됩니다.
-`NMF_INVOICE_MODEL`을 명시한다면 `claude-haiku-5-5`여야 하며,
-`NMF_INVOICE_TIMEOUT_MS`는 기본 100초, 최대 120초입니다.
-`NMF_INVOICE_BASE_URL`은 Go 주소만 허용합니다. 앱은 실제 이름의 User-Agent와
-사진 한 장의 대화에 해당하는 서명된 요청 기반 세션 ID를 전달합니다.
-Go의 공식 사용 안내는 코딩 에이전트용이므로 일반 웹앱 OCR 지원은 보장되지 않습니다.
-키·구독·한도 오류는 그대로 표시하며, 용도를 위장하거나 일반 Zen 유료 호출로 전환하지 않습니다.
-**서버 연결 확인**은 서버 설정 유무 검사이고, 제공업체 인증·정확도는 실제 사진 처리로
-확인해야 합니다. 본문 전체 SHA-256을 포함하는 60초 유효 HMAC으로 인증하고,
-허용 홈페이지 출처·실제 파일 형식·8MB 이미지 한도·재사용 요청·동시 호출을 검사합니다.
-별도 공개 Storage나 데이터베이스 권한은 추가하지 않습니다.
+AI labels/banners are removed from published meal plans. Explicit AI-meal cleanup preserves manual meals, headcounts, default rice, and recipes. Cleanup uses encrypted backups, latest-state conflict checks, read-after-write verification, exact deletion markers, and manual edit times to prevent old screens from reviving removed content.
 
-오프라인 검사: `deno run tools/test_invoice_ocr.ts`,
-`node tools/test_invoice_ocr_ui.cjs`. 모두 가상 명세서로 검사하고 운영 발주에는 쓰지 않습니다.
-`tools/verify_invoice_photo.cjs`는 운영자가 명시한 원본 사진만 실제 서버에서 처리하는
-확인 도구입니다. `NMF_INVOICE_PHOTOS`에 명시 경로를 전달하고 `NMF_PW`를 환경에
-안전하게 입력합니다. 품목 수·합계를 대조하지만 발주 등록이나 데이터베이스 저장은 하지 않습니다.
-`NMF_EXPECTED_OCR_MODEL=claude-haiku-5-5`, `NMF_EXPECTED_OCR_PLAN=go`로 지정하면
-사진을 보내기 전에 서버 모델과 Go 플랜도 확인합니다.
-배포 후 `node tools/test_live_invoice_status.cjs`는 실제 암호화 페이지와 서명된 상태 조회만
-확인합니다. 사진을 보내거나 인식 서비스를 호출하지 않고 운영 데이터 쓰기를 차단합니다.
+Photo-plan headcounts through **2026-10-12** remain. From **2026-10-13**, only photo-plan-derived values were cleared after backup; manual counts and sales remain. Photo-plan wording/icons are hidden.
 
-## 레시피 자동 채움 (Supabase cron → Edge Function → OpenCode Zen)
+Expected meal counts and actual ticket/return records are separate. Expected counts feed meal plans, recipes, and ingredient requirements; an empty Food expected count is zero, while Cafe retains its previous default servings. Earlier expected-versus-actual comparisons use actual minus expected and distinguish blank sales from explicit zero. Newer company-ticket and profit basis rules are described above. The original six sales CSV columns are retained, with expected/difference fields appended. Check: `node tools/test_sales_expected_actual.cjs`.
 
-레시피가 없는 음식을 **식단 저장 직후 요청**하고, 누락된 요청은 **매분 확인**해
-자동으로 채웁니다. 최근 편집 중이어도 생성하고 최신 상태에 충돌 검사 후 병합합니다.
-레시피 화면과 내부 조리용 식단에 실제 시작 시각, 진행 단계, 예상 완료 범위,
-다음 확인/재시도 시각을 5초마다 갱신합니다. 외부 공지용 화면·인쇄에는 AI 표시가 없습니다.
-앱 요청은 비밀번호 기반의 짧은 유효기간 HMAC 서명으로 인증하며 cron 비밀은
-클라이언트에 전달하지 않습니다. 동시 요청은 DB에서 하나만 실행합니다.
+### Selecting recipes and rice
 
-재료는 **1인 기준**으로 저장해 기존 발주 계산을 유지하고, 조리법은 **100명 기준
-급식 대량 작업서**로 생성합니다. 회전솥·대형솥·튀김기·전판과 장비 용량에 따른
-분할 조리, 배식 마무리를 명시하며 가정용 프라이팬·숟가락 계량은 거부합니다.
-오븐은 선택 장비입니다. 식약처의 대량 조리 가열·보관 기준을 적용합니다.
+Food recipe/meal pickers follow **main ingredient → cooking method**. Meat groups beef, pork, chicken, and duck, with collapsed subcategories. Other top groups are fish/seafood, vegetables, and other dishes. Meat methods include stir-frying, grilling, steaming, braising, frying, pan-frying, and boiling; empty categories display zero and are disabled.
 
-기존 AI 레시피 중 가정용 조리법은 신규 누락 음식 뒤에 **한 번에 최대 2개**씩
-조리법만 전환합니다. 재료·분량·알레르기·출처와 수동 레시피는 그대로 유지하고,
-동시 편집은 지문/CAS로 보호합니다. 전환 전에는 고유 암호화 백업을 남깁니다.
-레시피 화면에는 전환 대기 수, 진행 내역, 100·300·500명 계산과 선택 음식의
-A4 한 장 조리 작업서 인쇄가 있습니다. 복원한 조리법은 수동 선택으로 보호합니다.
-읽기 전용 확인: `NMF_PW=... deno run -A tools/audit_bulk_recipes.ts`.
+Boiled pork dishes belong under boiling, chicken galbi/marinated stir-fries under stir-frying, and karaage/chili-fried chicken under frying. For ambiguous names, use a clearly established main cooking step; preparation-only, sauce-only, or conflicting methods leave the dish unclassified. Name/ingredient search works with soup/main/side filters. Unclassified dishes remain selectable; Cafe categories are unchanged.
 
-### 급식 메뉴 라이브러리 · 임시 식단 작성
+Below direct entry and clear, **Choose from all menus** searches every registered dish beyond slot categories, excluding forbidden items such as alcohol. Returning to slot categories preserves collapsed recommendations. Clicking the default-rice display opens alternatives such as curry or black-bean-sauce rice. Rice stays in slot 0; clearing restores white rice. Choices flow through viewing, print, CSV, purchasing, and previous-day/month copies without changing other dishes/headcounts. Check: `node tools/test_menu_all_rice_picker.cjs`.
 
-푸드 레시피와 식단 선택기는 **주재료 → 조리방식**으로 찾습니다. 고기·생선/해산물·
-야채·기타를 먼저 고르고 튀김·구이·볶음·찜·조림·무침·부침으로 좁힙니다.
-소고기·돼지고기·닭고기·오리고기는 고기에 묶고 세부 재료는 접힌 목록에서 펼칩니다.
-고기는 볶음·구이·찜·조림·튀김·부침·삶음의 조리방식으로 나누며, 빈 분류도 개수 0과
-비활성 버튼으로 표시합니다. 수육·보쌈은 삶음, 닭갈비·주물럭은 볶음, 가라아게·깐풍기는
-튀김으로 찾습니다. 이름이 불명확한 고기 메뉴는 등록된 본 조리 단계가 명확할 때만
-방법을 보완하며, 준비·소스 작업만 있거나 방법이 충돌하면 미분류로 유지합니다.
-음식명·재료 검색과 국/주찬/부찬 필터를 함께 쓸 수 있습니다. 미분류 음식도 유지합니다.
-카페 레시피는 기존 분류를 그대로 사용합니다.
+The historical temporary-meal workflow lets users collect soup, three mains, two vegetable sides, and extras, then apply to a selected date/meal after replacement confirmation. Until applied, choices are unsaved and absent from print. Application changes only that meal's dishes and marks them manual, preserving headcounts/shifts.
 
-실제 식단의 고르기 창에는 직접 입력·비우기 아래 **전체 메뉴에서 선택**이 있습니다.
-자리별 분류를 벗어나 모든 등록 메뉴를 찾고 넣을 수 있으며, 술 등 금지 음식은 제외합니다.
-다시 자리별 목록으로 돌아갈 수 있고 추천은 접힌 상태를 유지합니다.
-**밥(기본) · 쌀밥** 표시 자체를 누르면 카레라이스·짜장밥 등으로 바꿀 수 있습니다.
-기존 밥 칸(0)에 저장하며 비우면 쌀밥으로 돌아갑니다. 선택한 밥은 식단 보기·인쇄·CSV·
-발주 및 전날/지난달 복사에도 반영됩니다. 기존 식수와 다른 메뉴는 그대로 유지합니다.
-화면·저장·인쇄·발주 검증: `node tools/test_menu_all_rice_picker.cjs`.
+`tools/institutional_catalog.ts` contains AI-authored bulk-cooking drafts informed by publicly available catering menus, not copied official recipes. Ingredients are per person and work instructions per 100 people. Kitchen staff must adjust for equipment, delivered specifications, and serving sizes. Imports add only new names/aliases without overwriting existing recipes.
 
-레시피를 **임시 식단에 담기**로 골라 국·메인 3개(고기/생선·해산물/기타 주찬)·
-야채 부찬 2개와 추가찬을
-구성할 수 있습니다. 날짜·끼니를 지정해 적용하기 전까지는 저장되지 않습니다.
-기존 식단이 있으면 교체 확인을 받고 해당 끼니의 음식만 변경합니다. 식수인원·근무표 등은
-그대로 두며, 적용한 식단은 직접 작성한 식단으로 보호합니다. 임시 선택은 인쇄에 나오지 않습니다.
+### Automatic missing recipes and bulk-cooking conversion
 
-`tools/institutional_catalog.ts`의 메뉴 라이브러리는 급식업체 공개 메뉴를 참고한
-**AI 작성 대량 조리 초안**입니다. 업체의 공식 레시피를 복제한 자료가 아닙니다.
-재료는 1인량, 작업서는 100인 기준이며 실제 납품 규격·장비·배식량에 맞춰 조리 담당자가
-확인·조정합니다. 기존 레시피는 덮어쓰지 않고 이름·별칭 중복을 제외한 새 메뉴만 추가합니다.
+Save a meal to request missing recipes immediately; a once-per-minute check catches missed requests. Generated recipes are merged into the latest state after conflict checking, including while other fields are edited. Internal screens refresh actual start time, phase, estimated completion range, and next check/retry every five seconds. External notices/prints contain no AI labels.
 
-식단 자동 생성은 2026-10-08 운영자 요청으로 종료했습니다. 식단은 직접 선택하고
-레시피 자동 채움·대량 조리 전환만 기존대로 운영합니다.
+Requests use short-lived password HMAC signatures, not a client-visible cron secret. A database claim allows one concurrent run. Ingredients remain **per person**, while methods are **100-person institutional cooking worksheets**, specifying large kettles, fryers, griddles, capacity-based batches, and service finishing. Household pans/spoon measures are rejected; ovens are optional. Instructions follow the food-safety heating/holding criteria described by the recipe policy.
 
-### AI 주간 추천 목록 (자동 작성과 별도)
+After new missing recipes, convert at most two older household-style AI methods per run. Preserve ingredients, amounts, allergens, provenance, and manual recipes. Fingerprints/CAS protect concurrent edits; create a unique encrypted backup before conversion. The recipe screen shows conversion queue/progress, 100/300/500-person calculations, and one-page A4 worksheets. Restored methods are protected as manual choices.
 
-추천 서버가 매일 **오전 6시 5분(KST)**에 **오늘부터 2주 뒤까지**의 AI 추천
-목록을 확인합니다. 누락·실패한 날짜는 5분마다 최대 2개씩 보충하며 완성된
-목록은 다시 생성하지 않습니다. 식단 화면은 선택한 날짜가 속한 월요일~일요일의
-서버 목록을 불러옵니다. 추천 영역은 기본으로 접혀 있으며 눌러 펼칠 수 있습니다.
-각 메뉴 칸의 **＋ 고르기 → AI 추천 펼치기**에서 국·고기·생선/해산물·기타
-주찬·야채 부찬 두 자리 중 해당 자리의 추천 3개가 보입니다. 선택창의 접기 제목은
-“뭐 할지 모르겠다면? 동건이의 추천!”이며 메뉴 분류는 아래에 별도로 표시합니다.
-실제 AI 모델·작성 시각은 펼친 목록 아래에 남깁니다. 별도의
-추천 받기·날짜/끼니 선택 패널은 없습니다. 등록된
-완성 레시피에서 날짜별 무작위 후보를 추리고, OpenCode 모델이 만원 급식·함바
-기준과 앞뒤 7일 식단을 참고해 선택합니다. 같은 음식·별칭, 주류·후식·미등록
-음식은 추천하지 않습니다. 후보가 부족한 자리는 부족한 수를 그대로 안내합니다.
+Read-only audit: `NMF_PW=... deno run -A tools/audit_bulk_recipes.ts`.
 
-완성된 원본 후보는 식단과 분리한 `nmf_menu_recommend_banks` 서버 테이블에
-보관합니다. 다른 기기·브라우저에서도 같은 날짜의 목록을 공유합니다. 브라우저
-저장 공간의 옛 추천은 사용하지 않으며 현재 화면에는 메모리 캐시만 사용합니다.
-원자적 150초 작업 임대로 모든 기기·서버 일정을 합쳐 AI 생성은 최대 2개씩
-진행합니다. 이미 생성 중이면 202 응답 후 서명을 갱신해 제한된 시간 동안 기다립니다.
-레시피가 바뀌면 요청한 날짜의 목록을 갱신하지만 식단 선택만으로는 다시 뽑지 않습니다.
-첫 준비에는 시간이 걸릴 수 있어 날짜별 준비 현황을 보여줍니다.
-선택하지 않은 이전 주의 대기 호출은 취소하고, 실패한 날짜는 화면을 다시 연다고
-자동으로 재시도하지 않습니다. 실패 시에만 다시 준비 버튼을 제공합니다.
+Food ingredient requirements are **base recipe × expected diners × preparation-loss correction × ordering allowance**. The default allowance is **2×**, adjustable from 1× to 10× in the collapsed allowance control shared across the daily table, recipe details, and purchasing requirements. Rice/new ingredients are included. Per-person originals, headcounts, actual purchases, and profit are unchanged. Apply manual additions/adjustments after the multiplier. Display the basis and multiplier in UI/CSV and use the same quantities for cooking print/PDF. This does not apply to Cafe/Store. Check: `node tools/test_recipe_order_allowance.cjs`.
 
-일반 선택창·레시피의 임시 식단 선택창 모두 날짜·자리별 추천을 재사용합니다.
-열 때마다 현재 식단·별칭·레시피 조건을 다시 확인하여 이미 선택한 메뉴 등은
-제외합니다. 후보가 줄면 부족함을 알리며 중복을 다시 넣지 않습니다.
-추천 준비·조회는 추천 전용 서버 자료만 사용하며 기존 식단·식수·직원 자료를 변경하지
-않습니다. 후보를 직접 눌렀을 때만 지정한 날짜·
-끼니의 한 음식 칸을 수동 선택으로 저장하며, 기존 값 교체는 확인을 받습니다.
-임시 식단 선택은 적용 전까지 저장하지 않습니다. 쌀밥은 그대로 기본 제공하며,
-추천과 AI 표시는 외부 공지 인쇄에 나오지 않습니다.
+| Component | Purpose |
+| --- | --- |
+| `supabase/functions/nmf-recipe-fill/` | Decrypt state, find missing recipes, call Claude Haiku 5.5 through Go, CAS-merge, encrypt/save |
+| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql` | Original schedule and `namofood_recipe_runs` |
+| `supabase/migrations/20260922060000_nmf_recipe_fill_every_10min.sql` | Historical ten-minute schedule |
+| `supabase/migrations/20260924182650_nmf_recipe_immediate_status.sql` | Immediate run locks/status and current once-per-minute schedule |
+| `tools/nmf_cron_setup.ps1` | One-time secret/migration/Vault/deployment/dry-run setup |
+| `tools/test_recipe_fill.ts` | Recipe logic checks |
 
-`supabase/functions/nmf-menu-recommend/`는 비밀번호 기반 날짜·nonce·시각 HMAC을
-검증한 뒤 암호화 상태를 읽고 추천 전용 테이블을 사용합니다. 이 테이블은 RLS를
-활성화하고 공개·일반 로그인 역할의 접근을 막습니다. 서버 일정은 Vault의 기존
-cron 비밀값으로 인증하며 실제 식단·레시피·상태 백업에는 쓰지 않습니다. 기존 식단
-자동 생성은 계속 비활성화합니다. 모델 오류는 그대로 안내하고 로컬 무작위 선택을 AI로 표시하지
-않습니다. 검사: `deno run -A tools/test_menu_recommend.ts`,
-`node tools/test_daily_menu_recommendations.cjs`,
-`node tools/test_weekly_menu_recommendations.cjs`,
-`deno run --allow-read tools/test_menu_recommend_schedule.ts`.
+The setup script prompts for secrets and stores them in Supabase, not Git. Run history query: `select * from namofood_recipe_runs order by started_at desc;`. If rotating the shared password, update the server's `NMF_PW` securely as well. Both `NMF_RECIPE_MODEL` and `NMF_RECIPE_FALLBACK_MODEL` default to `claude-haiku-5-5`; identical models are not called twice.
 
-과거 AI 식단의 일회성 교체 도구 `tools/refresh_institutional_menus.ts`는 이력으로 보존하며,
-현재는 읽기 전용 미리보기만 지원하고 `--apply`는 서버 조회 전에 거부합니다.
-`rebuild_week_20261005.ts`, `recover_menu_20261016.ts`의 과거 식단 작성 경로도 같은 방식으로 막았습니다.
-과거 소유권 확인·백업·충돌 검사 로직은 회귀 검사와 운영 이력 확인용으로만 보존합니다.
+`NMF_MAX_PER_RUN` defaults to eight recipes generated in parallel. Failed claims wait two minutes; the run limit is four minutes. `NMF_RECIPE_TIMEOUT_MS` defaults to 52 seconds and is capped at 55 seconds; `NMF_RECIPE_MAX_TOKENS` controls output length.
 
-| 파일                                                                 | 설명                                                                                                                                 |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `supabase/functions/nmf-recipe-fill/`                                | Edge Function. 상태 복호화 → 빠진 음식 → Claude Haiku 5.5(OpenCode Go)로 레시피 생성 → CAS 병합·암호화 저장 |
-| `supabase/migrations/20260922050000_nmf_recipe_fill_cron.sql`        | 실행 기록 표 `namofood_recipe_runs`와 최초 일정                                                                                      |
-| `supabase/migrations/20260922060000_nmf_recipe_fill_every_10min.sql` | pg_cron을 10분마다 확인하도록 변경                                                                                                   |
-| `tools/nmf_cron_setup.ps1`                                           | 1회 설정 스크립트 (비밀값 입력 → 마이그레이션 → vault → 배포 → dry-run)                                                              |
-| `tools/test_recipe_fill.ts`                                          | 로직 점검 `deno run -A tools/test_recipe_fill.ts`                                                                                    |
+### Weekly AI suggestions (not automatic meal writing)
 
-처음 한 번: `powershell -ExecutionPolicy Bypass -File tools/nmf_cron_setup.ps1`
-— 앱 비밀번호와 OpenCode Zen API 키를 물어 Supabase 비밀로만
-저장합니다(저장소에는 남지 않음). 실행 기록 확인:
-`select * from namofood_recipe_runs order by started_at desc;` 비밀번호를 바꾸면
-`supabase secrets set NMF_PW=새비밀번호` 도 같이 바꿔야 합니다. 레시피 모델은
-`NMF_RECIPE_MODEL`·`NMF_RECIPE_FALLBACK_MODEL` 모두 기본 `claude-haiku-5-5`이며,
-같은 모델은 중복 호출하지 않습니다. 추천·세금 검토·카드 연결·쿠팡 정리도 같은 Go 모델입니다. 1회 생성 수는
-`NMF_MAX_PER_RUN`(기본 8, 메뉴별 병렬 생성), 오류 재시도 대기는
-DB claim에서 2분, 실행 제한시간은 4분입니다. LLM 제한은
-`NMF_RECIPE_TIMEOUT_MS`(기본 52초, 최대 55초 적용)/`NMF_RECIPE_MAX_TOKENS`로
-조정합니다.
+At **06:05 KST daily**, the recommendation service checks today through two weeks ahead. Every five minutes it fills at most two missing/failed days, leaving complete banks unchanged. The UI loads the Monday–Sunday bank containing the selected date; suggestions start collapsed.
 
-## 수동 식단 운영 · AI 식단 자동 편성 종료
+Each meal slot shows three suggestions after opening its recommendation section. The display title translates to **“Not sure what to serve? Donggeon's picks!”**, with the category and actual model/generation time shown separately. There is no separate request/date/meal panel.
 
-실시간 레시피 실행 잠금·진행 상태·매분 일정은
-`supabase/migrations/20260924182650_nmf_recipe_immediate_status.sql`에서 적용합니다.
-인쇄는 A4 여백 2mm이며 식단 높이에 맞춰 한 페이지로 자동 축소합니다.
-브라우저 회귀 확인: Playwright와 pdf-lib가 설치된 환경에서
-`node tools/test_app_print.cjs` (필요하면 `CHROME_PATH` 지정).
-대량 조리 화면·계산·편집 보호·인쇄 회귀: `node tools/test_bulk_recipe_ui.cjs`.
-식단 인쇄의 조식·중식·석식·야식 체크는 미리보기/인쇄에만 적용하며 최소 한 끼니는
-남깁니다. 월·주·하루 보기와 외부/내부 용도 모두 A4 한 페이지로 맞춥니다.
-판매 실적의 `식권 금액 · 끼니별 실적`은 기본 접힘이며 눌러서 펼칩니다.
-판매 실적은 예상 식수와 판매 식권 수를 별도 입력하며, 예상 값은 식단표의 식수와
-같은 자료에 저장합니다. 나모푸드의 예상 식수 빈칸은 설정 기본 인원이 아닌 0명이며,
-입력값은 식단표·레시피 재료량·발주 필요량 계산에 함께 반영됩니다. 카페의 기존
-기본 인분은 유지합니다. 끼니·하루·월의 인원과 식권 금액 차이는 판매−예상으로
-표시하고, 판매 미입력 끼니는 비교에서 제외해 명시적인 0장과 구분합니다. 실제
-매출·손익은 기존처럼 판매 식권 수와 기타 매출만 사용합니다. 판매 CSV의 기존
-6개 열은 보존하고 예상·차이 정보를 뒤에 추가합니다.
-회귀: `node tools/test_sales_expected_actual.cjs`.
-레시피 상태 API는 `https://d-bae.com`과 기존 GitHub 주소만 요청별로 허용하고,
-기존 서명/cron 인증은 유지합니다. 회귀: `deno run -A tools/test_recipe_cors.ts`.
+Registered complete recipes supply randomized candidates; the model selects against the KRW 10,000 institutional-canteen standard and surrounding seven-day menus. Exclude same dishes/aliases, alcohol, desserts, and unregistered recipes. Report shortages rather than filling with duplicates.
 
-2026-10-08 운영자 요청으로 AI 식단 자동 편성을 종료했습니다. 매일 생성 일정과
-15분 재시도 일정은 비활성화하고, 인증된 요청도 서버에서 `disabled:true`와
-생성/저장 0을 반환합니다. `force`·`retry`·`preview`나 환경 변수로 재활성화하지
-않습니다. 실행 기록과 백업은 유지하며 레시피 자동 작성은 별도로 계속 운영합니다.
+Banks live separately from meal plans in `nmf_menu_recommend_banks` and are shared across devices. Old browser-storage banks are ignored; the UI uses an in-memory cache. A 150-second atomic lease limits generation to two days across schedules/devices. In-progress requests return 202 and wait for a bounded period with refreshed signatures.
 
-- 한 끼 10,000원, 조식·중식·석식·야식
-- 쌀밥은 별도 입력 없이 매 끼니 기본 포함. 국 + 메인 3개(고기/생선·해산물/기타) +
-  야채 부찬 2개를 선택하며 추가 메뉴는 자유롭게 더하거나 뺄 수 있음
-- 식단에서는 AI 배너·표시를 제거함. AI가 작성한 식단 내용은 명시적인 삭제 작업으로
-  정리하고 수동 식단·식수·쌀밥·레시피는 유지함
-- 사진 계획 기반 식수는 2026-10-12까지의 기존 숫자를 유지하고 2026-10-13부터
-  사진 계획으로 입력된 값만 백업 후 비움. 직접 입력과 판매 실적은 유지하며
-  `사진 계획`·사진 아이콘은 식단표에서 표시하지 않음
+Recipe changes refresh a requested day's bank; meal selection alone does not reroll it. Show readiness by day, cancel pending calls for deselected weeks, and retry a failed day only through the explicit retry control. Reopening a screen does not silently retry.
 
-| 파일                                                          | 설명                                                             |
-| ------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `supabase/functions/nmf-menu-plan/`                           | 종료된 식단 생성 요청을 인증 후 무작업 응답으로 처리              |
-| `supabase/migrations/20260924162050_nmf_menu_plan_weekly.sql` | 실행 기록 표, Vault 함수 URL, 매일 확인 cron, 최초 2주 범위 보충 |
-| `tools/test_menu_automation_disabled.ts`                     | 실제 요청 처리기의 DB·모델·저장 무작업 검사                       |
-| `tools/remove_ai_menus.ts`                                    | AI 표시 끼니 내용만 삭제, 기본 dry · `--apply` 시 백업/CAS 확인   |
+Pickers recheck current meals, aliases, and recipe conditions on opening and remove already-selected dishes. Only choosing a suggestion saves that one date/meal/slot as a manual selection, with replacement confirmation. Recommendation preparation never changes meals, headcounts, staff, recipes, or state backups. Default rice remains; recommendations/AI labels do not appear on external prints.
 
-실행 기록 확인: `select * from namofood_menu_runs order by started_at desc;`
+`supabase/functions/nmf-menu-recommend/` validates date/nonce/time HMAC, reads encrypted state, and writes only recommendation tables. RLS blocks public/ordinary authenticated table access; schedules use the existing Vault cron secret. Model failures are reported honestly; local random picks are not labeled AI.
 
-## 사람의 수정 식단을 기준으로 한 만원 식단 매뉴얼
+Checks: `deno run -A tools/test_menu_recommend.ts`, `node tools/test_daily_menu_recommendations.cjs`, `node tools/test_weekly_menu_recommendations.cjs`, and `deno run --allow-read tools/test_menu_recommend_schedule.ts`.
 
-[식단 작성 매뉴얼](docs/menu-composition-manual.md)은 과거 저장본과 비교해 확인한
-사람의 수정 식단에서 구성 원칙을 추출한 운영 기준입니다. AI 초안 자체를 정답으로
-삼지 않습니다. 기본 6칸과 자유로운 추가·제거를 유지하면서 고기·생선/해산물·
-기타 주찬의 메인 3종, 야채 부찬 2종을 직접 선택합니다. 국·나물·후식만으로
-실속 있는 주찬을 대체하지 않습니다. 고기 종류는 한 상위 분류로 묶고 필요할 때
-소분류를 펼치며, 모든 식단 선택은 주재료 다음 조리방식 순서입니다.
+Historical automatic-menu tools remain for audits. `tools/refresh_institutional_menus.ts` supports read-only preview and rejects `--apply` before server access; past write routes in `rebuild_week_20261005.ts` and `recover_menu_20261016.ts` are also blocked.
 
-과거 자동 편성 순수 로직과 검사는 운영 이력으로 보존하지만 서버 생성은 종료됐습니다.
-현재 화면의 식단 선택·임시 식단 검증은 수동 운영 기준을 사용합니다. 기존 칸 값은
-분류나 화면 변경만으로 이동·삭제하지 않으며 명시적으로 적용한 끼니만 변경합니다.
-AI 삭제는 암호화 백업·최신 상태 충돌 검사·저장 후 재조회로 확인하고 정확한 삭제
-값과 수동 편집 시각을 기록해 열린 옛 화면이 삭제된 식단을 되살리지 않게 합니다.
+| Retired automation component | Purpose |
+| --- | --- |
+| `supabase/functions/nmf-menu-plan/` | Authenticated no-op response for retired generation |
+| `supabase/migrations/20260924162050_nmf_menu_plan_weekly.sql` | Historical run table, Vault URL, daily checks, and initial two-week fill |
+| `tools/test_menu_automation_disabled.ts` | Verify no database/model/save work in the actual handler |
+| `tools/remove_ai_menus.ts` | Remove only AI-marked meal content; dry by default, backup/CAS with explicit `--apply` |
 
-## 직원 삭제/보관과 근무 내역 보존
+Historical runs: `select * from namofood_menu_runs order by started_at desc;`.
 
-직원 명단의 **삭제/보관**은 현재 명단에서만 제외합니다. 근무 기록과 직원 정보는
-함께 보관되어, 근무한 달의 주차별 근무표·직원별 인건비·CSV·인쇄에 계속 포함됩니다.
-직원별 인건비에는 해당 월 실제 근무 기록이 있는 사람만 표시합니다.
-**보관된 명단**은 접힌 목록에서 이름·역할·이전 이름으로 검색하고, 10명씩 페이지로
-확인하거나 현재 명단으로 복귀시킬 수 있습니다.
-보관 직원의 이름도 목록에서 수정할 수 있으며 이전 이름은 검색용 별칭으로 남습니다.
-직원별 인건비의 보관 직원 이름을 누르면 검색을 초기화하고 해당 직원이 있는 페이지를
-펼쳐 이름 입력칸으로 이동합니다. 이름 수정은 직원 ID·보관 상태·시급·근무시간·인건비를
-바꾸지 않습니다. 이름과 별칭의 수정 시각을 동기화해 오래된 기기/백업이 새 이름을
-덮어쓰지 않으며, 신원·시급 미확인 직원은 이름만 바꿔도 확인 경고와 복귀 제한을 유지합니다.
+### Print and PDF
 
-보관된 명단 안의 **삭제**는 확인 후 그 명단에서만 제외합니다. 직원 정보·모든 달의
-근무시간·인건비·CSV·인쇄 기록은 삭제하지 않습니다. 삭제 표식을 동기화해 새로고침이나
-오래된 기기/백업이 명단을 되살리지 않도록 합니다. 해당 월 직원별 인건비의 이름을 누르면
-삭제된 직원의 기록만 임시로 조회하고 이름 수정·명단 복귀도 할 수 있습니다. **기록 보기 닫기**는
-명단에 다시 넣지 않고 조회만 닫습니다. 검증: `node tools/test_staff_archive_delete.cjs`.
+Meal printing uses 2mm A4 margins and scales to one page. Breakfast/lunch/dinner/late-night checkboxes affect only preview/print, retaining at least one meal. Day/week/month and internal/external views share page fitting.
 
-기본 근무 채우기와 지난달 복사는 현재 직원만 대상으로 빈 칸에 적용합니다.
-기존 기록은 복사·동기화·백업 불러오기에서 누락되었다는 이유로 삭제하지 않으며,
-근무표의 개별 **지우기** 또는 **이 달 근무표 지우기**가 남긴 명시 삭제 표식을
-기기 간 공유합니다. 보관/복귀 선택도 재시작과 기기 간 동기화에서 유지합니다.
+Checks: `node tools/test_app_print.cjs` (Playwright/pdf-lib; optional `CHROME_PATH`) and `node tools/test_bulk_recipe_ui.cjs`. Recipe status permits the configured `https://d-bae.com` and GitHub origins while preserving request/cron authentication; check `deno run -A tools/test_recipe_cors.ts`.
 
-각 주차의 **이 주차 일괄 입력**을 열고 칸·직원·날짜 또는 주차 전체를 체크해
-24시간 형식 시간/휴게를 적용하거나 전날 시간을 복사합니다. 한 주차씩 선택하며,
-다른 주차로 이동하거나 입력을 닫으면 선택만 해제되고 기록은 바뀌지 않습니다.
-전날 복사는 전월 마지막 날도 포함한 원본 기준이며, 기존 기록을 바꾸기 전
-확인합니다. 선택하지 않은 칸은 변경하지 않습니다.
+## Staff schedules and archived history
 
-직원 명단은 화면 폭에 맞춘 표로 표시하고, 좁은 화면에서는 직원별 카드로
-나누어 가로 스크롤 없이 편집합니다. 이 변경은 근무표 등 다른 표에는 적용하지 않습니다.
-화면 검증: `node tools/test_staff_layout.cjs`, 주차별 입력 검증: `node tools/test_weekly_bulk.cjs`.
+Archiving/removing from the active roster preserves employee information and all work records. Employees remain in the weekly schedule, payroll, CSV, and prints for months they worked. Monthly employee payroll lists only staff with actual work records that month.
 
-### 역할과 시급
+The collapsed archive searches names, roles, and previous-name aliases, with ten employees per page and restoration controls. Renaming preserves employee IDs, archive state, wages, hours, and payroll. Edit times prevent old devices/backups from replacing new names. Selecting an archived employee in payroll clears search, opens the correct archive page, and focuses the name field. Historical identity/rate warnings are not resolved merely by renaming.
 
-최초 역할은 총괄/조리 각 15,000원, 보조/이송 각 13,000원입니다.
-지정한 현재 직원 3명은 별도 개인 시급을 적용하며 모든 금액은 편집할 수 있습니다.
-개인 시급을 비우면 역할 기본 시급을 적용합니다. 기존 보관 직원의 적용 시급은
-유지합니다. 역할은 추가/삭제할 수 있고 사용 중인 역할을 삭제할 때는 다른 역할로
-옮깁니다. 이때 기존 적용 시급을 개인 시급으로 남겨 뜻하지 않은 인건비 변경을 막습니다.
-역할 설정/개인 시급의 편집 표식은 오래된 기기나 백업에서 설정이 되돌아가는 것을 막습니다.
-초기 설정 확인: `NMF_PW=... NMF_STAFF_PAY_NAMES='["대상1","대상2","대상3"]' deno run -A tools/apply_staff_pay_settings.ts`.
-`--apply`를 명시하면 고유 암호화 백업·충돌 검사를 거쳐 최초 한 번만 적용합니다.
+Confirmed deletion inside the archive hides only its roster entry, preserving employee information, all monthly hours/payroll, CSV, and print history. Synced deletion markers prevent resurrection. Clicking a deleted employee's payroll name temporarily opens just that historical record for renaming/restoration; closing the historical view does not restore the roster. Check: `node tools/test_staff_archive_delete.cjs`.
 
-회귀 확인: `node tools/test_staff_history.cjs` (Playwright·pdf-lib·pdfjs-dist 필요).
-기존에 삭제된 직원의 남아 있는 근무 기록은
-`NMF_PW=... deno run -A tools/recover_staff_history.ts`로 읽기 전용 점검합니다.
-`--apply`를 명시하면 고유 암호화 백업과 충돌 검사를 거쳐, 날짜별 백업에서 확인한
-정확한 직원 정보만 보관 명단에 추가하며 다른 데이터는 변경하지 않습니다.
+Fill-default and copy-previous-month target current employees and blank cells only. Missing records in sync/backups/copies are not deletions. Individual clear/month-clear actions create explicit cross-device deletion markers. Archive/restore choices persist across restart and synchronization.
 
-## 비밀번호 바꾸기 / 앱 갱신
+Weekly bulk entry selects cells, employees, dates, or an entire week and applies 24-hour start/end/break times or previous-day shifts. Only one week is selected at a time. Switching weeks/closing clears selection without edits. Previous-day copy reads originals, including the prior month's last day; replacing existing shifts requires confirmation. Unselected cells remain unchanged.
 
-앱 표시·암호화 잠금 페이지·`ver.json`에 같은 전체 버전 태그를 사용합니다.
-업데이트 버튼/암호 해제/재로드 반복 방지 회귀: `NMF_PW=... node tools/test_app_version.cjs`.
+New employees, new shifts, fill-default, and bulk entry default to **zero break minutes**. Existing shifts retain breaks; old shift codes convert under their historical defaults before new defaults apply. Explicit employee break settings remain.
 
-```bash
-pip install cryptography
-python encrypt_app.py 나모푸드_관리앱.html . "새비밀번호"
-git add index.html ver.json && git commit -m "앱 갱신" && git push
+The staff roster fits its container; narrow screens use employee cards without horizontal scrolling. This layout does not change other tables. Checks: `node tools/test_staff_layout.cjs`, `node tools/test_weekly_bulk.cjs`, and `node tools/test_staff_history.cjs` (Playwright/pdf-lib/pdfjs-dist).
+
+### Roles and hourly rates
+
+Initial lead/cook roles are KRW 15,000/hour; assistant/transport roles are KRW 13,000/hour. Three designated current employees have individual overrides; all amounts are editable. Blank individual pay uses the role default. Existing archived rates are preserved.
+
+Roles can be added/deleted. Deleting an assigned role requires reassignment and preserves the previous effective wage as an individual override to avoid accidental payroll changes. Role/rate edit markers prevent stale settings restoration.
+
+The operator can inspect initial settings with `tools/apply_staff_pay_settings.ts`, supplying `NMF_PW` and a JSON array in `NMF_STAFF_PAY_NAMES` securely. Only explicit `--apply` performs the one-time write after unique encrypted backup/conflict checks.
+
+`NMF_PW=... deno run -A tools/recover_staff_history.ts` audits surviving historical shifts read-only. Explicit `--apply` restores only exact employee information verified in dated backups to the archive after backup/conflict checking; other data stays unchanged.
+
+## Release files and password changes
+
+| File | Purpose |
+| --- | --- |
+| `index.html` | Unlock page and encrypted app body |
+| `encrypt_app.py` | Re-encrypt the local plaintext app for a release |
+| `ver.json` | Full release version tag |
+
+Keep the app display, encrypted loader, and `ver.json` on the same full version tag. Regression check: `NMF_PW=... node tools/test_app_version.cjs`.
+
+The existing encryption entry point accepts the local source filename and output directory. Supply the password through the operator's secure workflow; never paste a real value into documentation, logs, or Git:
+
+```text
+python encrypt_app.py <local-plaintext-app.html> <output-directory> <password>
 ```
 
-비밀번호를 바꾸면 Supabase에 저장된 데이터는 예전 비밀번호로 잠겨 있으므로,
-바꾸기 전에 앱에서 백업 파일을 받고 → 새 비밀번호로 열어 → 백업 불러오기 → 지금
-저장 순서로 옮기세요.
+The local source filename remains unchanged by this documentation translation. The encryption tool requires Python's `cryptography` package. Publish only reviewed encrypted/public release files.
 
-## 보안 메모
-
-- 저장소가 공개라도 파일은 암호문입니다. 비밀번호가 짧으면 무차별 대입에
-  취약하니 12자 이상을 권합니다.
-- 공용 PC에서는 "비밀번호 기억"을 켜지 마세요.
+Changing the password does not re-encrypt existing Supabase records automatically. Before rotation, download a backup with the old password; unlock with the new password, import the backup, and explicitly save. Update server secrets consistently. Do not commit the plaintext app or secret values.

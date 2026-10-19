@@ -6,10 +6,18 @@ links. UTF-8, UTF-16 and CP949 text are supported. Hidden sheets are reported
 and skipped. Oversize sheets fail explicitly rather than being truncated.
 
 The signed `nmf-invoice-ocr` spreadsheet request sends bounded, typed cells to
-OpenCode Go / GPT-6 Luna. The fixed prompt maps cell addresses to invoice
-fields; the server reads money from source cells, not AI-generated numbers.
+OpenCode Go / Claude Haiku 5.5 (`claude-haiku-5-5`). The fixed prompt maps cell
+addresses to invoice fields; the server reads money from source cells, not
+AI-generated numbers.
 One pooled label review follows. At most two provider calls are made per sheet.
 This does not allow documents or the model to modify the production prompt.
+
+Recognized line-by-line period ledgers are read directly from verified source
+cells, grouped by transaction date and number, and marked as reference ledgers
+to prevent duplicate purchase totals. Unpriced items, negative returns, and
+blank VAT are preserved. The general extraction limit is 1,000 items, with
+500 characters each for item names and specifications; separate file, row,
+and cell safety limits still apply.
 
 Source files are encrypted separately under `#invoice-file#<sha256>` using the
 existing shared-store/password mechanism. Shared invoice state contains only
