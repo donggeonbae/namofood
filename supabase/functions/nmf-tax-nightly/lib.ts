@@ -194,7 +194,8 @@ export function buildTaxReport(state: TaxState, asOf: string) {
           );
       }
       const rows = (state.orders?.[month] || []).filter((o) =>
-          !object(o.ocrMeta).duplicateReviewPending
+          !object(o.ocrMeta).duplicateReviewPending &&
+          !object(o.ocrMeta).referenceOnly
         ),
         orders = rows.filter((o) =>
           validDate(o.date) && o.date.startsWith(month) && o.date <= asOf

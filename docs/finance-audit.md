@@ -34,11 +34,22 @@ provider without registration or database writes.
 Source-backed corrections use encrypted pre-write snapshots, attachment hash/size
 checks, per-order edit stamps, a fresh canonical read and updated-at compare-and-swap.
 Original photos and unknown VAT values are retained. Inspection notes are attached
-to affected records. Unresolved period-ledger duplicate policy requires an operator
-decision; do not silently delete source documents or invent missing header totals.
+to affected records. The operator approved keeping the three overlapping period
+pages as references. Records/photos remain available from the warning immediately
+below the monthly purchase summary; all financial, tax, matching and inventory
+consumers exclude `ocrMeta.referenceOnly`. A separate classification timestamp
+protects against unrelated stale-device edits. Do not delete source documents or
+invent missing header totals.
 No private originals, actual line items or credentials are committed here.
 
 ## Regressions
+
+- `tools/test_invoice_references.cjs`, `tools/test_tax_references.ts`: reference
+  exclusion across monthly/profit/consolidated/card/tax consumers, warning position,
+  preserved editable source view and stale-device classification protection.
+- `tools/test_live_finance_audit.cjs`: deployed encrypted report and source-photo
+  metadata, retained references, correct summary exclusion and phone layout, with
+  all production writes and generation calls blocked.
 
 - `tools/test_finance_audit.cjs`: exact aliases, catalog blanks, registered-known
   arithmetic, unchanged strict unknowns and numeric partial settlement.
