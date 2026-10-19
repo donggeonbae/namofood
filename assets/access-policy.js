@@ -20,6 +20,8 @@
   }
   const recipeFields=['comp','menu','item','qty','unit','storage','loss','form','method','allergy'];
   const productFields=['id','name','category','unit','price','ticketUnits','itemsPerTicket','at','deleted','archiveHidden','sourceIdentity','sourceSpec'];
+  const coupangReviewKind=k=>/^hidden-order:\d{6,30}$/.test(k)?'hidden':/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(k)?'job':'';
+  const coupangReviewFields=['at','registered','hidden','orderNo','date'];
   const saleFields=['id','date','name','category','unit','price','ticketUnits','itemsPerTicket','settlementMode','cardAmount','cashAmount','qty','tickets','ticketQty','cardQty','cashQty','creditQty','paymentSplit','deleted','at'];
   const priced=v=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0;
   const priceConfigured=v=>Object.hasOwn(v,'price')?priced(v.price):v.priceConfigured===true;
@@ -103,6 +105,7 @@
     out.storeProducts=Object.fromEntries(Object.entries(s.storeProducts||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,productFields),priceConfigured:priceConfigured(v)}]));
     out.storeSales=Object.fromEntries(Object.entries(s.storeSales||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,{...pick(v,saleFields),priceConfigured:priceConfigured(v)}]));
     out.storeStockImports=stockView(s).rows;
+    out.storeCoupangReviews=Object.fromEntries(Object.entries(s.storeCoupangReviews||{}).filter(([id,v])=>coupangReviewKind(id)&&v&&typeof v==='object').map(([id,v])=>[id,pick(v,coupangReviewFields)]));
     Object.assign(out,{settings,staff:staff(s.staff),staffArchive:staff(s.staffArchive),
       staffOrder:s.staffOrder?pick(s.staffOrder,['at','ids']):undefined,
       recipes:(s.recipes||[]).map(r=>pick(r,recipeFields)),
@@ -233,6 +236,13 @@
       const edit=pick(row,['storeProductId','storeUnitsPerPack','deleted','at']),target=stock.targets[id];
       if(target){const order=Object.values(out.orders).flat().find(o=>o.id===target.orderId),item=order.items[target.index];Object.assign(item,pick(edit,['storeProductId','storeUnitsPerPack']));item.storeExcluded=!!edit.deleted;out.orderEdits||={};out.orderEdits[order.id]={...out.orderEdits[order.id],at:edit.at};}
       else out.storeStockImports[id]={...out.storeStockImports[id],...edit};
+    }
+    out.storeCoupangReviews||={};
+    if(Object.keys(incoming.storeCoupangReviews||{}).length>10000)throw Error('invalid_coupang_review');
+    for(const [id,row]of Object.entries(incoming.storeCoupangReviews||{})){
+      const kind=coupangReviewKind(id),old=out.storeCoupangReviews[id];if(!kind||!clock(row)||old&&Date.parse(row.at)<=Date.parse(old.at||'1970-01-01'))continue;
+      if(kind==='job'&&(!Number.isSafeInteger(row.registered)||row.registered<0||row.registered>100)||kind==='hidden'&&(typeof row.hidden!=='boolean'||row.orderNo!==id.slice(13)||typeof row.date!=='string'||!/^20\d{2}-\d{2}-\d{2}$/.test(row.date)))throw Error('invalid_coupang_review');
+      out.storeCoupangReviews[id]={...(old||{}),...pick(row,kind==='job'?['at','registered']:['at','hidden','orderNo','date'])};
     }
     return out;
   }

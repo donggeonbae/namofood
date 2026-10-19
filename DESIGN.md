@@ -2,6 +2,8 @@
 
 ## Admin access boundary (2026-10-19)
 
+- Coupang synchronization correction (2026-10-20): completed-review receipts and dated hidden-order markers are shared operational metadata. Project and clock-merge only their allowlisted fields, retain tombstones when absent from stale devices, and never drop receipts during guest saves/reloads. Applying a peer edit must not create a perpetual save/load/toast loop. Starting a fresh import invalidates pre-start status responses and the old pending job ID before enqueueing; a visibility resume must not poll the previous job while the new request is being created. Do not touch purchase/sales amounts or launch a fresh production import for a smoke test.
+
 - Store archive correction (2026-10-20): expanding the archive must render a separate compact list across all months, even without selected-month sales. Allow source invoice opening, single/selected restoration and single/selected/all removal with confirmation. Ordinary list removal records a clocked `archiveHidden` tombstone and preserves transactions. A separate explicit document-deletion action previews whole invoice count/items, warns about unselected goods sharing those invoices and purchase/profit changes, removes the confirmed invoices/products, preserves sales, then purges only unlinked Store invoice originals after successful state save. Recheck references under a server row lock; no arbitrary IDs/private files/other rooms, no automatic customer deletions during deployment. Shared-mode merges retain private costs and reject malformed archive flags; stale devices must not resurrect archive entries.
 
 ## Entrance branding (2026-10-20)
