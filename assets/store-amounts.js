@@ -60,16 +60,7 @@
     const history=periodDays('sales').map(d=>{const s=storeSummary(d);return `<tr><td><button class="btn small" onclick="periodViews.sales={mode:'day',date:${jsarg(dateKeyAt(ym(),d))}};render()">${dateKeyAt(ym(),d)}</button></td><td>${fmt(s.count)}개</td><td>${fmt(s.tickets)}장</td>${admin?'<td>'+won(s.revenue)+'</td>':''}</tr>`;}).join('');
     return storeStockHtml(date)+(admin?'<h2>'+kmonth()+' 전체 합계</h2>'+storeKpis(storeSummary()):'')+`<section class="card"><div class="row"><h2>날짜별 판매 수량</h2><button class="btn small" onclick="storeSalesCsv()">CSV 내려받기</button></div><table class="store-table"><thead><tr><th>날짜</th><th>판매 수량</th><th>받은 식권</th>${admin?'<th>매출</th>':''}</tr></thead><tbody>${history}</tbody></table></section>`;
   }
-  function sales(admin){
-    storeProductsFromOrders();const date=periodCurrent('sales').date,day=Number(date.slice(8)),map=new Map(storeProductGroups().map(p=>[p.id,p]));
-    for(const r of Object.values(S.storeSales||{}))if(r&&!r.deleted&&r.date===date&&!map.has(r.id)&&(!S.storeProducts?.[r.id]?.deleted||storeShowArchived))map.set(r.id,r);
-    return styles()+`<h1>매점 판매 실적</h1><p class="sub">받은 식권은 장수, 카드·현금은 결제한 원으로 입력하세요. 상품별 판매 수량은 자동 계산합니다.</p>${periodPicker('sales')}
-      ${storeArchivedToolsHtml()}<section class="card"><div class="row"><h2>${date} 판매 입력</h2><button class="btn small" onclick="go('recipe')">상품 · 판매가 · 식권 설정 →</button></div>
-      <p class="hint">식권 1장 = 10,000원. 예: 개당 2,500원 · 식권 1장당 4개 상품은 식권 1장 → 4개, 카드 12,500원 → 5개. 수정 후 다른 칸을 누르면 저장됩니다.</p>
-      <table class="store-amount-table store-sales-table"><thead><tr><th>상품 · 적용 기준</th><th>받은 식권(장)</th><th>카드(원)</th><th>현금(원)</th><th>판매 수량 · 자동</th></tr></thead><tbody>${[...map.values()].map(p=>rowHtml(date,p)).join('')||'<tr><td colspan="5">상품 관리에서 판매할 항목을 추가하세요.</td></tr>'}</tbody></table>
-      <label class="f" style="margin-top:12px">기타 매출(원)<input type="text" inputmode="numeric" data-sales-other value="${esc(_fmtNum(salesGet(day,'other')))}" onchange="NmfAccess.setCafeAmount(${day},'other',this)"></label></section>
-      <div data-store-derived>${derivedHtml(date,admin)}</div>`;
-  }
+  function sales(admin){return pageStoreDailySales(admin);}
   function products(admin){
     storeProductsFromOrders();const labels=[['name','상품명'],['category','분류'],['unit','단위'],['price','개당 판매가(원)'],['itemsPerTicket','식권 1장당 수량'],...(admin?[['cost','매입단가(원)']]:[])];
     const field=(p,key,label)=>`<label>${label}<input data-field="${key}" ${['price','cost','itemsPerTicket'].includes(key)?'type="number" min="0" step="'+(key==='itemsPerTicket'?'0.000001':'1')+'"':''} aria-label="${esc((p?.name||'새 상품')+' '+label)}" ${p?'':'id="store-'+key+'"'} value="${esc(p?(key==='itemsPerTicket'?(perTicket(p)==null?null:Number(perTicket(p).toFixed(6))):p[key])??'':key==='unit'?'개':'')}" ${p?'onchange="storeProductSet('+jsarg(p.id)+','+jsarg(key)+',this.value)"':''} ${key==='itemsPerTicket'?'placeholder="예: 4 · 비우면 10,000 ÷ 판매가"':''}></label>`;

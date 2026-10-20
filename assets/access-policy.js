@@ -5,7 +5,7 @@
   const pick = (x, keys) => Object.fromEntries(keys.filter(k => x && Object.hasOwn(x,k)).map(k=>[k,clone(x[k])]));
   const meals = ['조식','중식','석식','야식'];
   const safeKey = k => !['__proto__','constructor','prototype'].includes(k);
-  const salesKey = k => /^([1-9]|[12]\d|3[01])\|(?:(?:cashCount|cardCount|creditCount)\|)?(?:조식|중식|석식|야식)$/.test(k) || /^([1-9]|[12]\d|3[01])\|(?:cups|rev|other|ticketIssued|ticketIssuePrice|ticketBuyer|ticketCompany(?:Name|Qty|Price|Deleted)\|[a-zA-Z0-9_-]{1,64})$/.test(k);
+  const salesKey = k => /^([1-9]|[12]\d|3[01])\|(?:(?:cashCount|cardCount|creditCount)\|)?(?:조식|중식|석식|야식)$/.test(k) || /^([1-9]|[12]\d|3[01])\|(?:cups|rev|other|storeTickets|storeCash|storeCard|ticketIssued|ticketIssuePrice|ticketBuyer|ticketCompany(?:Name|Qty|Price|Deleted)\|[a-zA-Z0-9_-]{1,64})$/.test(k);
   const rosterKey = k => /^[a-zA-Z0-9_-]{1,100}\|([1-9]|[12]\d|3[01])$/.test(k);
   function initializeBreakDefaults(s){
     s.settings||={};if(s.settings.defaultBreakZeroInitialized)return s;
@@ -150,7 +150,7 @@
         out[edits][month][key]={at:edit.at,...(field==='roster'?{deleted:!has}:{})};
       }
     }
-    merge('sales','salesEdits',salesKey,(v,k)=>/\|(?:ticketBuyer|ticketCompanyName\|[a-zA-Z0-9_-]+)$/.test(k)?typeof v==='string'&&v.length<=100:/\|(?:rev|other|ticketIssuePrice|ticketCompanyPrice\|[a-zA-Z0-9_-]+)$/.test(k)?Number.isSafeInteger(v)&&v>=0:count(v));
+    merge('sales','salesEdits',salesKey,(v,k)=>/\|(?:ticketBuyer|ticketCompanyName\|[a-zA-Z0-9_-]+)$/.test(k)?typeof v==='string'&&v.length<=100:/\|(?:rev|other|storeCash|storeCard|ticketIssuePrice|ticketCompanyPrice\|[a-zA-Z0-9_-]+)$/.test(k)?Number.isSafeInteger(v)&&v>=0:count(v));
     merge('roster','rosterEdits',k=>rosterKey(k)&&staffIds.has(k.split('|')[0]),v=>
       ['', '휴','연차','병가'].includes(v)||(v&&typeof v==='object'&&Object.keys(v).every(k=>['s','e','b'].includes(k))&&
       /^([01]\d|2[0-3]):[0-5]\d$/.test(v.s)&&/^([01]\d|2[0-3]):[0-5]\d$/.test(v.e)&&Number.isInteger(v.b)&&v.b>=0&&v.b<=1440));

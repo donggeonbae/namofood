@@ -234,7 +234,7 @@
     const originalGo=go,originalRender=render;
     if(APP==='food'){PAGES.ticketSales=PAGES.sales;const ticketNav=document.createElement('button');ticketNav.dataset.p='ticketSales';ticketNav.innerHTML='<span class="ic">🎫</span>식권';ticketNav.addEventListener('click',()=>go('ticketSales'));document.querySelector('nav [data-p=sales]').after(ticketNav);}
     const originalTicketScope=foodTicketUiScope;foodTicketUiScope=function(){const before=foodTicketUi.scope,result=originalTicketScope();if(before!==foodTicketUi.scope)foodTicketUi.settingsOpen=true;return result;};foodTicketUi.settingsOpen=true;
-    storeSalesCsv=function(){return NmfStoreAmountsUI.exportCsv(isAdmin());};
+    storeSalesCsv=function(){return storeDailyCsv();};
     const originalPaidCurrent=staffPaymentCurrent;staffPaymentCurrent=function(row,month=ym()){const record=staffPayment(row.e.id,month);return record?.basis==='manual-check-v1'?!!record.paid:originalPaidCurrent(row,month);};
     const originalSetPaid=setStaffPaid;setStaffPaid=function(id,paid,month=ym()){
       const row=laborRows().find(r=>r.e.id===id);if(isAdmin()&&row&&staffNetPay(row,month).ready)return originalSetPaid(id,paid,month);

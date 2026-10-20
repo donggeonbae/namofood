@@ -1,5 +1,12 @@
 # Design
 
+## Store daily collection simplification (2026-10-20)
+
+- Supersedes the earlier store catalog/inventory UI: Store navigation has no product management, price board, or staff/fixed-cost controls. Keep procurement, source documents and Coupang import. Do not generate or demand product quantities to enter receipts.
+- Daily sales consist of exactly three editable shared fields: collected tickets (whole tickets), cash (won), card (won). A ticket remains 10,000 won. Reuse day/week/month navigation, compact cards, existing dark-green store styling and phone stacking without horizontal overflow.
+- Preserve all old item-level sales and purchases. Untouched dates use legacy totals; first explicit daily entry confirms replacing that date's calculation with the three-field total, never adds the old product revenue again. Explicit zero is an entered zero; clearing a field records zero, not legacy fallback. Retain per-cell edit clocks for multi-device saves.
+- Profit, tax, combined revenue and Food's shared ticket recovery use the same date calculation. Shared inputs remain public; monthly financial summaries/profit/settings/backup retain admin protection. Hide catalog/archive/inventory decorations, but never hide purchase items based on archived catalog products. Verify persistence, stale-device merge, historical fallback, no double counting, invoice deletion and responsive layout.
+
 ## Admin access boundary (2026-10-19)
 
 - Explicit Coupang reimport correction (2026-10-20): user-confirmed restoration is a manual order edit even though the order keeps its Coupang provenance. Keep automatic importer tombstone protection unchanged; unapproved imports never resurrect deleted orders. Clear both deletion and archive-list hiding on the exact reactivated product without changing historical sales or prices. Verify against the actual guest merge and an encrypted-app reload, not only local state. Inventory source lines provide a direct "원본 발주 수정" action to the existing invoice editor; quantity/pack corrections must not silently recalculate the paid invoice amount.
