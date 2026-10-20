@@ -1,5 +1,11 @@
 # Design
 
+## Profit daily revenue charts and visible cost benchmark (2026-10-21)
+
+- Profit pages (Food/Cafe/Store) and consolidated profit show a compact daily revenue chart for the selected month. Reuse existing colors, cards and date controls; use inline SVG with no new dependency, API call, AI execution or write. Provide keyboard/touch date selection, exact won values and a collapsible data table. Missing/invalid input stays a gap, explicit zero stays zero, negative amounts remain negative. Fit PC and 320px phones without page overflow.
+- Match each report's existing accounting basis: Food individual profit uses recovered-ticket performance plus cash/card/credit/other through the current cutoff; no per-day allocation of company bulk ticket sales or outstanding-ticket valuation. Cafe and Store use their existing entered monthly revenue. Consolidated uses company ticket sales (legacy fallback when absent) and removes Store voucher settlement duplication once on each applicable day, matching its existing monthly calculation. Label partial/failed sources, never imply missing input is confirmed zero.
+- Move the existing saved AI peer-cost comparison to a permanently visible Food profit card immediately below month navigation. Two compact cards show labor/food ratios, original industry references and signed percentage-point gaps, plus the saved report's as-of/source and incomplete-input caveats. Do not silently replace its accounting basis with recovered-ticket ratios, invent results before a report exists, or call the reference current official guidance. Keep AI cost narrative/cautions in the collapsed AI panel; asynchronous refresh updates the top card without resetting other panels. Profit/chart/benchmark stay admin-only.
+
 ## Store daily collection simplification (2026-10-20)
 
 - Supersedes the earlier store catalog/inventory UI: Store navigation has no product management, price board, or staff/fixed-cost controls. Keep procurement, source documents and Coupang import. Do not generate or demand product quantities to enter receipts.
