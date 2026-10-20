@@ -2,6 +2,7 @@ import { readState, sql } from "../_shared/database.ts";
 import { handlePurchaseRouting } from "../_shared/purchase-routing-handler.ts";
 import { preservePurchaseRouting } from "../_shared/purchase-routing.ts";
 import { preserveInvoiceLedgers } from "../_shared/invoice-ledger.ts";
+import { preserveStoreDaily } from "../_shared/store-daily.ts";
 import { handleInvoiceLedger } from "../_shared/invoice-ledger-handler.ts";
 import { decryptText, encryptText } from "../nmf-recipe-fill/lib.ts";
 import {
@@ -308,7 +309,8 @@ Deno.serve(async (request) => {
       }
       if (admin && id === root && existing) {
         const full = JSON.parse(await decryptText(pw, String(existing.data)));
-        const incoming = JSON.parse(await decryptText(pw, cipher));
+        const parsed = JSON.parse(await decryptText(pw, cipher));
+        const incoming = root === 'namostore' ? preserveStoreDaily(full, parsed) : parsed;
         cipher = await encryptText(pw, JSON.stringify(preserveInvoiceLedgers(full, preservePurchaseRouting(full, incoming))));
       }
       if (!admin) {
