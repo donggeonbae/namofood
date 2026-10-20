@@ -1,5 +1,11 @@
 # Design
 
+## Weekend and stacked performance-chart correction (2026-10-21)
+
+- Supersedes the consolidated chart basis below only: the graph's Food segment uses the same state-aware, current-cutoff recovered meals × meal price plus cash/card/credit/other as individual Food profit, never company bulk ticket sales. Cafe/Store continue using entered revenue. Add these three operational series without subtracting Store ticket recovery again; keep company-sale monthly KPIs, accounting totals and voucher duplication rules unchanged and label the difference explicitly.
+- Use one stacked column per date, retain business colors, put negative segments below zero, scale for the full positive/negative stack, show aggregate and partial-source details on selection and in the table. Do not draw a separate aggregate line or side-by-side columns. Mark every Saturday/Sunday with red date labels and a faint red background on both individual and combined charts. Keep missing gaps, explicit zero, keyboard date selection and 320px mobile fit.
+- Release includes the user's completed BankAPI/Shinhan procurement reconciliation work as requested, preserving its administrator-only boundary. Do not trigger live bank queries, auto-match payments or change financial source data during chart verification.
+
 ## Profit daily revenue charts and visible cost benchmark (2026-10-21)
 
 - Profit pages (Food/Cafe/Store) and consolidated profit show a compact daily revenue chart for the selected month. Reuse existing colors, cards and date controls; use inline SVG with no new dependency, API call, AI execution or write. Provide keyboard/touch date selection, exact won values and a collapsible data table. Missing/invalid input stays a gap, explicit zero stays zero, negative amounts remain negative. Fit PC and 320px phones without page overflow.

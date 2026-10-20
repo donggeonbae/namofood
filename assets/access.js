@@ -42,7 +42,7 @@
     const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),{name:'HMAC',hash:'SHA-256'},false,['sign']);
     const signed=await crypto.subtle.sign('HMAC',key,new TextEncoder().encode('nmf-access\n'+time+'\n'+raw));
     const signature=btoa(String.fromCharCode(...new Uint8Array(signed)));
-    return rawFetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-nmf-time':time,'x-nmf-signature':signature,...(isAdmin()?{'x-nmf-admin-session':token}:{})},body:raw,cache:'no-store',signal:signal||AbortSignal.timeout(30000)});
+    return rawFetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','x-nmf-time':time,'x-nmf-signature':signature,...(body.action==='bank-transactions'?{'x-region':'ap-northeast-2'}:{}),...(isAdmin()?{'x-nmf-admin-session':token}:{})},body:raw,cache:'no-store',signal:signal||AbortSignal.timeout(30000)});
   }
   window.fetch=async function(input,init={}){
     const url=new URL(typeof input==='string'?input:input.url,location.href);
@@ -243,6 +243,7 @@
     const originalArchivePayment=staffArchivePaymentHtml;staffArchivePaymentHtml=function(e,row){if(isAdmin()&&row&&staffNetPay(row).ready)return originalArchivePayment(e,row);return '<label class="payroll-paid"><input type="checkbox" data-staff-paid="'+esc(e.id)+'" '+(staffPayment(e.id)?.paid?'checked':'')+' onchange="setStaffPaid('+jsarg(e.id)+',this.checked)">'+kmonth()+' 지급 완료</label>';};
     const originalRosterCsv=csvRoster;csvRoster=function(){if(isAdmin())return originalRosterCsv();const days=periodDays('roster');csv('근무표_'+ym(),[['이름',...days.map(d=>d+'일')],...rosterStaff().map(e=>[e.name,...days.map(d=>{const c=rosterGet(e.id,d);return isWork(c)?c.s+'~'+c.e+' (휴게 '+c.b+'분)':c||'';})])]);};
     for(const name of ['invoiceMonthlySummaryHtml','invoicePaymentHtml','paymentAiPanelHtml']){const original=window[name];window[name]=function(...args){return isAdmin()?original(...args):'';};}
+    const originalInvoicePayment=invoicePaymentHtml;invoicePaymentHtml=function(o){return isAdmin()?bankInvoiceHtml(o)+originalInvoicePayment(o):'';};
     for(const name of ['paymentAiSchedule']){const original=window[name];window[name]=function(...args){if(isAdmin())return original(...args);};}
     operationBase=policy.operations(S);
     const originalSave=save;save=function(){
@@ -259,7 +260,7 @@
     for(const p of Object.keys(PAGES))PAGES[p]=()=>{
       if(!isAdmin()&&p==='fixed')return '<h1>고정비 발주'+(APP==='food'?' (사무용품 등)':'')+'</h1><p class="sub">발주에서 분류된 품목과 원본만 표시합니다. 임차료·정기 고정비·소모품 설정·계약서·일반 서류함은 관리자 전용입니다.</p>'+monthPicker()+fixedPurchasesHtml();
       if(!isAdmin()&&privatePages.has(p))return '<h1>관리자 전용</h1><p>상단에서 관리자 비밀번호를 입력해 주세요.</p>';
-      if(p==='order'&&!isAdmin()&&orderView==='card')orderView='sheet';
+      if(p==='order'&&!isAdmin()&&['card','bank'].includes(orderView))orderView='sheet';
       const html=p==='roster'?commonRoster(originals[p]()):p==='sales'?sharedSalesHtml(originals[p]):APP==='store'&&p==='recipe'?NmfStoreAmountsUI.products(isAdmin()):originals[p]();
       return isAdmin()?html:removeMoney(html,p);
     };
@@ -273,6 +274,7 @@
     };
     paint();setTimeout(archiveLegacy,1000);
   }};
+  window.NmfAccess.bankTransactions=(startDate,endDate)=>call({action:'bank-transactions',startDate,endDate},AbortSignal.timeout(75000));
   addEventListener('beforeunload',event=>{if(cachePending||pendingLegacy.size||cacheError){event.preventDefault();event.returnValue='';}});
   addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
 })();

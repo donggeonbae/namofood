@@ -1,4 +1,5 @@
 import { readState, sql } from "../_shared/database.ts";
+import { bankTransactions } from "../_shared/bank-transactions.ts";
 import { handlePurchaseRouting } from "../_shared/purchase-routing-handler.ts";
 import { preservePurchaseRouting } from "../_shared/purchase-routing.ts";
 import { preserveInvoiceLedgers } from "../_shared/invoice-ledger.ts";
@@ -47,7 +48,7 @@ Deno.serve(async (request) => {
     "Vary": "Origin",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
-      "authorization,apikey,content-type,x-nmf-time,x-nmf-signature,x-nmf-admin-session",
+      "authorization,apikey,content-type,x-nmf-time,x-nmf-signature,x-nmf-admin-session,x-region",
   });
   if (origins.has(origin)) headers.set("Access-Control-Allow-Origin", origin);
   const json = (v: unknown, status = 200) =>
@@ -78,6 +79,10 @@ Deno.serve(async (request) => {
       )
     ) return json({ error: "unauthorized" }, 401);
     const body = JSON.parse(raw), admin = await adminAuthorized(request);
+    if (body.action === 'bank-transactions') {
+      const response = await bankTransactions(body, admin, {env, fetch});
+      return json(response.data, response.status);
+    }
     if (body.action === "login") {
       const address = (request.headers.get("x-forwarded-for") || "unknown")
         .split(",")[0].trim();

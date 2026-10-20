@@ -18,6 +18,10 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
         const body=req.postDataJSON(),auth=req.headers()['x-nmf-admin-session']==='test-token';
         if(body.action==='login')return r.fulfill({status:body.password===admin?200:403,json:body.password===admin?{token:'test-token',expiresAt:Date.now()+3600000,cacheKey:"test-only-strong-cache-key-32-characters"}:{error:'관리자 비밀번호가 맞지 않습니다.'}});
         if(body.action==='archiveLocal')return r.fulfill({json:{ok:true}});
+        if(body.action==='bank-transactions'){
+          assert(auth);assert.equal(req.headers()['x-region'],'ap-northeast-2');assert.deepEqual(Object.keys(body).sort(),['action','endDate','startDate']);
+          return r.fulfill({json:{transactions:[{id:'a'.repeat(64),date:'2026/10/19',time:'12:00:00',type:'withdrawal',amount:123456,balance:500000,description:'PRIVATE_BANK_MATCH'},{id:'b'.repeat(64),date:'2026/10/20',time:'12:00:00',type:'withdrawal',amount:777,balance:499223,description:'PRIVATE_BANK_UNMATCHED'},{id:'c'.repeat(64),date:'2026/10/20',time:'13:00:00',type:'deposit',amount:777,balance:500000,description:'REFUND'}],fetchedAt:at,retryAfterSec:300}});
+        }
         const rest=new URL(body.path,'https://test');
         if(rest.pathname.includes('/rpc/'))return r.fulfill({json:[{updated_at:at,revision:'a'.repeat(64)}]});
         if(!state)state=await p.evaluate(()=>{const s=defaultState();s.month='2026-10';s.staff=[{id:'staff-a',name:'직원',role:'조리',wage:19999,phone:'PRIVATE_PHONE',def:{s:'09:00',e:'18:00',b:60},off:[]}];s.settings.fixed=[['PRIVATE_FIXED',123456]];s.settings.rolePayInitialized=true;s.settings.wage=19999;s.settings.roleWages={조리:19999};s.sales={'2026-10':{'19|ticketIssued':1000,'19|중식':10}};s.orders={'2026-10':[{id:'private-order',date:'2026-10-19',vendor:'PRIVATE_VENDOR',total:123456,items:[]}]};return s;});
@@ -39,6 +43,18 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
     await p.locator('#admin-password').fill('wrong');await p.locator('#admin-form button').click();await p.waitForFunction(()=>document.getElementById('admin-message').textContent.includes('맞지'));assert.equal(await p.locator('#admin-password').inputValue(),'');
     await p.evaluate(()=>{clearTimeout(saveTimer);cloudDirty=false;});await p.locator('#admin-password').fill(admin);await p.locator('#admin-form button').click();await p.waitForFunction(()=>NmfAccess.isAdmin());await p.waitForFunction(()=>S.staff[0]?.wage===19999);
     for(const name of ['settings','data','pl','overview','fixed','order'])assert(await p.locator('nav [data-p='+name+']').isVisible(),name);
+    await p.evaluate(()=>{go('order');});await p.locator('[data-order-view=bank]').click();
+    const bankBefore=await p.evaluate(()=>JSON.stringify(S));await p.locator('[data-bank-query]').click();await p.waitForFunction(()=>bankUi.rows.length===3);
+    assert.equal(await p.evaluate(()=>JSON.stringify(S)),bankBefore,'query must not persist bank rows');
+    assert.equal(await p.locator('[data-bank-link]').count(),1);assert((await p.locator('[data-bank-unmatched]').innerText()).includes('2건'));
+    p.once('dialog',d=>d.accept());await p.locator('[data-bank-link]').click();
+    assert.equal(await p.evaluate(()=>orderRef('private-order').order.paymentBank.amount),123456);
+    assert((await p.locator('[data-bank-unmatched]').innerText()).includes('1건'));
+    assert(!await p.evaluate(()=>JSON.stringify(NmfAccessPolicy.project(S)).includes('PRIVATE_BANK')),'bank references stay private');
+    await p.locator('[data-bank-unmatched]').click();assert.equal(await p.locator('[data-bank-row]').count(),1);assert((await p.locator('[data-bank-panel]').innerText()).includes('대응 발주 없음'));
+    for(const width of [390,320]){await p.setViewportSize({width,height:1000});assert(await p.evaluate(()=>main.scrollWidth<=main.clientWidth+1),'bank panel fits mobile');}
+    await p.setViewportSize({width:1440,height:1000});await p.evaluate(()=>{const o=orderRef('private-order').order;const cleared={...structuredClone(o),paymentBank:null,paymentBankAt:'2099-01-01'};const merged=structuredClone(o);preserveManualPaymentLink(merged,o,cleared);if(merged.paymentBank!==null)throw Error('unlink merge lost');bankUnlink('private-order');});
+    assert.equal(await p.evaluate(()=>orderRef('private-order').order.paymentBank),null);
     const lockBox=await p.locator('#admin-lock').boundingBox(),barBox=await p.locator('#admin-access').boundingBox();assert(Math.abs(lockBox.x+lockBox.width/2-barBox.x-barBox.width/2)<2,'lock is centered');
     await p.evaluate(()=>go('roster'));assert(await p.locator('[data-roster-common] table').count());assert(await p.locator('#staff-payroll-table').count());
     await p.evaluate(()=>{const e={id:'unknown-pay',name:'시급 미확인',role:'조리',wage:0,historyUnknown:true,off:[],def:{s:'09:00',e:'18:00',b:0}};S.staff.push(e);S.staffArchive.push({...e,id:'hidden-pay',name:'보관 미확인'});S.staffEdits['hidden-pay']={at:'2026-10-01',status:'archive',listed:false};S.roster['2026-10']={'unknown-pay|1':{s:'09:00',e:'18:00',b:0}};go('roster');});assert(await p.locator('[data-staff-paid=unknown-pay]').isEnabled());await p.locator('[data-staff-paid=unknown-pay]').check();assert.equal(await p.evaluate(()=>staffPayment('unknown-pay').basis),'manual-check-v1');assert.equal(await p.evaluate(()=>staffNetPay(laborRows().find(r=>r.e.id==='unknown-pay')).ready),false);
