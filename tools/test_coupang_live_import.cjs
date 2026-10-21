@@ -36,14 +36,17 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=requ
    if(!state.busy)break;
    await p.waitForTimeout(3000);
   }
-  const result=await p.evaluate(async ({before,from,to})=>({error:coupangUi.error,busy:coupangUi.busy,orders:coupangUi.orders.length,items:coupangUi.orders.reduce((n,o)=>n+o.items.length,0),missingAmounts:coupangUi.orders.flatMap(o=>o.items).filter(i=>i.amt===null).length,outOfOrderRange:coupangUi.orders.filter(o=>o.date<from||o.date>to).length,warnings:coupangUi.warnings,sourceUnchanged:before.orders===JSON.stringify(S.orders),revisionUnchanged:before.revision===(await cloudFetch(AbortSignal.timeout(20000)))?.updated_at,jobId:coupangUi.jobId}),{before,from,to});
+  const result=await p.evaluate(async ({before,from,to})=>{const all=[...coupangUi.orders,...(coupangUi.hiddenOrders||[])];return {error:coupangUi.error,busy:coupangUi.busy,orders:all.length,visibleOrders:coupangUi.orders.length,hiddenOrders:coupangUi.hiddenOrders?.length||0,items:all.reduce((n,o)=>n+o.items.length,0),missingAmounts:all.flatMap(o=>o.items).filter(i=>i.amt===null).length,outOfOrderRange:all.filter(o=>o.date<from||o.date>to).length,warnings:coupangUi.warnings,sourceUnchanged:before.orders===JSON.stringify(S.orders),revisionUnchanged:before.revision===(await cloudFetch(AbortSignal.timeout(20000)))?.updated_at,jobId:coupangUi.jobId};},{before,from,to});
   assert.equal(result.busy,false);assert.equal(result.error,'');assert(result.orders>0,'actual completed orders must reach preview');
   assert.equal(result.sourceUnchanged,true);assert.equal(result.revisionUnchanged,true);assert.equal(result.outOfOrderRange,0);assert.equal(starts,1);assert.equal(businessWrites,0);assert.deepEqual(errors,[]);
-  assert.equal(await p.locator('[data-coupang-order]').count(),result.orders,'every returned order appears without manual Status');
-  if(process.env.NMF_EXPECT_AMOUNT_COMPLETE==='1'){assert.equal(result.missingAmounts,0);assert.equal(await p.locator('[data-coupang-item] [aria-label="쿠팡 품목 금액"]').evaluateAll(inputs=>inputs.filter(i=>i.value==='').length),0,'amounts must be visible in the actual preview inputs');}
-  const status=await p.evaluate(async()=>{const d=await coupangApi('status');return {state:d.job?.status,through:d.worker?.lastImportThrough};});
+  assert.equal(await p.locator('[data-coupang-order]').count(),result.visibleOrders,'every visible order appears without manual Status');
+  assert.equal(await p.locator('[data-coupang-hidden-order]').count(),result.hiddenOrders,'previously cleaned orders remain available, not silently discarded');
+  if(result.hiddenOrders){await p.locator('[data-coupang-hidden] > summary').click();assert(await p.locator('[data-coupang-hidden-order]').first().isVisible(),'cleaned history must actually open');}
+  if(process.env.NMF_EXPECT_AMOUNT_COMPLETE==='1'){assert.equal(result.missingAmounts,0);assert.equal(await p.locator('[data-coupang-item] [aria-label="쿠팡 품목 금액"]').evaluateAll(inputs=>inputs.filter(i=>i.value==='').length),0,'amounts must be visible in the actual preview inputs');assert.equal(await p.locator('[data-coupang-hidden-order]').filter({hasText:'금액 미확인'}).count(),0,'hidden history must display confirmed amounts too');}
+  const status=await p.evaluate(async()=>{const d=await coupangApi('status',{jobId:coupangUi.jobId});return {state:d.job?.status,through:d.worker?.lastImportThrough,orders:d.job?.result?.orders?.length};});
   assert.equal(status.state,'done');
-  if(!result.warnings.some(w=>w.includes('일부만')))assert.equal(status.through,to,'successful complete import persists its date cursor');
+  assert.equal(result.orders,status.orders,'no returned order may disappear from both review and cleaned history');
+  if(!result.warnings.some(w=>w.includes('일부만')))assert(status.through>=to,'successful complete import persists its monotonic date cursor');
   console.log(JSON.stringify({version,range:{from,to},defaultDates,result,status,businessWrites,starts}));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

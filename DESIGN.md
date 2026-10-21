@@ -1,5 +1,10 @@
 # Design
 
+## Coupang cleaned-review visibility (2026-10-22)
+
+- A completed date lookup must account for every fetched order, including previously cleaned review rows. Keep ordinary cleanup effective, but show fetched/visible/cleaned counts and a collapsed, read-only source list with item quantities and amounts even when every order is hidden. An explicit confirmed single/all recovery changes only clocked `hidden-order:` review metadata; it must not change purchases, sales, purchase-deletion markers or duplicate-registration guards. Recovered rows are not automatically selected.
+- Retain fetched hidden rows in memory instead of discarding them while rendering. New jobs replace that cache, reviewed/registered jobs clear it, and returning to a tab with cached hidden results must not restart polling. Preserve stale-peer tombstones, manual edits, storage-failure rollback, shared-mode access and 320px fit. No server schema, source business-data migration or automatic purchase restoration.
+
 ## Weekend and stacked performance-chart correction (2026-10-21)
 
 - Supersedes the consolidated chart basis below only: the graph's Food segment uses the same state-aware, current-cutoff recovered meals × meal price plus cash/card/credit/other as individual Food profit, never company bulk ticket sales. Cafe/Store continue using entered revenue. Add these three operational series without subtracting Store ticket recovery again; keep company-sale monthly KPIs, accounting totals and voucher duplication rules unchanged and label the difference explicitly.
