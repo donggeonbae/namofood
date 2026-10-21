@@ -65,6 +65,34 @@ assert(
   one.orders[0].items[0].price === 34990,
   "observed listed price remains separate from paid amount",
 );
+const formattedSource =
+  `주문상세\n2026. 10. 20 주문주문번호 ${orderNo}\n배송완료\n콜라\n10,000 원\n1개\n총 결제금액\n9,000 원`;
+const formatted = await organize(
+  {
+    pages: [{
+      text: formattedSource,
+      links: [{
+        orderNo,
+        path: "/ssr/desktop/order/" + orderNo,
+        text: "주문 상세보기",
+      }],
+    }],
+  },
+  range,
+  "test-only",
+  provider([{
+    sourcePage: 0,
+    orderNo,
+    date: "2026-10-20",
+    status: "배송완료",
+    total: "9,000",
+    items: [{ ...item("콜라", 1), price: "10,000", amt: "9,000" }],
+  }]),
+);
+assert(
+  formatted.orders[0].items[0].amt === 9000,
+  "fully identified source amounts must not depend on AI using a numeric rather than formatted-string JSON field",
+);
 const multi = await organizeOne(
   "콜라\n10,000 원\n2개\n장바구니 담기\n생수\n2,000 원\n3개\n장바구니 담기\n총 상품가격\n26,000 원\n할인금액\n-1,000 원\n배송비\n3,000 원\n총 결제금액\n28,000 원",
   [item("콜라", 2), item("생수", 3)],

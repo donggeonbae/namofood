@@ -271,6 +271,29 @@ export async function organize(
       JSON.stringify(pages.map((p) => p.links));
     return parsed.orders.flatMap((raw: Record<string, unknown>) => {
       if (!raw || typeof raw !== "object") throw Error("invalid_orders");
+      // Canonical formatted integers are a transport representation, not a
+      // financial inference. Every value still goes through source grounding.
+      const number = (v: unknown) =>
+        typeof v === "string" &&
+          /^(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/.test(v.trim())
+          ? Number(v.trim().replaceAll(",", ""))
+          : v;
+      raw = {
+        ...raw,
+        total: number(raw.total),
+        items: Array.isArray(raw.items)
+          ? raw.items.map((i) =>
+            i && typeof i === "object"
+              ? {
+                ...i,
+                qty: number(i.qty),
+                price: number(i.price),
+                amt: number(i.amt),
+              }
+              : i
+          )
+          : raw.items,
+      };
       if (raw.sourcePage == null) {
         return validateOrders({ orders: [raw] }, source, range);
       }
@@ -299,6 +322,41 @@ export async function organize(
       }
       if (!detail && !page.text.includes(String(raw.orderNo))) {
         throw Error("ungrounded_order");
+      }
+      if (detail && Array.isArray(raw.items)) {
+        const totals = [
+          ...page.text.matchAll(/(?:^|\n)총\s*결제금액\s+([\d,]+)\s*원/g),
+        ];
+        const paid = totals.length === 1
+          ? Number(totals[0][1].replaceAll(",", ""))
+          : null;
+        if (
+          paid !== null && Number.isSafeInteger(paid) && paid >= 0 &&
+          paid <= 1e10
+        ) {
+          // First validate identity/date/status/product names with no proposed
+          // AI money. Only a complete, bijective source-row match may replace it.
+          const base = validateOrders(
+            {
+              orders: [{
+                ...raw,
+                evidence: page.text,
+                total: null,
+                items: raw.items.map((i) =>
+                  i && typeof i === "object"
+                    ? { ...i, qty: null, price: null, amt: null }
+                    : i
+                ),
+              }],
+            },
+            page.text,
+            range,
+          )[0];
+          const resolved = detailAmounts(base, page.text, paid);
+          if (
+            resolved.amountNote && resolved.items.every((i) => i.amt !== null)
+          ) return [resolved];
+        }
       }
       return validateOrders(
         { orders: [{ ...raw, evidence: detail ? page.text : raw.evidence }] },
