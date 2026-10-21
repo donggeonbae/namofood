@@ -32,7 +32,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict'),{mkdtemp,rm}=re
      sessionResult={session,relay:{url:'wss://rycibsczsgbkgtwfxyim.supabase.co/realtime/v1/websocket',key:'test-public-key'}};lastKind='remote';return route.fulfill({json:{ok:true,jobId:session.id}});
     }
     if(b.action==='result')return route.fulfill({json:{ok:true,job:{status:'done',result:lastKind==='pair'?pairResult:sessionResult}}});
-    if(b.action==='status')return route.fulfill({json:{ok:true,worker:{online:true,state:'ready'},job:null}});
+    if(['status','defaults'].includes(b.action))return route.fulfill({json:{ok:true,worker:{online:true,state:'ready'},job:null}});
     writes++;return route.abort();
    }
    if(!['GET','HEAD','OPTIONS'].includes(r.method()))writes++;return route.abort();
