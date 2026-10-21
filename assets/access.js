@@ -4,7 +4,7 @@
   if(!window.NMF_ACCESS_REQUIRED)return;
   const rawFetch=window.fetch.bind(window),get=Storage.prototype.getItem,set=Storage.prototype.setItem,remove=Storage.prototype.removeItem;
   const roots=['namofood_v2','namocafe_v1','namostore_v1'],roomFor={namofood_v2:'namofood',namocafe_v1:'namocafe',namostore_v1:'namostore'};
-  const policy=globalThis.NmfAccessPolicy,pendingLegacy=new Map(),revisions=new Map(),privateDrafts=new Map();
+  const policy=globalThis.NmfAccessPolicy,pendingLegacy=new Map(),privateDrafts=new Map();
   let token='',password='',expires=0,writeChain=Promise.resolve(),cachePending=0,cacheError='',expiryTimer;
   let operationBase={};
   const endpoint='https://rycibsczsgbkgtwfxyim.supabase.co/functions/v1/nmf-access';
@@ -52,9 +52,6 @@
         // Guest backups are made from the full state on the server, not supplied by an unprivileged browser.
         if(!isAdmin()&&method==='POST'&&String(init.body||'').includes('"id":"'+roomFor[KEY]+'@'))return new Response('[]',{status:200});
         const response=await call({action:'rest',path:url.pathname+url.search,method,prefer:new Headers(init.headers).get('Prefer')||'',body:init.body?JSON.parse(init.body):undefined},init.signal);
-        if(response.ok&&method==='GET'&&url.pathname==='/rest/v1/namofood_state'){
-          const rows=await response.clone().json(),id=(url.searchParams.get('id')||'').replace(/^eq\./,'');if(rows[0]?.source_revision)revisions.set(id,rows[0].source_revision);
-        }
         return response;
       }
       if(['/functions/v1/nmf-invoice-ocr','/functions/v1/nmf-coupang','/functions/v1/nmf-payment-match','/functions/v1/nmf-tax-auto'].includes(url.pathname)&&isAdmin()){
@@ -115,7 +112,7 @@
       const pw=get.call(sessionStorage,'nmf_session_pw')||get.call(localStorage,'nmf_pw');
       S=normalize(Object.assign(defaultState(),JSON.parse(await decryptText(pw,remote.data))));
       operationBase=policy.operations(S);
-      cloudRemoteAt=remote.updated_at;cloudRemoteData=remote.data;cloudDirty=false;
+      cloudRememberRemote(remote);cloudDirty=false;
       cloudMenuBase=captureCloudMenuBase(S);cloudStaffBase=captureCloudStaffBase(S);cloudConfigBase=captureCloudConfigBase(S);cloudOrderBase=captureCloudOrderBase(S);cloudCardBase=captureCloudCardBase(S);cloudSalesBase=captureCloudSalesBase(S);
       const draft=get.call(localStorage,KEY+'#admin-draft');
       paint();render();
@@ -128,7 +125,7 @@
     await writeChain;
     if(password){try{set.call(localStorage,KEY+'#admin-draft',await encryptText(password,JSON.stringify(S)));}catch{toast('기기 임시저장에 실패했습니다. 서버 저장 내역을 확인해 주세요.');}}
     token='';password='';expires=0;privateDrafts.clear();clearTimeout(expiryTimer);
-    S=normalize(Object.assign(defaultState(),policy.project(S)));cloudRemoteAt='';cloudRemoteData='';
+    S=normalize(Object.assign(defaultState(),policy.project(S)));cloudRemoteAt='';cloudRemoteData='';cloudRemoteRevision=null;cloudPayloadCache={data:null,text:null};
     // Remove detached dialogs, previews and data URLs as well as financial DOM.
     document.querySelectorAll('dialog').forEach(el=>el.remove());document.getElementById('codepick').style.display='none';
     document.getElementById('main').replaceChildren();paint();go('home');
@@ -252,8 +249,8 @@
     };
     const originalApply=applyState;applyState=function(...args){const result=originalApply(...args);operationBase=policy.operations(S);return result;};
     cloudRevisionUnchanged=async function(){
-      if(!cloudRemoteAt||!revisions.has(cloud.room))return false;
-      const before=cloudRemoteAt;try{const r=await call({action:'rest',method:'GET',path:'/rest/v1/rpc/nmf_state_revision?room='+encodeURIComponent(cloud.room)});if(!r.ok)return false;const [row]=await r.json();return cloudRemoteAt===before&&Date.parse(row?.updated_at)===Date.parse(before)&&row.revision===revisions.get(cloud.room);}catch{return false;}
+      if(!cloudRemoteAt||!cloudRemoteRevision)return false;
+      const before=cloudRemoteAt,revision=cloudRemoteRevision;try{const r=await call({action:'rest',method:'GET',path:'/rest/v1/rpc/nmf_state_revision?room='+encodeURIComponent(cloud.room)});if(!r.ok)return false;const [row]=await r.json();return cloudRemoteAt===before&&cloudRemoteRevision===revision&&Date.parse(row?.updated_at)===Date.parse(before)&&row.revision===revision;}catch{return false;}
     };
     go=function(p){if(p==='ticketSales'){salesTab=APP==='food'?'ticket':'sales';p='sales';}else if(p==='sales')salesTab='sales';return originalGo(!isAdmin()&&privatePages.has(p)?'home':p);};
     const originals={...PAGES};

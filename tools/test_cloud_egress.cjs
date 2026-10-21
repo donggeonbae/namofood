@@ -1,4 +1,6 @@
 // Offline two-browser regressions for lightweight cloud polling; no production calls.
+// Tax is now AI-managed/read-only in Food. Exercise the same real editable
+// percentage control with vacancy instead; preserve all exact merge/race assertions.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -101,7 +103,7 @@ async function fixture(browser, app = 'food', table = 'namofood_state') {
     state.recipes = [{ menu: '전송량 검증 수동주찬', item: '검증재료', qty: 100, unit: 'g', comp: '주찬' }];
     state.methods = {}; state.sources = {}; state.recipeMeta = {}; state.recipeAsk = {};
     state.purch = []; state.purchEdit = {}; state.stock = []; state.stockLog = []; state.orders = {};
-    state.settings.fixturePayload = payload; state.settings.tax = .1; state.settings.target = .08;
+    state.settings.fixturePayload = payload; state.settings.vacancy = .1; state.settings.target = .08;
     state.view = { range: 'month', mode: 'public', ing: false, printMeals: ['중식', '석식', '야식'] };
     S = state; return structuredClone(state);
   }, randomBytes(120000).toString('base64'));
@@ -125,13 +127,13 @@ function protectedData(state) {
   return Object.fromEntries(['menus', 'menuPlanMeta', 'headcountMeta', 'staff', 'staffArchive', 'staffEdits', 'staffFieldEdits', 'roster', 'rosterEdits', 'recipes', 'methods', 'recipeMeta'].map(key => [key, state[key]]));
 }
 
-async function editTax(page, percent) {
+async function editVacancy(page, percent) {
   await page.evaluate(() => { go('settings'); clearTimeout(cloudTimer); clearTimeout(saveTimer); });
-  const input = page.locator('input[onchange*="[\'tax\']"]');
-  assert.equal(await input.count(), 1, 'the genuine tax field exists');
+  const input = page.locator('input[onchange*="[\'vacancy\']"]');
+  assert.equal(await input.count(), 1, 'the genuine vacancy field exists');
   await input.fill(String(percent)); await input.press('Tab');
   await page.evaluate(() => { clearTimeout(cloudTimer); clearTimeout(saveTimer); });
-  assert.equal((await stateOf(page)).settings.tax, percent / 100, 'genuine field edits commit the intended local setting');
+  assert.equal((await stateOf(page)).settings.vacancy, percent / 100, 'genuine field edits commit the intended local setting');
 }
 
 (async () => {
@@ -160,78 +162,78 @@ async function editTax(page, percent) {
     if (baseline) return;
     await run('REAL_PEER_CHANGE_APPLIES_WITHIN_ONE_POLL_AND_SAVE_RETAINS_FULL_CAS', async f => {
       await f.initialize(); f.reset();
-      await editTax(f.b, 17); await f.save(f.b);
+      await editVacancy(f.b, 17); await f.save(f.b);
       assert.equal(f.stats().fullReads, 1, 'saving still fetches full state to reconcile before CAS');
       assert.equal(f.stats().revisions, 0, 'saving does not substitute revision metadata for its reconciliation read');
       assert.equal(f.stats().writes, 2, 'mocked room update and daily snapshot both finish');
       const committed = await f.readRemote();
-      assert.equal(committed.settings.tax, .17, 'peer genuine field value reached shared ciphertext');
+      assert.equal(committed.settings.vacancy, .17, 'peer genuine field value reached shared ciphertext');
       assert.deepEqual(protectedData(committed), protectedData(f.base), 'peer settings save preserves synthetic staff/menu/history');
       f.reset();
       assert.equal(await f.poll(f.a), true, 'one silent poll applies the newer peer revision');
       assert.equal(f.stats().revisions, 1); assert.equal(f.stats().fullReads, 1);
       const loaded = await stateOf(f.a);
-      assert.equal(loaded.settings.tax, .17); assert.deepEqual(protectedData(loaded), protectedData(committed));
+      assert.equal(loaded.settings.vacancy, .17); assert.deepEqual(protectedData(loaded), protectedData(committed));
       await f.a.evaluate(() => go('settings'));
-      assert.equal(await f.a.locator('input[onchange*="[\'tax\']"]').inputValue(), '17', 'the visible genuine field refreshes within the same poll');
+      assert.equal(await f.a.locator('input[onchange*="[\'vacancy\']"]').inputValue(), '17', 'the visible genuine field refreshes within the same poll');
       f.reset(); assert.equal(await f.poll(f.a), false);
       assert.equal(f.stats().fullReads, 0, 'hash cache is refreshed for the newly loaded ciphertext');
       assert.equal(f.stats().revisions, 1);
     });
     await run('SAME_TIMESTAMP_DIFFERENT_CIPHERTEXT_IS_NOT_SKIPPED', async f => {
       await f.initialize();
-      const peer = clone(f.base); peer.settings.tax = .19;
+      const peer = clone(f.base); peer.settings.vacancy = .19;
       const previous = f.row(); await f.put(peer, previous.updated_at);
       assert.notEqual(f.row().data, previous.data, 'the authentic encryption yields different ciphertext at the same timestamp');
       f.reset(); assert.equal(await f.poll(f.a), true);
       assert.equal(f.stats().revisions, 1); assert.equal(f.stats().fullReads, 1);
-      assert.equal((await stateOf(f.a)).settings.tax, .19);
+      assert.equal((await stateOf(f.a)).settings.vacancy, .19);
       assert.deepEqual(protectedData(await stateOf(f.a)), protectedData(f.base));
       f.reset(); assert.equal(await f.poll(f.a), false); assert.equal(f.stats().fullReads, 0);
     });
     await run('LOCAL_EDIT_DURING_METADATA_RESPONSE_SURVIVES_AND_MERGES_ON_SAVE', async f => {
       await f.initialize();
-      const peer = clone(f.base); peer.settings.tax = .2; peer.settings.target = .15;
+      const peer = clone(f.base); peer.settings.vacancy = .2; peer.settings.target = .15;
       await f.put(peer, '2026-10-02T00:00:00.000Z'); f.reset();
       const held = f.hold(), pending = f.poll(f.a);
       await held.ready;
-      await editTax(f.a, 12); const local = await stateOf(f.a);
+      await editVacancy(f.a, 12); const local = await stateOf(f.a);
       held.release(); assert.equal(await pending, false, 'in-flight metadata cannot apply a state captured before local editing');
       assert.deepEqual(await stateOf(f.a), local, 'every local value survives the delayed pull exactly');
       await f.save(f.a);
-      const committed = await f.readRemote(), expected = clone(peer.settings); expected.tax = .12;
-      assert.deepEqual(committed.settings, expected, 'the next full CAS save keeps the typed tax while merging the unrelated peer target');
+      const committed = await f.readRemote(), expected = clone(peer.settings); expected.vacancy = .12;
+      assert.deepEqual(committed.settings, expected, 'the next full CAS save keeps the typed vacancy while merging the unrelated peer target');
       assert.deepEqual(protectedData(committed), protectedData(peer));
     });
     await run('UNCOMMITTED_INPUT_DURING_METADATA_RESPONSE_IS_NOT_DISCARDED', async f => {
       await f.initialize();
-      const peer = clone(f.base); peer.settings.tax = .2; peer.settings.target = .16;
+      const peer = clone(f.base); peer.settings.vacancy = .2; peer.settings.target = .16;
       await f.put(peer, '2026-10-03T00:00:00.000Z');
       await f.a.evaluate(() => go('settings'));
       const held = f.hold(), pending = f.poll(f.a); await held.ready;
-      const input = f.a.locator('input[onchange*="[\'tax\']"]'); await input.fill('13');
-      assert.equal((await stateOf(f.a)).settings.tax, .1, 'focused text is authentically uncommitted');
+      const input = f.a.locator('input[onchange*="[\'vacancy\']"]'); await input.fill('13');
+      assert.equal((await stateOf(f.a)).settings.vacancy, .1, 'focused text is authentically uncommitted');
       await f.a.evaluate(() => { lastInputAt = 0; });
       held.release(); assert.equal(await pending, false, 'input revision protects typing even after its time guard expires');
       assert.equal(await input.inputValue(), '13', 'the visible typed text remains after metadata resolves');
       await input.press('Tab'); await f.save(f.a);
-      const committed = await f.readRemote(); assert.equal(committed.settings.tax, .13); assert.equal(committed.settings.target, .16);
+      const committed = await f.readRemote(); assert.equal(committed.settings.vacancy, .13); assert.equal(committed.settings.target, .16);
     });
     await run('MANUAL_PULL_ALWAYS_FETCHES_FULL_STATE', async f => {
       await f.initialize(); f.reset();
       assert.equal(await f.a.evaluate(() => cloudLoad(false)), false, 'an exact duplicate manual pull reports latest state');
       assert.equal(f.stats().fullReads, 1); assert.equal(f.stats().revisions, 0);
-      const peer = clone(f.base); peer.settings.tax = .21; await f.put(peer, '2026-10-04T00:00:00.000Z');
+      const peer = clone(f.base); peer.settings.vacancy = .21; await f.put(peer, '2026-10-04T00:00:00.000Z');
       assert.equal(await f.a.evaluate(() => cloudLoad(false)), true);
-      assert.equal((await stateOf(f.a)).settings.tax, .21);
+      assert.equal((await stateOf(f.a)).settings.vacancy, .21);
       assert.equal(f.stats().fullReads, 2); assert.equal(f.stats().revisions, 0);
     });
     for (const mode of ['unavailable', 'malformed', 'empty', 'invalid-date', 'timeout']) await run('RPC_' + mode.toUpperCase().replace('-', '_') + '_FULL_READ_FALLBACK_AND_60S_COOLDOWN', async f => {
       await f.initialize();
-      const peer = clone(f.base); peer.settings.tax = .22; await f.put(peer, '2026-10-05T00:00:00.000Z');
+      const peer = clone(f.base); peer.settings.vacancy = .22; await f.put(peer, '2026-10-05T00:00:00.000Z');
       await f.a.evaluate(() => { window.__egressFixedNow = Date.now(); });
       f.mode(mode); f.reset(); assert.equal(await f.poll(f.a), true, 'invalid or unavailable metadata still loads a real changed full state');
-      assert.equal((await stateOf(f.a)).settings.tax, .22);
+      assert.equal((await stateOf(f.a)).settings.vacancy, .22);
       assert.equal(f.stats().revisions, 1); assert.equal(f.stats().fullReads, 1);
       f.mode('valid');
       for (let i = 0; i < 2; i++) assert.equal(await f.poll(f.a), false);
@@ -255,8 +257,8 @@ async function editTax(page, percent) {
       await f.initialize(); f.reset();
       for (let i = 0; i < 2; i++) assert.equal(await f.poll(f.a), false);
       assert.equal(f.stats().fullReads, 2); assert.equal(f.stats().revisions, 0, 'custom tables never call the restricted default-table RPC');
-      const peer = clone(f.base); peer.settings.tax = .24; await f.put(peer, '2026-10-07T00:00:00.000Z');
-      assert.equal(await f.poll(f.a), true); assert.equal((await stateOf(f.a)).settings.tax, .24);
+      const peer = clone(f.base); peer.settings.vacancy = .24; await f.put(peer, '2026-10-07T00:00:00.000Z');
+      assert.equal(await f.poll(f.a), true); assert.equal((await stateOf(f.a)).settings.vacancy, .24);
     }, 'food', 'offline_custom_state');
     await run('HIDDEN_INTERVAL_TICK_SKIPS_POLLING', async f => {
       await f.initialize(); f.reset(); await f.a.clock.install();

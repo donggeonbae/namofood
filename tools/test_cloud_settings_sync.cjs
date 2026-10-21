@@ -1,4 +1,6 @@
 // Offline two-client regressions. Every network request is intercepted; no production is contacted.
+// UI typing cases use the still-editable vacancy percentage. Food's old tax
+// percentage control was retired by AI tax calculation; data-only tax cases remain.
 // Run with Playwright available through NODE_PATH. NMF_SETTINGS_SOURCE may point to an authentic saved source.
 const fs = require('node:fs');
 const path = require('node:path');
@@ -107,7 +109,7 @@ async function fixture(browser) {
       state.methods = {}; state.sources = {}; state.recipeMeta = {}; state.recipeAsk = {};
       state.purch = []; state.purchEdit = {}; state.stock = []; state.stockLog = [];
       state.view = { range: 'day', mode: 'public', ing: false, printMeals: ['중식', '석식', '야식'] };
-      state.settings.tax = .1; state.settings.target = .08; state.settings.burden = .18;
+      state.settings.tax = .1; state.settings.vacancy = .1; state.settings.target = .08; state.settings.burden = .18;
       state.settings.tickets = { '조식': 10000, '중식': 10000, '석식': 10000, '야식': 10000 };
       state.settings.foodOverride = { '2026-09': 900000 };
       S = state; return structuredClone(state);
@@ -318,16 +320,16 @@ async function fixture(browser) {
       });
       const pull = f.a.evaluate(silent => cloudLoad(silent), silent);
       await f.a.waitForFunction(() => window.__settingsPullReady);
-      const taxInput = f.a.locator('input[onchange*="[\'tax\']"]');
-      assert.equal(await taxInput.count(), 1, 'the real Settings tax field is present');
-      await taxInput.fill('12'); await taxInput.press('Tab');
-      assert.equal((await stateOf(f.a)).settings.tax, .12, 'real input change sets local tax before the pending pull resumes');
+      const vacancyInput = f.a.locator('input[onchange*="[\'vacancy\']"]');
+      assert.equal(await vacancyInput.count(), 1, 'the real Settings vacancy field is present');
+      await vacancyInput.fill('12'); await vacancyInput.press('Tab');
+      assert.equal((await stateOf(f.a)).settings.vacancy, .12, 'real input change sets local vacancy before the pending pull resumes');
       await f.a.evaluate(() => window.__releaseSettingsPull());
       await pull;
-      assert.equal((await stateOf(f.a)).settings.tax, .12, 'finishing an older async pull cannot overwrite a setting just typed by the user');
+      assert.equal((await stateOf(f.a)).settings.vacancy, .12, 'finishing an older async pull cannot overwrite a setting just typed by the user');
       await f.save(f.a);
-      const committed = await f.readRemote(), expected = clone(peer.settings); expected.tax = .12;
-      assert.deepEqual(committed.settings, expected, 'next save retains the typed tax and merges unrelated peer settings');
+      const committed = await f.readRemote(), expected = clone(peer.settings); expected.vacancy = .12;
+      assert.deepEqual(committed.settings, expected, 'next save retains the typed vacancy and merges unrelated peer settings');
       assert.deepEqual(committed.view.printMeals, allMeals);
       assert.deepEqual(protectedData(committed), protectedData(peer), 'unrelated peer meal edit and every employee record survive');
     });
@@ -350,19 +352,19 @@ async function fixture(browser) {
       });
       const pull = f.a.evaluate(() => cloudLoad(true));
       await f.a.waitForFunction(() => window.__settingsPullReady);
-      const taxInput = f.a.locator('input[onchange*="[\'tax\']"]');
-      await taxInput.fill('12');
-      assert.equal(await taxInput.inputValue(), '12');
-      assert.equal((await stateOf(f.a)).settings.tax, .1, 'typing remains uncommitted until this real onchange field loses focus');
+      const vacancyInput = f.a.locator('input[onchange*="[\'vacancy\']"]');
+      await vacancyInput.fill('12');
+      assert.equal(await vacancyInput.inputValue(), '12');
+      assert.equal((await stateOf(f.a)).settings.vacancy, .1, 'typing remains uncommitted until this real onchange field loses focus');
       await f.a.waitForTimeout(6100);
       assert(await f.a.evaluate(() => Date.now() - lastInputAt >= 6000), 'the ordinary time-based typing guard has actually expired');
       await f.a.evaluate(() => window.__releaseSettingsPull());
       await pull;
-      assert.equal(await taxInput.inputValue(), '12', 'an async pull begun before typing must preserve the still-focused raw field even after six seconds');
-      await taxInput.press('Tab');
-      assert.equal((await stateOf(f.a)).settings.tax, .12, 'blur commits the preserved typed value');
+      assert.equal(await vacancyInput.inputValue(), '12', 'an async pull begun before typing must preserve the still-focused raw field even after six seconds');
+      await vacancyInput.press('Tab');
+      assert.equal((await stateOf(f.a)).settings.vacancy, .12, 'blur commits the preserved typed value');
       await f.save(f.a);
-      const committed = await f.readRemote(), expected = clone(peer.settings); expected.tax = .12;
+      const committed = await f.readRemote(), expected = clone(peer.settings); expected.vacancy = .12;
       assert.deepEqual(committed.settings, expected);
       assert.deepEqual(committed.view.printMeals, allMeals);
       assert.deepEqual(protectedData(committed), protectedData(f.base));
