@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
-import { cleanText } from '../../supabase/functions/nmf-coupang/protocol.mjs';
+import { cleanText, ACTIVE_ORDER_PATTERN } from '../../supabase/functions/nmf-coupang/protocol.mjs';
 
 export const ORDER_URL='https://mc.coupang.com/ssr/desktop/order/list';
 export class CoupangBrowser {
@@ -80,20 +80,20 @@ export class CoupangBrowser {
       if(await this.state()!=='ready')throw Error('login_required');
       // Coupang uses React click controls, not order-detail anchors. Read only the
       // explicitly labelled detail controls; never click cart/return/payment actions.
-      const cards=await page.getByText('주문 상세보기',{exact:true}).evaluateAll(elements=>elements.map(el=>{
+      const cards=await page.getByText('주문 상세보기',{exact:true}).evaluateAll((elements,statusPattern)=>elements.map(el=>{
         let root=el;
         for(let n=0;n<5&&root.parentElement;n++){
           root=root.parentElement;
-          if(/20\d\d\.\s*\d{1,2}\.\s*\d{1,2}\s*주문/.test(root.textContent)&&/배송|취소|반품|구매확정/.test(root.textContent))break;
+          if(/20\d\d\.\s*\d{1,2}\.\s*\d{1,2}\s*주문/.test(root.textContent)&&/배송|취소|반품|구매확정|상품\s*준비|결제\s*완료|주문\s*완료/.test(root.textContent))break;
         }
         const text=root.textContent||'',m=text.match(/(20\d\d)\.\s*(\d{1,2})\.\s*(\d{1,2})\s*주문/);
-        return {date:m?`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`:'',completed:/배송\s*완료|구매\s*확정/.test(text),fingerprint:text};
-      }));
+        return {date:m?`${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`:'',eligible:new RegExp(statusPattern).test(text),fingerprint:text};
+      }),ACTIVE_ORDER_PATTERN);
       const fingerprint=cards.map(x=>x.fingerprint).join('\n');
       if(visited.has(fingerprint)){truncated=true;break;}visited.add(fingerprint);
       if(cards.length){
         for(let j=0;j<cards.length;j++){
-          const card=cards[j];if(!card.completed||!card.date||range.from&&card.date<range.from||range.to&&card.date>range.to)continue;
+          const card=cards[j];if(!card.eligible||!card.date||range.from&&card.date<range.from||range.to&&card.date>range.to)continue;
           if(detailCount>=60||pages.reduce((n,p)=>n+p.text.length,0)>70000){truncated=true;break;}
           await page.getByText('주문 상세보기',{exact:true}).nth(j).dispatchEvent('click');
           await page.waitForURL(u=>/^https:\/\/mc\.coupang\.com\/ssr\/desktop\/order\/\d{6,30}$/.test(u.href),{timeout:15000});
@@ -102,8 +102,9 @@ export class CoupangBrowser {
             const lines=document.body.innerText.split('\n'),start=lines.findIndex(x=>x.trim()==='주문상세'||x.trim()==='주문 상세');
             const end=lines.findIndex((x,index)=>index>start&&/받는\s*사람|배송지|수령인/.test(x));
             if(start<0||end<0)return null; // Do not send address/payment sections to AI.
-            const totalIndex=lines.findIndex(x=>/^총 결제금액$/.test(x.trim()));
-            const totals=totalIndex>=0?lines.slice(totalIndex,totalIndex+2):[];
+            // Whitelist monetary labels and their numeric line only, never the
+            // surrounding recipient/card/payment-method sections.
+            const totals=lines.flatMap((line,index)=>/^(?:총 상품가격|총 상품금액|할인금액|배송비|총 결제금액)$/.test(line.trim())&&/^[+-]?[\d,]+\s*원$/.test((lines[index+1]||'').trim())?[line.trim(),lines[index+1].trim()]:[]);
             return {text:[...lines.slice(start,end),...totals].join('\n'),path:location.pathname};
           });
           if(!detail)throw Error('no_order_evidence');
@@ -124,7 +125,7 @@ export class CoupangBrowser {
         await next.dispatchEvent('click');
         await page.waitForFunction(previous=>{
           const labels=[...document.querySelectorAll('span')].filter(x=>x.textContent.trim()==='주문 상세보기');
-          return labels.length&&labels.map(el=>{let root=el;for(let n=0;n<5&&root.parentElement;n++){root=root.parentElement;if(/20\d\d\.\s*\d{1,2}\.\s*\d{1,2}\s*주문/.test(root.textContent)&&/배송|취소|반품|구매확정/.test(root.textContent))break;}return root.textContent||'';}).join('\n')!==previous;
+          return labels.length&&labels.map(el=>{let root=el;for(let n=0;n<5&&root.parentElement;n++){root=root.parentElement;if(/20\d\d\.\s*\d{1,2}\.\s*\d{1,2}\s*주문/.test(root.textContent)&&/배송|취소|반품|구매확정|상품\s*준비|결제\s*완료|주문\s*완료/.test(root.textContent))break;}return root.textContent||'';}).join('\n')!==previous;
         },fingerprint,{timeout:15000}).catch(()=>{truncated=true;});
         if(truncated)break;continue;
       }
@@ -145,7 +146,7 @@ export class CoupangBrowser {
       if(pages.reduce((n,p)=>n+p.text.length,0)>70000||i===9){truncated=true;break;}
       await page.goto(next.href,{waitUntil:'domcontentloaded',timeout:45000});
     }
-    if(!pages.length)return {pages:[{text:'선택 기간 내 완료 주문 없음',links:[]}],truncated};
+    if(!pages.length)return {pages:[{text:'선택 기간 내 정상 주문 없음',links:[]}],truncated};
     return {pages,truncated};
   }
   async close() {

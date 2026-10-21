@@ -55,6 +55,10 @@ export function cleanText(value, max = 40000) {
 }
 const squash = (value) =>
   String(value ?? "").normalize("NFKC").replace(/\s/g, "");
+export const ACTIVE_ORDER_PATTERN = "주문\\s*완료|결제\\s*완료|상품\\s*준비(?:\\s*중)?|배송\\s*준비(?:\\s*중)?|배송\\s*시작|배송\\s*중|배송\\s*완료|구매\\s*확정";
+export function activeOrderStatus(value) {
+  return new RegExp(ACTIVE_ORDER_PATTERN).test(String(value || "")) && !/취소|반품|환불/.test(String(value || ""));
+}
 function money(value, evidence) {
   if (value == null || value === "") return null;
   if (!Number.isSafeInteger(value) || value < 0 || value > 1e10) {
@@ -91,7 +95,7 @@ export function validateOrders(value, source, range) {
     ) throw Error("ungrounded_order_date");
     if (
       !text.includes(order.orderNo) ||
-      !/배송\s*완료|구매\s*확정/.test(order.status || "") ||
+      !activeOrderStatus(order.status) ||
       !squash(evidence).includes(squash(order.status)) ||
       /취소|반품|환불/.test(order.status)
     ) throw Error("ineligible_order");
