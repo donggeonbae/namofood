@@ -1,4 +1,7 @@
-import { organize } from "../supabase/functions/nmf-coupang/ai.ts";
+import {
+  nativeDetail,
+  organize,
+} from "../supabase/functions/nmf-coupang/ai.ts";
 import { validateOrders } from "../supabase/functions/nmf-coupang/protocol.mjs";
 import { GO_MODEL } from "../supabase/functions/_shared/opencode-go.ts";
 const assert = (v: unknown, m: string) => {
@@ -121,6 +124,36 @@ assert(
     direct.extraction.sourceOrders === 1,
   "standard source extraction must not fail when the AI provider is unavailable",
 );
+const inconsistent = await organize(
+  {
+    pages: [{
+      text: nativeSource.replace(
+        "총 상품가격\n10,000 원",
+        "총 상품가격\n12,000 원",
+      ),
+      links: [{
+        orderNo,
+        path: "/ssr/desktop/order/" + orderNo,
+        text: "주문 상세보기",
+      }],
+    }],
+  },
+  range,
+  "test-only",
+  provider([{
+    sourcePage: 0,
+    orderNo,
+    date: "2026-10-20",
+    status: "배송완료",
+    total: null,
+    items: [item("콜라", 1)],
+  }]),
+);
+assert(
+  inconsistent.orders[0].items[0].amt === null &&
+    inconsistent.extraction.sourceOrders === 0,
+  "an inconsistent subtotal may indicate unread items; do not assign the whole payment to the sole parsed row",
+);
 const multi = await organizeOne(
   "콜라\n10,000 원\n2개\n장바구니 담기\n생수\n2,000 원\n3개\n장바구니 담기\n총 상품가격\n26,000 원\n할인금액\n-1,000 원\n배송비\n3,000 원\n총 결제금액\n28,000 원",
   [item("콜라", 2), item("생수", 3)],
@@ -201,6 +234,69 @@ for (const status of ["취소완료", "반품완료", "환불완료", "결제대
   }
   assert(rejected, `${status} cannot become procurement`);
 }
+const canceledText =
+  `주문상세\n2026. 10. 20 주문주문번호 ${orderNo}\n취소완료\n콜라\n10,000 원\n1개\n구매확정\n총 상품가격\n10,000 원\n총 결제금액\n0 원`;
+const canceled = await organize(
+  {
+    pages: [{
+      text: canceledText,
+      links: [{
+        orderNo,
+        path: "/ssr/desktop/order/" + orderNo,
+        text: "주문 상세보기",
+      }],
+    }],
+  },
+  range,
+  "test-only",
+  provider([]),
+);
+assert(
+  canceled.orders.length === 0,
+  "a generic confirmation button must not make a canceled order mandatory",
+);
+const splitSource = `주문상세\n2026. 10. 20 주문주문번호 ${orderNo}\n` +
+  Array.from(
+    { length: 4 },
+    () =>
+      `배송완료\n분리배송된 상품입니다\n검증 매트, 4개\n164,400 원\n1개\n장바구니 담기\n`,
+  ).join("") + "총 상품가격\n164,400 원\n배송비\n0 원\n총 결제금액\n164,400 원";
+const split = await organize(
+  {
+    pages: [{
+      text: splitSource,
+      links: [{
+        orderNo,
+        path: "/ssr/desktop/order/" + orderNo,
+        text: "주문 상세보기",
+      }],
+    }],
+  },
+  range,
+  "test-only",
+  (async () => {
+    throw Error("Verified split-shipment rows do not need AI");
+  }) as typeof fetch,
+);
+assert(
+  split.orders[0].items.length === 1 && split.orders[0].items[0].qty === 1 &&
+    split.orders[0].items[0].amt === 164400,
+  "four repeated split-shipment displays are one charged product, not four purchases",
+);
+assert(
+  nativeDetail({
+    text: splitSource.replaceAll(
+      "총 상품가격\n164,400 원",
+      "총 상품가격\n657,600 원",
+    ).replaceAll("총 결제금액\n164,400 원", "총 결제금액\n657,600 원"),
+    links: [{
+      orderNo,
+      path: "/ssr/desktop/order/" + orderNo,
+      text: "주문 상세보기",
+    }],
+  }, range) === null,
+  "repeated identical rows must not be collapsed when the printed subtotal charges for all four",
+);
 console.log(
   "COUPANG_ORDER_NOT_DELIVERY_DATE_PENDING_SINGLE_PAID_MULTI_SUBTOTAL_AMOUNTS_NO_FAKE_ALLOCATION_OK",
 );

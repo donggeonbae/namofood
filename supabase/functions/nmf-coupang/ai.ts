@@ -41,6 +41,30 @@ function detailRows(text: string) {
   }
   return rows;
 }
+function purchaseRows(text: string) {
+  const rows = detailRows(text),
+    subtotals = [
+      ...text.matchAll(/(?:^|\n)총\s*상품(?:가격|금액)\s+([\d,]+)\s*원/g),
+    ];
+  if (subtotals.length !== 1) return rows;
+  const subtotal = Number(subtotals[0][1].replaceAll(",", ""));
+  const matches = (rs: typeof rows) =>
+    rs.reduce((n, r) => n + r.price * r.qty, 0) === subtotal ||
+    rs.reduce((n, r) => n + r.price, 0) === subtotal;
+  if (matches(rows) || !/분리\s*배송|교환\s*완료/.test(text)) return rows;
+  const unique = [
+    ...new Map(rows.map((r) => [JSON.stringify([r.name, r.price, r.qty]), r]))
+      .values(),
+  ];
+  return unique.length < rows.length && matches(unique) ? unique : rows;
+}
+function currentOrderState(text: string) {
+  return text.split("\n").map((s) => s.trim()).find((s) =>
+    new RegExp("^(?:" + ACTIVE_ORDER_PATTERN + ")$").test(s) ||
+    /^(?:취소|반품|환불)\s*(?:완료|진행중|처리중|접수|요청)$|^결제\s*대기$/
+      .test(s)
+  ) || "";
+}
 // Recover fields from the exact order detail, never from another order or a
 // current product page. Multi-item discounts/shipping are never allocated.
 function detailAmounts(
@@ -53,7 +77,7 @@ function detailAmounts(
     const n = Number(s.replace(/[,원\s]/g, ""));
     return Number.isSafeInteger(n) && n >= 0 && n <= 1e10 ? n : null;
   };
-  const rows = detailRows(text);
+  const rows = purchaseRows(text);
   if (rows.length !== order.items.length) return { ...order, total };
   const used = new Set<number>();
   const matches = order.items.map((item) => {
@@ -76,6 +100,10 @@ function detailAmounts(
       : null;
   if (matches.length === 1) {
     const row = matches[0]!;
+    if (
+      subtotal !== null && row.price !== subtotal &&
+      row.price * row.qty !== subtotal
+    ) return { ...order, total };
     return {
       ...order,
       total,
@@ -124,7 +152,7 @@ type SourcePage = {
   text: string;
   links: { orderNo: string; path: string; text: string }[];
 };
-function nativeDetail(
+export function nativeDetail(
   page: SourcePage,
   range: { from: string; to: string },
 ): CompletedOrder | null {
@@ -159,7 +187,7 @@ function nativeDetail(
   if (totals.length !== 1 || subtotals.length !== 1) return null;
   const total = Number(totals[0][1].replaceAll(",", "")),
     subtotal = Number(subtotals[0][1].replaceAll(",", "")),
-    rows = detailRows(page.text);
+    rows = purchaseRows(page.text);
   if (
     !rows.length || !Number.isSafeInteger(total) || total < 0 || total > 1e10 ||
     !Number.isSafeInteger(subtotal) || subtotal < 0 || subtotal > 1e10
@@ -504,7 +532,9 @@ export async function organize(
       id && page.links[0].path === "/ssr/desktop/order/" + id &&
       new RegExp("주문번호\\s*" + id + "(?!\\d)").test(page.text) &&
       day >= range.from && day <= range.to &&
-      new RegExp(ACTIVE_ORDER_PATTERN).test(page.text) && !returned.has(id)
+      new RegExp("^(?:" + ACTIVE_ORDER_PATTERN + ")$").test(
+        currentOrderState(page.text),
+      ) && !returned.has(id)
     ) {
       throw Error("ai_missing_orders");
     }
