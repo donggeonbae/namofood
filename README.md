@@ -286,6 +286,12 @@ Each order number maps to a stable purchase ID. Imports never overwrite/revive o
 
 One run reads at most ten list pages and 60 order details; reaching a limit produces a partial-results warning. Prefer a uniquely identified source total tied to the same order number/detail URL. Missing AI total evidence must not trigger an invented item sum; conflicting or cross-order totals are not auto-corrected. Revalidate changed Coupang layouts against authorized read-only account results.
 
+AI organization uses batches of at most four source pages (16,000 input characters), with at most three concurrent requests and an 85-second overall AI deadline. A token-limited batch is split, never accepted as a partial JSON result. Detail-page references are bound to the explicit order number and exact detail URL before applying the existing date/status/item/amount grounding checks. Eligible detail orders omitted by AI fail validation. Legacy evidence-shaped responses remain validated against their source. Diagnostic errors distinguish output limits, refusals, and model mismatch without storing raw AI responses or credentials.
+
+The date picker defaults to the day after the last fully successful import, through today (today again if already current). Its small signed `defaults` request reads a durable private connector cursor, independent of the 24-hour encrypted preview retention. Failed or truncated scans, expired diagnostic jobs, and login tasks do not advance this cursor; overlapping older retries cannot move it backwards. Manual date edits are protected from delayed defaults responses. Without a successful cursor, the current month is used; an existing purchase's date is not treated as proof of complete coverage.
+
+Regression checks: `deno run tools/test_coupang_ai_batches.ts`, `deno run tools/test_coupang_cursor.ts`, and `node tools/test_coupang_date_defaults.cjs`. The opt-in `tools/test_coupang_live_import.cjs` verifies actual signed browser-to-worker-to-AI retrieval and automatic preview rendering while blocking every business-ledger write. It requires `NMF_COUPANG_LIVE_IMPORT=1` and a securely injected `NMF_PW`; it never registers selected purchases.
+
 The evidence/statement-printing guide links official desktop issuance routes and National Tax Service deduction guidance. App purchase prints are management reports, not tax invoices/card slips or deduction applications. Opening official Coupang pages may require another sign-in.
 
 ### Installation and rollback

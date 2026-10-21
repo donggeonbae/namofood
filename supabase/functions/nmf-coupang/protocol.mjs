@@ -80,7 +80,7 @@ export function validateOrders(value, source, range) {
     ) throw Error("invalid_order_identity");
     if (
       typeof order.evidence !== "string" || order.evidence.length < 8 ||
-      order.evidence.length > 6000 || !text.includes(squash(order.evidence))
+      order.evidence.length > 20000 || !text.includes(squash(order.evidence))
     ) throw Error("ungrounded_order");
     const evidence = order.evidence;
     const [year, month, day] = order.date.split("-").map(Number);

@@ -17,6 +17,11 @@ const codes = new Set([
   "worker_timeout",
   "ai_not_configured",
   "ai_incomplete",
+  "ai_output_limit",
+  "ai_refused",
+  "ai_model_mismatch",
+  "ai_missing_orders",
+  "ai_timeout",
   "ai_invalid_response",
   "invalid_snapshot",
   "snapshot_too_large",
@@ -169,6 +174,9 @@ export function createHandler(
             await seal(workerKey, body.nonce, payload),
           );
           return json({ ok: true, jobId });
+        }
+        if (body.action === "defaults") {
+          return json({ ok: true, worker: await queue.info() });
         }
         if (body.action === "status" || body.action === "result") {
           const worker = await queue.info();
@@ -349,6 +357,10 @@ export function createHandler(
           body.jobId,
           body.lease,
           await seal(workerKey, body.jobId, result),
+          job.kind === "import" && "truncated" in result &&
+            result.truncated === false
+            ? String(job.to_date).slice(0, 10)
+            : null,
         );
         return json({ ok: true });
       } catch (error) {

@@ -4,11 +4,13 @@ const room = "namostore";
 export const queue = {
   async info() {
     const [row] =
-      await sql`select state,last_seen from namofood_private.coupang_connector where room=${room}`;
+      await sql`select state,last_seen,last_import_through::text,last_import_at from namofood_private.coupang_connector where room=${room}`;
     return {
       state: row?.state || "offline",
       lastSeen: row?.last_seen || null,
       online: !!row && Date.now() - Date.parse(String(row.last_seen)) < 65000,
+      lastImportThrough: row?.last_import_through || null,
+      lastImportAt: row?.last_import_at || null,
     };
   },
   async heartbeat(state: string, jobId?: string, lease?: string) {
@@ -85,8 +87,25 @@ export const queue = {
       await sql`update namofood_private.coupang_jobs set status='processing',stage='ai',progress=80,lease_until=now()+interval '3 minutes' where id=${id}::uuid and lease_token=${lease}::uuid and status='running' and lease_until>now() returning kind,from_date::text as from_date,to_date::text as to_date,payload_ciphertext`;
     return row || null;
   },
-  async done(id: string, lease: string, ciphertext: string) {
-    await sql`update namofood_private.coupang_jobs set status='done',stage='done',progress=100,result_ciphertext=${ciphertext},completed_at=now() where id=${id}::uuid and lease_token=${lease}::uuid and status='processing' and lease_until>now()`;
+  async done(
+    id: string,
+    lease: string,
+    ciphertext: string,
+    through: string | null = null,
+  ) {
+    await sql.begin(async (tx) => {
+      const [row] =
+        await tx`update namofood_private.coupang_jobs set status='done',stage='done',progress=100,result_ciphertext=${ciphertext},completed_at=now() where id=${id}::uuid and lease_token=${lease}::uuid and status='processing' and lease_until>now() returning kind,created_at`;
+      if (!row) throw Error("worker_timeout");
+      // Only a fully read, successfully validated real import advances the cursor.
+      // Expired isolated diagnostic jobs and login tasks cannot change defaults.
+      if (
+        through && row.kind === "import" &&
+        Date.now() - Date.parse(String(row.created_at)) < 86400000
+      ) {
+        await tx`update namofood_private.coupang_connector set last_import_through=greatest(last_import_through,least(${through}::date,(now() at time zone 'Asia/Seoul')::date)),last_import_at=now() where room=${room}`;
+      }
+    });
   },
   async fail(id: string, lease: string, code: string) {
     await sql`update namofood_private.coupang_jobs set status='error',stage='error',error_code=${code},completed_at=now() where id=${id}::uuid and lease_token=${lease}::uuid and status in ('running','processing')`;

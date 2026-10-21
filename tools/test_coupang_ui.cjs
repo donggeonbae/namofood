@@ -39,5 +39,5 @@ const fixture={orders:[{orderNo:'12345678901234',date:'2026-10-12',status:'ë°°ì†
  await p.evaluate(()=>{const o=orderRef('coupang-12345678901234').order;markOrder(o,true);S.orders['2026-10']=[];coupangSelectAll(true);});assert.equal(await p.evaluate(()=>coupangUi.picks.size),0,'deleted order does not resurrect');
  assert.equal(await p.evaluate(()=>JSON.stringify(S).includes('test-coupang-app-password')),false,'no credential in shared state');
  for(const width of [1600,390,320]){await p.setViewportSize({width,height:1000});assert(await p.evaluate(()=>document.getElementById('main').scrollWidth<=document.getElementById('main').clientWidth+1),'fits '+width);if(width!==320)await p.screenshot({path:'/tmp/nmf-coupang-'+width+'.png'});}
- assert.deepEqual(errors,[]);assert.deepEqual(calls.slice(0,3),['status','start','result']);console.log('COUPANG_SIGNED_UI_REVIEW_EDIT_PARTIAL_AMOUNT_DUPLICATE_TOMBSTONE_MANUAL_MERGE_RESPONSIVE_OK');
+ assert.deepEqual(errors,[]);assert.deepEqual(calls.slice(0,4),['defaults','status','start','result']);console.log('COUPANG_SIGNED_UI_REVIEW_EDIT_PARTIAL_AMOUNT_DUPLICATE_TOMBSTONE_MANUAL_MERGE_RESPONSIVE_OK');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});
