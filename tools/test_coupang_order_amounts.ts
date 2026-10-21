@@ -93,6 +93,34 @@ assert(
   formatted.orders[0].items[0].amt === 9000,
   "fully identified source amounts must not depend on AI using a numeric rather than formatted-string JSON field",
 );
+let sourceProviderCalls = 0;
+const nativeSource = formattedSource.replace(
+  "총 결제금액",
+  "총 상품가격\n10,000 원\n할인금액\n-1,000 원\n배송비\n0 원\n총 결제금액",
+);
+const direct = await organize(
+  {
+    pages: [{
+      text: nativeSource,
+      links: [{
+        orderNo,
+        path: "/ssr/desktop/order/" + orderNo,
+        text: "주문 상세보기",
+      }],
+    }],
+  },
+  range,
+  "test-only",
+  (async () => {
+    sourceProviderCalls++;
+    throw Error("No AI needed for a complete, verified standard detail");
+  }) as typeof fetch,
+);
+assert(
+  direct.orders[0].items[0].amt === 9000 && sourceProviderCalls === 0 &&
+    direct.extraction.sourceOrders === 1,
+  "standard source extraction must not fail when the AI provider is unavailable",
+);
 const multi = await organizeOne(
   "콜라\n10,000 원\n2개\n장바구니 담기\n생수\n2,000 원\n3개\n장바구니 담기\n총 상품가격\n26,000 원\n할인금액\n-1,000 원\n배송비\n3,000 원\n총 결제금액\n28,000 원",
   [item("콜라", 2), item("생수", 3)],

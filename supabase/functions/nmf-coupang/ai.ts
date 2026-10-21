@@ -25,6 +25,22 @@ type CompletedOrder = {
     amt: number | null;
   }[];
 };
+function detailRows(text: string) {
+  const lines = text.split("\n").map((s) => s.trim()),
+    rows: { name: string; price: number; qty: number }[] = [];
+  for (let i = 1; i < lines.length - 1; i++) {
+    if (
+      !/^[\d,]+\s*원$/.test(lines[i]) || !/^([\d,]+)\s*개$/.test(lines[i + 1])
+    ) continue;
+    const price = Number(lines[i].replace(/[,원\s]/g, "")),
+      qty = Number(lines[i + 1].replace(/[,개\s]/g, ""));
+    if (
+      Number.isSafeInteger(price) && price >= 0 && price <= 1e10 &&
+      Number.isSafeInteger(qty) && qty > 0 && qty <= 1e10
+    ) rows.push({ name: lines[i - 1], price, qty });
+  }
+  return rows;
+}
 // Recover fields from the exact order detail, never from another order or a
 // current product page. Multi-item discounts/shipping are never allocated.
 function detailAmounts(
@@ -32,23 +48,12 @@ function detailAmounts(
   text: string,
   total: number,
 ): CompletedOrder {
-  const lines = text.split("\n").map((s) => s.trim()),
-    key = (s: string) => s.normalize("NFKC").replace(/\s/g, "");
+  const key = (s: string) => s.normalize("NFKC").replace(/\s/g, "");
   const money = (s: string) => {
     const n = Number(s.replace(/[,원\s]/g, ""));
     return Number.isSafeInteger(n) && n >= 0 && n <= 1e10 ? n : null;
   };
-  const rows: { name: string; price: number; qty: number }[] = [];
-  for (let i = 1; i < lines.length - 1; i++) {
-    if (
-      !/^[\d,]+\s*원$/.test(lines[i]) || !/^([\d,]+)\s*개$/.test(lines[i + 1])
-    ) continue;
-    const price = money(lines[i]),
-      qty = Number(lines[i + 1].replace(/[,개\s]/g, ""));
-    if (price !== null && Number.isSafeInteger(qty) && qty > 0 && qty <= 1e10) {
-      rows.push({ name: lines[i - 1], price, qty });
-    }
-  }
+  const rows = detailRows(text);
   if (rows.length !== order.items.length) return { ...order, total };
   const used = new Set<number>();
   const matches = order.items.map((item) => {
@@ -115,6 +120,92 @@ function detailAmounts(
       : "품목 금액은 원문 기준입니다. 주문 전체 할인·배송비는 총결제액에만 반영하며 품목별로 임의 배분하지 않습니다.",
   };
 }
+type SourcePage = {
+  text: string;
+  links: { orderNo: string; path: string; text: string }[];
+};
+function nativeDetail(
+  page: SourcePage,
+  range: { from: string; to: string },
+): CompletedOrder | null {
+  const id = page.links.length === 1 ? page.links[0].orderNo : "";
+  if (
+    !/^\d{6,30}$/.test(id) ||
+    page.links[0].path !== "/ssr/desktop/order/" + id ||
+    !new RegExp("주문번호\\s*" + id + "(?!\\d)").test(page.text)
+  ) return null;
+  const header = page.text.match(/(20\d\d)\.\s*(\d{1,2})\.\s*(\d{1,2})\s*주문/);
+  if (!header) return null;
+  const date = `${header[1]}-${header[2].padStart(2, "0")}-${
+    header[3].padStart(2, "0")
+  }`;
+  if (date < range.from || date > range.to) return null;
+  const lines = page.text.split("\n").map((s) => s.trim());
+  if (
+    lines.some((s) =>
+      /^(?:취소|반품|환불)\s*(?:완료|진행중|처리중|접수|요청)$/.test(s)
+    )
+  ) return null;
+  const states = lines.filter((s) =>
+    new RegExp("^(?:" + ACTIVE_ORDER_PATTERN + ")$").test(s)
+  );
+  if (!states.length || new Set(states).size !== 1) return null;
+  const totals = [
+      ...page.text.matchAll(/(?:^|\n)총\s*결제금액\s+([\d,]+)\s*원/g),
+    ],
+    subtotals = [
+      ...page.text.matchAll(/(?:^|\n)총\s*상품(?:가격|금액)\s+([\d,]+)\s*원/g),
+    ];
+  if (totals.length !== 1 || subtotals.length !== 1) return null;
+  const total = Number(totals[0][1].replaceAll(",", "")),
+    subtotal = Number(subtotals[0][1].replaceAll(",", "")),
+    rows = detailRows(page.text);
+  if (
+    !rows.length || !Number.isSafeInteger(total) || total < 0 || total > 1e10 ||
+    !Number.isSafeInteger(subtotal) || subtotal < 0 || subtotal > 1e10
+  ) return null;
+  // A separate size/option line is not a product name. Unfamiliar layouts
+  // remain on the AI path rather than silently creating a size-only item.
+  if (
+    rows.some((r) =>
+      !/[가-힣A-Za-z]{2,}/.test(r.name) ||
+      /^\s*\d[\d.,%\s]*(?:kg|g|ml|l|개|입|팩|캔|병)\b/i.test(r.name)
+    )
+  ) return null;
+  if (
+    rows.reduce((n, r) => n + r.price * r.qty, 0) !== subtotal &&
+    rows.reduce((n, r) => n + r.price, 0) !== subtotal
+  ) return null;
+  try {
+    const base = validateOrders(
+      {
+        orders: [{
+          orderNo: id,
+          date,
+          status: states[0],
+          evidence: page.text,
+          total: null,
+          items: rows.map((r) => ({
+            name: r.name,
+            spec: "",
+            unit: "개",
+            qty: null,
+            price: null,
+            amt: null,
+          })),
+        }],
+      },
+      page.text,
+      range,
+    )[0];
+    const result = detailAmounts(base, page.text, total);
+    return result.amountNote && result.items.every((i) => i.amt !== null)
+      ? result
+      : null;
+  } catch {
+    return null;
+  }
+}
 export async function organize(
   snapshot: unknown,
   range: { from: string; to: string },
@@ -140,11 +231,17 @@ export async function organize(
   }));
   const source = JSON.stringify(pages);
   if (source.length > 105000) throw Error("snapshot_too_large");
-  if (!key) throw Error("ai_not_configured");
+  const sourceOrders: CompletedOrder[] = [], unknownPages: typeof pages = [];
+  for (const page of pages) {
+    const order = nativeDetail(page, range);
+    if (order) sourceOrders.push(order);
+    else unknownPages.push(page);
+  }
+  if (unknownPages.length && !key) throw Error("ai_not_configured");
   // Bound both input size and output expansion. Source text stays on the server;
   // the model returns a page reference rather than copying every detail twice.
   const batches: typeof pages[] = [];
-  for (const page of pages) {
+  for (const page of unknownPages) {
     const last = batches.at(-1);
     if (
       !last || last.length >= 4 ||
@@ -386,7 +483,17 @@ export async function organize(
     throw error;
   }
   const seen = new Set<string>();
-  const returned = new Set(results.flat().map((order) => order.orderNo));
+  const allOrders = [...sourceOrders, ...results.flat()];
+  const sourceOrder = new Map(
+    pages.flatMap((p, i) =>
+      p.links.length === 1 ? [[p.links[0].orderNo, i] as const] : []
+    ),
+  );
+  allOrders.sort((a, b) =>
+    (sourceOrder.get(a.orderNo) ?? Infinity) -
+    (sourceOrder.get(b.orderNo) ?? Infinity)
+  );
+  const returned = new Set(allOrders.map((order) => order.orderNo));
   for (const page of pages) {
     const id = page.links.length === 1 ? page.links[0].orderNo : "";
     const date = page.text.match(/(20\d\d)\.\s*(\d{1,2})\.\s*(\d{1,2})\s*주문/);
@@ -402,7 +509,7 @@ export async function organize(
       throw Error("ai_missing_orders");
     }
   }
-  const orders = results.flat().map((order: CompletedOrder) => {
+  const orders = allOrders.map((order: CompletedOrder) => {
     if (seen.has(order.orderNo)) throw Error("invalid_order_identity");
     seen.add(order.orderNo);
     // The paid total is an observed receipt field, not an AI calculation. Bind
@@ -435,6 +542,10 @@ export async function organize(
   });
   return {
     orders,
+    extraction: {
+      sourceOrders: sourceOrders.length,
+      aiOrders: results.flat().length,
+    },
     truncated: data.truncated === true,
     warnings: [
       ...(orders.some((o) => o.items.some((i) => i.amt === null))
