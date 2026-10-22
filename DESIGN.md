@@ -2,7 +2,7 @@
 
 ## Food attendance difference (2026-10-22)
 
-- Headcount variance is forecast minus actual Food attendance: recovered meal tickets + entered cash/card/credit meal counts. The October 22 lunch example is 439 − (334 + 5 + 39 + 21) = +40, not the ticket-only −105. Use this same basis in meal/day/month views and CSV/XLSX; keep company ticket sales, Store recovery, won-only legacy entries and other revenue out of attendance. Preserve every financial and ticket-recovery calculation.
+- Headcount variance is actual Food attendance minus forecast: recovered meal tickets + entered cash/card/credit meal counts. The October 22 lunch example is (334 + 5 + 39 + 21) − 439 = −40, not the ticket-only −105. Use this same basis in meal/day/month views and CSV/XLSX; keep company ticket sales, Store recovery, won-only legacy entries and other revenue out of attendance. Preserve every financial and ticket-recovery calculation.
 - Unentered attendance remains unknown, explicit zero is known zero, and cash/card/credit-only meals still count. Aggregate only entered meals, show the compared forecast and attendance alongside full forecast totals, and retain the separately labeled recovered-ticket monetary variance. Excel cached results and native recalculation formulas must agree, including channel-only rows. No data migration or business-record edits.
 
 ## Coupang cleaned-review visibility (2026-10-22)
