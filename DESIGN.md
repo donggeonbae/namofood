@@ -1,5 +1,10 @@
 # Design
 
+## Food attendance difference (2026-10-22)
+
+- Headcount variance is forecast minus actual Food attendance: recovered meal tickets + entered cash/card/credit meal counts. The October 22 lunch example is 439 − (334 + 5 + 39 + 21) = +40, not the ticket-only −105. Use this same basis in meal/day/month views and CSV/XLSX; keep company ticket sales, Store recovery, won-only legacy entries and other revenue out of attendance. Preserve every financial and ticket-recovery calculation.
+- Unentered attendance remains unknown, explicit zero is known zero, and cash/card/credit-only meals still count. Aggregate only entered meals, show the compared forecast and attendance alongside full forecast totals, and retain the separately labeled recovered-ticket monetary variance. Excel cached results and native recalculation formulas must agree, including channel-only rows. No data migration or business-record edits.
+
 ## Coupang cleaned-review visibility (2026-10-22)
 
 - A completed date lookup must account for every fetched order, including previously cleaned review rows. Keep ordinary cleanup effective, but show fetched/visible/cleaned counts and a collapsed, read-only source list with item quantities and amounts even when every order is hidden. An explicit confirmed single/all recovery changes only clocked `hidden-order:` review metadata; it must not change purchases, sales, purchase-deletion markers or duplicate-registration guards. Recovered rows are not automatically selected.
