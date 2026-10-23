@@ -96,6 +96,7 @@
     // stay private. Operational invoices and routed fixed purchases are allowlisted.
     const staff = a => (a||[]).map(e=>({...pick(e,['id','name','role','off','archivedAt','historyNames']),...(e.def?{def:pick(e.def,['s','e','b'])}:{})}));
     const out=pick(s,['month','updatedAt','view','menus','menuManualEdits','menuExtraSlots','menuExtraEdits','menuRetirements','methods','hyg','cafeSeeded','recipeAsk','recipeResolutions','sources','accessEdits']);
+    if(s.menuRotationReference?.version==='2026-10-24-two-week-methods-v1')out.menuRotationReference={...pick(s.menuRotationReference,['version','from','to']),names:(Array.isArray(s.menuRotationReference.names)?s.menuRotationReference.names:[]).filter(n=>typeof n==='string'&&n.length<=240).slice(0,1000)};
     out.recipeMeta=Object.fromEntries(Object.entries(s.recipeMeta||{}).filter(([name])=>safeKey(name)).map(([name,v])=>[name,pick(v,['by','updated','cookingProfile'])]));
     out.board=boardView(s);
     out.orders=orderMap(s);out.orderEdits=Object.fromEntries(Object.entries(s.orderEdits||{}).filter(([id])=>safeKey(id)).map(([id,v])=>[id,pick(v,['at','deleted','origin'])]));

@@ -2,6 +2,7 @@
 import { GO_MODEL, goEndpoint } from "../_shared/opencode-go.ts";
 import { assertMealMenuAllowed } from "../_shared/menu-eligibility.ts";
 import { canonicalDish, dishAliases } from "../_shared/institutional-menu.ts";
+import { referenceDishes } from "../_shared/menu-rotation.ts";
 import {
   MANUAL_FAMILIAR_DISHES,
   MENU_MANUAL_VERSION,
@@ -680,6 +681,7 @@ export async function recommendationCatalogRevision(
     recipes: (state.recipes || []).map(stableJson).sort(),
     methods: state.methods || {},
     recipeAsk: state.recipeAsk || {},
+    menuRotationReference: state.menuRotationReference || null,
   });
   const digest = new Uint8Array(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)),
@@ -774,6 +776,7 @@ export function buildRecommendationInput(
   const byName = recipeMap(state);
   const unresolved = state.recipeAsk || {};
   const nearby = surroundingCanonicalDishes(state, date);
+  const rotation=state.menuRotationReference ? referenceDishes(state) : null;
   const allPools: Record<SlotId, RecipeCandidate[]> = {
     "1": [],
     "2": [],
@@ -815,7 +818,7 @@ export function buildRecommendationInput(
     }
     const slotGroup = profile.slotGroup as CandidateSlotGroup;
     const canonical = canonicalDish(name);
-    if (nearby.has(canonical)) {
+    if (rotation ? !rotation.has(name) : nearby.has(canonical)) {
       excludedCount++;
       continue;
     }
@@ -945,6 +948,7 @@ export function buildRecommendationPrompt(
       input.expectedCounts["8"]
     }개 후보 + 야채 부찬 ${vegetableCount}개 후보입니다.`,
     "같은 조리법·양념만 몰리지 않게 볶음/구이/튀김/부침/조림/찜/무침을 섞고, 튀김만 반복하는 선택은 피하세요.",
+    "동건이의 추천: 기준 2주 메뉴만 로테이션합니다. 한 끼의 고기·생선·기타 메인은 조리방식이 서로 달라야 합니다. 같은 날 다른 끼니에서도 같은 주재료군의 메인 조리방식은 반복하지 않습니다. 부찬의 무침·나물·김치 등은 중복 허용합니다. 메인 대안 3개도 가능한 서로 다른 조리방식으로 제시하세요. 실제 선택 시 해당 끼니와 같은 날의 다른 끼니를 다시 검증합니다.",
     `익숙한 운영 예시/방향: ${familiar}`,
     `슬롯 3과 4의 야채 부찬은 서로 겹치지 않게 총 ${vegetableCount}개를 구성하세요. 각 슬롯 수는 아래 지정된 수를 정확히 지키세요.`,
     "전체 슬롯 사이에서도 같은 실제 음식/동일 canonical 음식은 중복 금지입니다.",
