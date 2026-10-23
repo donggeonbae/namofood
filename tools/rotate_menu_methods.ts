@@ -28,10 +28,15 @@ const before = JSON.parse(await decryptText(pw, row.data)),
   rmap = new Map<string, Array<Record<string, unknown>>>();
 for (const r of before.recipes || []) {
   const rows = rmap.get(r.menu) || [];
-  rows.push(r);
+  rows.push({ ...r, method: before.methods?.[r.menu] || r.method || "" });
   rmap.set(r.menu, rows);
 }
-const profile = (name: string) => recipeFoodProfile(name, rmap.get(name) || []);
+const profile = (name: string) =>
+  recipeFoodProfile(
+    name,
+    rmap.get(name) ||
+      (before.methods?.[name] ? [{ method: before.methods[name] }] : []),
+  );
 const result = rotateExistingMains(before, profile, "2026-10-24", "2027-06-30");
 for (const key of Object.keys(before)) {
   if (

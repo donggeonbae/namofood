@@ -86,6 +86,34 @@ assert(
     .changes.length === 0,
   "repeat operation is idempotent",
 );
+const misfiled = structuredClone(before);
+misfiled.menus["2026-10"]["26|중식|7"] = "제육";
+misfiled.menus["2026-10"]["26|석식|7"] = "수육";
+const repaired = rotateExistingMains(
+  misfiled,
+  (n) => profiles[n],
+  "2026-10-26",
+  "2026-10-26",
+);
+assert(
+  repaired.blocked.length === 0,
+  "misfiled meat in fish slots can use approved fish alternatives",
+);
+assert(
+  repaired.changes.some((c) =>
+    c.slot === "7" && profiles[c.after].slotGroup === "생선"
+  ),
+  "restore intended fish slot when current meat group is infeasible",
+);
+assert(
+  rotateExistingMains(
+    repaired.after,
+    (n) => profiles[n],
+    "2026-10-26",
+    "2026-10-26",
+  ).changes.length === 0,
+  "fallback retains conflict-free idempotency",
+);
 console.log(
   "MENU_METHOD_ROTATION_MINIMAL_THREE_REFERENCE_ONLY_PROTECTED_FIELDS_CROSS_METHOD_IDEMPOTENT_OK",
 );

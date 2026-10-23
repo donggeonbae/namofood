@@ -81,7 +81,9 @@ export function rotateExistingMains(
     }
   }
   const candidates = [...mainNames].map((name) => ({ name, ...profile(name) }))
-    .filter(p=>known(p)&&!['김치','샐러드','밥·면','국·찌개'].includes(p.method));
+    .filter((p) =>
+      known(p) && !["김치", "샐러드", "밥·면", "국·찌개"].includes(p.method)
+    );
   const dates = new Set<string>();
   for (const [month, cells] of Object.entries(before.menus || {})) {
     for (const key of Object.keys(cells)) {
@@ -115,38 +117,58 @@ export function rotateExistingMains(
     let solution: typeof candidates | undefined, visits = 0;
     const picked: typeof candidates = [];
     // Iterative change budget keeps the largest possible number of original mains.
-    for (let budget = 1; budget <= vars.length && !solution; budget++) {
-      const search = (i: number, changed: number): boolean => {
-        if (++visits > 500000) return false;
-        if (i === vars.length) {
-          solution = [...picked];
-          return true;
-        }
-        const offset = Number(date.replaceAll("-", "")) %
-            Math.max(1, candidates.length),
-          bank = [...candidates.slice(offset), ...candidates.slice(0, offset)];
-        const v = vars[i],
-          options = [
-            { name: v.name, ...profile(v.name) },
-            ...bank.filter((c) =>
-              c.name !== v.name && c.slotGroup === v.slotGroup
-            ),
-          ];
-        for (const c of options) {
-          const cost = c.name === v.name ? 0 : 1;
-          if (
-            changed + cost > budget ||
-            picked.some((p, j) =>
-              p.name === c.name || methodConflict(c, p, v.meal === vars[j].meal)
-            )
-          ) continue;
-          picked.push(c);
-          if (search(i + 1, changed + cost)) return true;
-          picked.pop();
-        }
-        return false;
-      };
-      search(0, 0);
+    // Preserve the current ingredient group first. If misfiled mains make
+    // that impossible, use the slot's intended meat/fish/other group instead.
+    for (const canonical of [false, true]) {
+      if (solution) break;
+      visits = 0;
+      for (let budget = 1; budget <= vars.length && !solution; budget++) {
+        const search = (i: number, changed: number): boolean => {
+          if (++visits > 500000) return false;
+          if (i === vars.length) {
+            solution = [...picked];
+            return true;
+          }
+          const offset = Number(date.replaceAll("-", "")) %
+              Math.max(1, candidates.length),
+            bank = [
+              ...candidates.slice(offset),
+              ...candidates.slice(0, offset),
+            ];
+          const v = vars[i],
+            targetGroup = canonical
+              ? ({ "2": "고기", "7": "생선", "8": "기타 주찬" }[v.slot] ||
+                v.slotGroup)
+              : v.slotGroup,
+            methods = new Set([v.slotGroup + "|" + v.method]),
+            options = [
+              { name: v.name, ...profile(v.name) },
+              ...bank.filter((c) => {
+                const key = c.slotGroup + "|" + c.method;
+                if (c.slotGroup !== targetGroup || methods.has(key)) {
+                  return false;
+                }
+                methods.add(key);
+                return true;
+              }),
+            ];
+          for (const c of options) {
+            const cost = c.name === v.name ? 0 : 1;
+            if (
+              changed + cost > budget ||
+              picked.some((p, j) =>
+                p.name === c.name ||
+                methodConflict(c, p, v.meal === vars[j].meal)
+              )
+            ) continue;
+            picked.push(c);
+            if (search(i + 1, changed + cost)) return true;
+            picked.pop();
+          }
+          return false;
+        };
+        search(0, 0);
+      }
     }
     if (!solution) {
       blocked.push({
