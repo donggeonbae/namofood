@@ -176,7 +176,7 @@
     if(APP==='cafe'&&currentPage==='sales'||APP==='store'&&['sales','recipe'].includes(currentPage))return html;
     const retained=[];for(const el of root.querySelectorAll('#food-ticket-ledger,#food-ticket-documents,[data-ticket-history]')){const marker=document.createComment('shared-ticket-operations');el.replaceWith(marker);retained.push([marker,el]);}
     root.querySelectorAll('input').forEach(el=>{if(el.hasAttribute('data-sales-other')||/salesSet\([^)]*,\s*['"]other['"]/.test((el.getAttribute('oninput')||'')+' '+(el.getAttribute('onchange')||'')))el.dataset.publicEntry='other';});
-    root.querySelectorAll('[data-admin-only],[data-month-company-sales],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
+    root.querySelectorAll('[data-admin-only],[data-month-company-sales],[data-month-ticket-recoveries],[data-sales-month-total],#ticketMealStats,[data-sales-xlsx],[data-sales-export-status],#staffRoleSettings').forEach(el=>el.remove());
     root.querySelectorAll('.kpi').forEach(el=>{if(/원|매출|인건비|급여|순익|수익|수당|사업자 부담|세금/.test(el.textContent))el.remove();});
     root.querySelectorAll('table').forEach(table=>{
       const header=table.tHead?.rows[table.tHead.rows.length-1];if(!header)return;

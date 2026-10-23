@@ -8,7 +8,7 @@ import {
   normalizedDishName,
 } from "./institutional-menu.ts";
 
-export const MENU_MANUAL_VERSION = "2026-10-24-reference-rotation-methods-v2";
+export const MENU_MANUAL_VERSION = "2026-10-24-full-catalog-methods-v3";
 export const MANUAL_FAMILIAR_DISHES = [
   "고등어구이",
   "위샹로우스",

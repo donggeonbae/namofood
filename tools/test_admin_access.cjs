@@ -37,12 +37,14 @@ function encrypt(text){const salt=crypto.randomBytes(16),iv=crypto.randomBytes(1
     for(const value of ['PRIVATE_PHONE','PRIVATE_FIXED'])assert(!JSON.stringify(await p.evaluate(()=>S)).includes(value));assert.equal(await p.evaluate(()=>S.staff[0].wage),undefined);
     await p.evaluate(()=>go('settings'));assert.equal(await p.evaluate(()=>page),'home');
     await p.evaluate(()=>go('sales'));assert(await p.getByRole('heading',{name:'판매 실적 — 회사 판매 · 식권 회수'}).isVisible());assert(!(await p.locator('#main').innerText()).includes('이달 실제 매출'));assert(await p.locator('[data-sales-expected]').count()>0,'original sales form is retained');
+    assert.equal(await p.locator('[data-month-ticket-recoveries]').count(),0,'monthly combined ticket recoveries are admin-only');
     await p.evaluate(()=>go('roster'));assert(!await p.locator('#staff-payroll-table').count());assert(await p.locator('[data-roster-common] table').count());assert.equal(await p.locator('.roster-person span').first().evaluate(e=>getComputedStyle(e).whiteSpace),'nowrap');
     await p.evaluate(()=>go('recipe'));assert(await p.locator('#recipe-filters').isVisible());const recipeNames=await p.locator('#rlist').innerText();await p.locator('.rchip').first().click();assert(await p.locator('#rdetail input').count()>0);assert(await p.locator('#rdetail textarea').isEnabled());
     const before=apiReads;assert(await p.evaluate(()=>cloudRevisionUnchanged()));assert.equal(apiReads,before,'revision check must not download state');
     await p.locator('#admin-password').fill('wrong');await p.locator('#admin-form button').click();await p.waitForFunction(()=>document.getElementById('admin-message').textContent.includes('맞지'));assert.equal(await p.locator('#admin-password').inputValue(),'');
     await p.evaluate(()=>{clearTimeout(saveTimer);cloudDirty=false;});await p.locator('#admin-password').fill(admin);await p.locator('#admin-form button').click();await p.waitForFunction(()=>NmfAccess.isAdmin());await p.waitForFunction(()=>S.staff[0]?.wage===19999);
     for(const name of ['settings','data','pl','overview','fixed','order'])assert(await p.locator('nav [data-p='+name+']').isVisible(),name);
+    await p.evaluate(()=>go('sales'));assert.equal(await p.locator('[data-month-ticket-recoveries]').count(),1,'admin retains combined monthly ticket recoveries');assert(await p.locator('[data-sales-expected]').count()>0,'admin sales inputs remain');
     await p.evaluate(()=>{go('order');});await p.locator('[data-order-view=bank]').click();
     const bankBefore=await p.evaluate(()=>JSON.stringify(S));await p.locator('[data-bank-query]').click();await p.waitForFunction(()=>bankUi.rows.length===3);
     assert.equal(await p.evaluate(()=>JSON.stringify(S)),bankBefore,'query must not persist bank rows');
